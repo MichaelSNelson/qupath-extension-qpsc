@@ -11,7 +11,7 @@ plugins {
 qupathExtension {
     name = "qupath-extension-qpsc"
     group = "io.github.michalsnelson"
-    version = "0.1.0-SNAPSHOT"
+    version = "0.2.1-SNAPSHOT"
     description = "A  QuPath extension to allow interaction with a microscope through PycroManager and MicroManager."
     automaticModule = "io.github.michalsnelson.extension.qpsc"
 }
