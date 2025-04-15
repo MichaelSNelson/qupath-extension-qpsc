@@ -9,11 +9,11 @@ plugins {
 
 // TODO: Configure your extension here (please change the defaults!)
 qupathExtension {
-    name = "qupath-extension-template"
-    group = "io.github.qupath"
+    name = "qupath-extension-qpsc"
+    group = "io.github.michalsnelson"
     version = "0.1.0-SNAPSHOT"
-    description = "A simple QuPath extension"
-    automaticModule = "io.github.qupath.extension.template"
+    description = "A  QuPath extension to allow interaction with a microscope through PycroManager and MicroManager."
+    automaticModule = "io.github.michalsnelson.extension.qpsc"
 }
 
 // TODO: Define your dependencies here
@@ -23,7 +23,11 @@ dependencies {
     shadow(libs.bundles.qupath)
     shadow(libs.bundles.logging)
     shadow(libs.qupath.fxtras)
-
+    //shadow(libs.slf4j)
+    //implementation(libs.snakeyaml)
+    //implementation(libs.gson)
+    //implementation("qupath.ext.basicstitching:basic-stitching:0.2.0")
+    //implementation("io.github.qupath:qupath-extension-bioformats:0.6.0-SNAPSHOT")
     // If you aren't using Groovy, this can be removed
     shadow(libs.bundles.groovy)
 
