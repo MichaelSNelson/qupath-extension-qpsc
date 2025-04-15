@@ -23,11 +23,11 @@ dependencies {
     shadow(libs.bundles.qupath)
     shadow(libs.bundles.logging)
     shadow(libs.qupath.fxtras)
-    //shadow(libs.slf4j)
-    //implementation(libs.snakeyaml)
-    //implementation(libs.gson)
+    shadow(libs.slf4j)
+    implementation(libs.snakeyaml)
+    implementation(libs.gson)
     //implementation("qupath.ext.basicstitching:basic-stitching:0.2.0")
-    //implementation("io.github.qupath:qupath-extension-bioformats:0.6.0-SNAPSHOT")
+    //implementation("io.github.qupath:qupath-extension-bioformats:0.6.0-rc3")
     // If you aren't using Groovy, this can be removed
     shadow(libs.bundles.groovy)
 
