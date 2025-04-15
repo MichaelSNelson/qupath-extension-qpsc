@@ -8,7 +8,7 @@ import javafx.scene.control.MenuItem;
 import javafx.stage.Stage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import qupath.ext.template.ui.InterfaceController;
+import qupath.ext.qp_scope.ui.InterfaceController;
 import qupath.fx.dialogs.Dialogs;
 import qupath.fx.prefs.controlsfx.PropertyItemBuilder;
 import qupath.lib.common.Version;
