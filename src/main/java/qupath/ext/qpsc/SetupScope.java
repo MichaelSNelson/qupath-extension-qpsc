@@ -1,4 +1,4 @@
-package qupath.ext.qp_scope;
+package qupath.ext.qpsc;
 
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.IntegerProperty;
@@ -8,7 +8,7 @@ import javafx.scene.control.MenuItem;
 import javafx.stage.Stage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import qupath.ext.qp_scope.ui.InterfaceController;
+import qupath.ext.qpsc.ui.InterfaceController;
 import qupath.fx.dialogs.Dialogs;
 import qupath.fx.prefs.controlsfx.PropertyItemBuilder;
 import qupath.lib.common.Version;
@@ -33,31 +33,27 @@ import java.util.ResourceBundle;
  *     /resources/META-INF/services/qupath.lib.gui.extensions.QuPathExtension
  * </pre>
  */
-public class setup implements QuPathExtension, GitHubProject {
-	// TODO: add and modify strings to this resource bundle as needed
+public class SetupScope implements QuPathExtension, GitHubProject {
 	/**
 	 * A resource bundle containing all the text used by the extension. This may be useful for translation to other languages.
 	 * Note that this is optional and you can define the text within the code and FXML files that you use.
 	 */
-	private static final ResourceBundle resources = ResourceBundle.getBundle("qupath.ext.template.ui.strings");
-	private static final Logger logger = LoggerFactory.getLogger(setup.class);
+	private static final ResourceBundle resources = ResourceBundle.getBundle("qupath.ext.qpsc.ui.strings");
+	private static final Logger logger = LoggerFactory.getLogger(SetupScope.class);
 
 	/**
 	 * Display name for your extension
-	 * TODO: define this
 	 */
 	private static final String EXTENSION_NAME = resources.getString("name");
 
 	/**
 	 * Short description, used under 'Extensions > Installed extensions'
-	 * TODO: define this
 	 */
 	private static final String EXTENSION_DESCRIPTION = resources.getString("description");
 
 	/**
 	 * QuPath version that the extension is designed to work with.
 	 * This allows QuPath to inform the user if it seems to be incompatible.
-	 * TODO: define this
 	 */
 	private static final Version EXTENSION_QUPATH_VERSION = Version.parse("v0.5.0");
 
@@ -66,10 +62,10 @@ public class setup implements QuPathExtension, GitHubProject {
 	 * This makes it easier for users to find updates to your extension.
 	 * If you don't want to support this feature, you can remove
 	 * references to GitHubRepo and GitHubProject from your extension.
-	 * TODO: define this
+
 	 */
 	private static final GitHubRepo EXTENSION_REPOSITORY = GitHubRepo.create(
-			EXTENSION_NAME, "myGitHubUserName", "myGitHubRepo");
+			EXTENSION_NAME, "MichaelSNelson", "qupath-extension-qpsc");
 
 	/**
 	 * Flag whether the extension is already installed (might not be needed... but we'll do it anyway)
@@ -90,7 +86,7 @@ public class setup implements QuPathExtension, GitHubProject {
 	 * because of the type of GUI element we use to manage it.
 	 */
 	private static final Property<Integer> integerOption = PathPrefs.createPersistentPreference(
-			"demo.num.option", 1).asObject();
+			"qpsc.num.option", 1).asObject();
 
 	/**
 	 * An example of how to expose persistent preferences to other classes in your extension.
@@ -125,8 +121,8 @@ public class setup implements QuPathExtension, GitHubProject {
 	private void addPreferenceToPane(QuPathGUI qupath) {
         var propertyItem = new PropertyItemBuilder<>(enableExtensionProperty, Boolean.class)
 				.name(resources.getString("menu.enable"))
-				.category("Demo extension")
-				.description("Enable the demo extension")
+				.category("QPSC")
+				.description(resources.getString("menu.description"))
 				.build();
 		qupath.getPreferencePane()
 				.getPropertySheet()
@@ -141,7 +137,7 @@ public class setup implements QuPathExtension, GitHubProject {
 	 */
 	private void addMenuItem(QuPathGUI qupath) {
 		var menu = qupath.getMenu("Extensions>" + EXTENSION_NAME, true);
-		MenuItem menuItem = new MenuItem("My menu item");
+		MenuItem menuItem = new MenuItem("QPSC");
 		menuItem.setOnAction(e -> createStage());
 		menuItem.disableProperty().bind(enableExtensionProperty.not());
 		menu.getItems().add(menuItem);
