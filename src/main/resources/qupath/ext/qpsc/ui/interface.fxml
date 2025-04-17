@@ -1,29 +1,42 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
-<?import java.lang.*?>
-<?import java.util.*?>
-<?import javafx.scene.*?>
-<?import javafx.scene.control.*?>
-<?import javafx.scene.layout.*?>
-
 <?import javafx.geometry.Insets?>
-<fx:root type="VBox" maxHeight="-Infinity" maxWidth="-Infinity" minHeight="-Infinity" minWidth="-Infinity" xmlns="http://javafx.com/javafx/20" xmlns:fx="http://javafx.com/fxml/1">
-    <VBox spacing="5" alignment="CENTER_RIGHT">
-        <padding>
-            <Insets topRightBottomLeft="3"/>
-        </padding>
-        <HBox spacing="2" alignment="CENTER_LEFT">
-            <Label text="%option.integer.text">
-                <Tooltip text="%option.integer.tooltip"/>
-            </Label>
-            <Spinner fx:id="integerOptionSpinner" prefWidth="75.0">
-                <valueFactory>
-                    <SpinnerValueFactory.IntegerSpinnerValueFactory max="100" min="1" />
-                </valueFactory>
-            </Spinner>
-        </HBox>
-        <Button onAction="#runDemoExtension" text="%run.button.text">
-            <Tooltip text="%run.button.tooltip"/>
-        </Button>
-    </VBox>
-</fx:root>
+<?import javafx.geometry.Pos?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.Spinner?>
+<?import javafx.scene.control.TextField?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.VBox?>
+
+<VBox xmlns="http://javafx.com/javafx/8" xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="qupath.ext.qpsc.ui.InterfaceController"
+      alignment="CENTER" spacing="15">
+    <padding>
+        <Insets top="20" right="20" bottom="20" left="20"/>
+    </padding>
+
+    <!-- Header -->
+    <Label text="Enter Sample Details" style="-fx-font-size: 16px; -fx-font-weight: bold;"/>
+
+    <!-- Sample Name input -->
+    <HBox spacing="10" alignment="CENTER_LEFT">
+        <Label text="Sample Name:"/>
+        <TextField fx:id="sampleNameField" promptText="Enter sample name" prefWidth="200"/>
+    </HBox>
+
+    <!-- Pixel Size input using Spinner -->
+    <HBox spacing="10" alignment="CENTER_LEFT">
+        <Label text="Pixel Size (um):"/>
+        <Spinner fx:id="pixelSizeSpinner" prefWidth="100" editable="true"/>
+    </HBox>
+
+    <!-- Warning message display -->
+    <Label fx:id="warningLabel" textFill="red" wrapText="true"/>
+
+    <!-- Action buttons -->
+    <HBox spacing="20" alignment="CENTER">
+        <Button fx:id="okButton" text="OK" onAction="#handleOk"/>
+        <Button fx:id="cancelButton" text="Cancel" onAction="#handleCancel"/>
+    </HBox>
+</VBox>
