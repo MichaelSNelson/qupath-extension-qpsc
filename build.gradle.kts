@@ -45,6 +45,13 @@ dependencies {
 
     // For testing
     testImplementation(libs.bundles.qupath)
-    testImplementation(libs.junit)
+    testImplementation("io.github.qupath:qupath-app:0.6.0-rc4")
+    //testImplementation(libs.junit)
+    testImplementation("org.junit.jupiter:junit-jupiter:5.9.1")
+    testImplementation("org.assertj:assertj-core:3.24.2")
+    testImplementation(libs.bundles.logging)
+}
 
+tasks.test {
+    useJUnitPlatform()
 }

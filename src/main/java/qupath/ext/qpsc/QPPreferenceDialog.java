@@ -18,28 +18,31 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
+//TODO NEXT TIME - function to check the list of files in smartpath_configurations,
+// and create a dropdown with those file names (minus extension)
+
 /**
  * This class adds and manages various persistent preferences for the QP Scope extension.
  * It registers numerous preference items with QuPath’s preference pane using PathPrefs and PropertyItemBuilder.
  */
-public class AddQPPreferences {
+public class QPPreferenceDialog {
 
-    private static AddQPPreferences instance;
+    private static QPPreferenceDialog instance;
 
     // A list to hold details of each preference (if needed for later lookup).
     // Here we use a List of Maps, where each map might store keys like "name" and "property".
-    private List<Map<String, Object>> preferencesList = new ArrayList<>();
+    private final List<Map<String,Object>> preferencesList = new ArrayList<>();
 
     // A category name to group these preferences in the QuPath GUI.
     private static final String EXTENSION_NAME = "Microscopy in QuPath";
 
-    private AddQPPreferences() {
+    private QPPreferenceDialog() {
         initializePreferences();
     }
 
-    public static synchronized AddQPPreferences getInstance() {
+    public static synchronized QPPreferenceDialog getInstance() {
         if (instance == null) {
-            instance = new AddQPPreferences();
+            instance = new QPPreferenceDialog();
         }
         return instance;
     }
@@ -48,7 +51,7 @@ public class AddQPPreferences {
      * Initializes and registers a comprehensive set of persistent preferences with QuPath's PreferencePane.
      * This method directly adds each property to the PreferenceSheet via QPEx.getQuPath().
      */
-    private static void initializePreferences() {
+    private void initializePreferences() {
         QuPathGUI qupath = QPEx.getQuPath();
         if (qupath == null) {
             // QuPath GUI not available; preferences cannot be registered.
@@ -65,47 +68,57 @@ public class AddQPPreferences {
                 .description("Allows the slide to be flipped horizontally so that the coordinates can be matched correctly with the stage.")
                 .build());
 
-        BooleanProperty isFlippedYProperty = PathPrefs.createPersistentPreference("isFlippedYProperty", false);
-        items.add(new PropertyItemBuilder<>(isFlippedYProperty, Boolean.class)
+        preferencesList.add(Map.of("name","Flip macro image X", "property", isFlippedXProperty));
+
+        BooleanProperty isFlippedY =
+                PathPrefs.createPersistentPreference("isFlippedYProperty", false);
+        items.add(new PropertyItemBuilder<>(isFlippedY, Boolean.class)
                 .name("Flip macro image Y")
                 .category(EXTENSION_NAME)
-                .description("Allows the slide to be flipped vertically so that the coordinates can be matched correctly with the stage.")
+                .description("Allows the slide to be flipped vertically for coordinate alignment.")
                 .build());
+        preferencesList.add(Map.of(
+                "name",     "Flip macro image Y",
+                "property", isFlippedY
+        ));
 
         // --- Stage inversion settings ---
-        BooleanProperty isInvertedXProperty = PathPrefs.createPersistentPreference("isInvertedXProperty", false);
-        items.add(new PropertyItemBuilder<>(isInvertedXProperty, Boolean.class)
+        // Inverted X stage
+        BooleanProperty isInvertedX =
+                PathPrefs.createPersistentPreference("isInvertedXProperty", false);
+        items.add(new PropertyItemBuilder<>(isInvertedX, Boolean.class)
                 .name("Inverted X stage")
                 .category(EXTENSION_NAME)
-                .description("Stage axis is inverted in X relative to QuPath.")
+                .description("Stage X axis is inverted relative to QuPath.")
                 .build());
+        preferencesList.add(Map.of(
+                "name",     "Inverted X stage",
+                "property", isInvertedX
+        ));
 
-        BooleanProperty isInvertedYProperty = PathPrefs.createPersistentPreference("isInvertedYProperty", true);
-        items.add(new PropertyItemBuilder<>(isInvertedYProperty, Boolean.class)
+        // Inverted Y stage
+        BooleanProperty isInvertedY =
+                PathPrefs.createPersistentPreference("isInvertedYProperty", true);
+        items.add(new PropertyItemBuilder<>(isInvertedY, Boolean.class)
                 .name("Inverted Y stage")
                 .category(EXTENSION_NAME)
-                .description("Stage axis is inverted in Y relative to QuPath.")
+                .description("Stage Y axis is inverted relative to QuPath.")
                 .build());
-
+        preferencesList.add(Map.of(
+                "name",     "Inverted Y stage",
+                "property", isInvertedY
+        ));
         // --- Script and environment paths ---
-        StringProperty pycromanagerProperty = PathPrefs.createPersistentPreference("pycromanagerProperty",
-                "C:\\Users\\Michael Nelson\\OneDrive - UW-Madison\\GitHub_clones\\smart-wsi-scanner\\minimal_qupathrunner.py");
-        items.add(new PropertyItemBuilder<>(pycromanagerProperty, String.class)
-                .propertyType(PropertyItemBuilder.PropertyType.DIRECTORY)
-                .name("PycroManager Path")
+        StringProperty runCommandProperty= PathPrefs.createPersistentPreference("runCommandName",
+                "smartpath");
+        items.add(new PropertyItemBuilder<>(runCommandProperty, String.class)
+                //.propertyType(PropertyItemBuilder.PropertyType.String.class)
+                .name("Command line call")
                 .category(EXTENSION_NAME)
-                .description("Path to the PycroManager script used for controlling microscopes.")
+                .description("The 'run' command for PycroManager control of the microscope, e.g. if smartpath, smartpath getStageCoordinates")
                 .build());
 
-        StringProperty pythonEnvironmentProperty = PathPrefs.createPersistentPreference("pythonEnvironmentProperty",
-                "C:\\Anaconda\\envs\\ls_control");
-        items.add(new PropertyItemBuilder<>(pythonEnvironmentProperty, String.class)
-                .propertyType(PropertyItemBuilder.PropertyType.DIRECTORY)
-                .name("Python Environment")
-                .category(EXTENSION_NAME)
-                .description("Path to the Python environment.")
-                .build());
-
+//TODO convert directly targeting file to target folder and build combo box from yml file contents
         StringProperty microscopeConfigFileProperty = PathPrefs.createPersistentPreference("microscopeConfigFileProperty",
                 "C:\\ImageAnalysis\\QPExtension0.5.0\\config\\config_CAMM.yml");
         items.add(new PropertyItemBuilder<>(microscopeConfigFileProperty, String.class)
@@ -126,7 +139,7 @@ public class AddQPPreferences {
                 .build());
 
         StringProperty extensionPathProperty = PathPrefs.createPersistentPreference("extensionPathProperty",
-                "C:\\ImageAnalysis\\QPExtension0.5.0\\qp-scope");
+                "F:\\QPScopeExtension\\qupath-extension-qpsc");
         items.add(new PropertyItemBuilder<>(extensionPathProperty, String.class)
                 .propertyType(PropertyItemBuilder.PropertyType.DIRECTORY)
                 .name("Extension Location")
@@ -135,8 +148,8 @@ public class AddQPPreferences {
                 .build());
 
         // --- Tissue detection script ---
-        String pyScript = extensionPathProperty.getValue().toString() + "/src/main/groovyScripts/DetectTissue.groovy";
-        StringProperty tissueDetectionScriptProperty = PathPrefs.createPersistentPreference("tissueDetectionScriptProperty", pyScript);
+        String tissueScript = extensionPathProperty.getValue().toString() + "/src/main/groovyScripts/DetectTissue.groovy";
+        StringProperty tissueDetectionScriptProperty = PathPrefs.createPersistentPreference("tissueDetectionScriptProperty", tissueScript);
         items.add(new PropertyItemBuilder<>(tissueDetectionScriptProperty, String.class)
                 .propertyType(PropertyItemBuilder.PropertyType.FILE)
                 .name("Tissue Detection Script")
@@ -144,77 +157,52 @@ public class AddQPPreferences {
                 .description("Tissue detection script.")
                 .build());
 
-        // --- Imaging mode settings ---
-        StringProperty firstImagingModeProperty = PathPrefs.createPersistentPreference("firstImagingModeProperty", "4x_bf");
-        items.add(new PropertyItemBuilder<>(firstImagingModeProperty, String.class)
-                .name("First Scan Type")
-                .category(EXTENSION_NAME)
-                .description("Type of the first scan (e.g., magnification and method).")
-                .build());
-
-        StringProperty secondImagingModeProperty = PathPrefs.createPersistentPreference("secondImagingModeProperty", "20x_bf");
-        items.add(new PropertyItemBuilder<>(secondImagingModeProperty, String.class)
-                .name("Second Scan Type")
-                .category(EXTENSION_NAME)
-                .description("Type of the second scan (e.g., magnification and method).")
-                .build());
+        //Imaging modalities moved to microscope config file
 
         // --- Tile handling ---
-        StringProperty tileHandlingProperty = PathPrefs.createPersistentPreference("tileHandlingProperty", "None");
+        StringProperty tileHandlingProperty =
+                PathPrefs.createPersistentPreference("tileHandlingProperty", "None");
         items.add(new PropertyItemBuilder<>(tileHandlingProperty, String.class)
                 .propertyType(PropertyItemBuilder.PropertyType.CHOICE)
                 .name("Tile Handling Method")
                 .category(EXTENSION_NAME)
                 .choices(Arrays.asList("None", "Zip", "Delete"))
                 .description("Specifies how tiles are handled during scanning. " +
-                        "\n'None' will leave the files in the folder where they were written." +
-                        "\n'Zip' will compress the tiles and their associated TileConfiguration file into a file and place it in a separate folder." +
-                        "\n'Delete' will delete the tiles and keep NO COPIES. Only use this if you are confident in your system and need the space.")
+                        "\n'None' will leave the files in place. " +
+                        "\n'Zip' will compress tiles into a single archive. " +
+                        "\n'Delete' will remove intermediate tiles.")
                 .build());
+        preferencesList.add(Map.of(
+                "name",     "Tile Handling Method",
+                "property", tileHandlingProperty
+        ));
 
         // --- Pixel sizes ---
-        DoubleProperty pixelSizeFirstImagingModeProperty = PathPrefs.createPersistentPreference("pixelSizeFirstImagingModeProperty", 1.105);
-        items.add(new PropertyItemBuilder<>(pixelSizeFirstImagingModeProperty, Double.class)
-                .name("1st scan pixel size um")
-                .category(EXTENSION_NAME)
-                .description("Pixel size for the first scan type, in micrometers.")
-                .build());
-
-        DoubleProperty pixelSizeSecondImagingModeProperty = PathPrefs.createPersistentPreference("pixelSizeSecondImagingModeProperty", 0.5);
-        items.add(new PropertyItemBuilder<>(pixelSizeSecondImagingModeProperty, Double.class)
-                .name("2nd scan pixel size um")
-                .category(EXTENSION_NAME)
-                .description("Pixel size for the second scan type, in micrometers.")
-                .build());
+        // pixel sizes moved to config file
 
         // --- Camera frame dimensions ---
-        IntegerProperty cameraFrameWidthPxProperty = PathPrefs.createPersistentPreference("cameraFrameWidthPxProperty", 1392);
-        items.add(new PropertyItemBuilder<>(cameraFrameWidthPxProperty, Integer.class)
-                .name("Camera Frame Width #px")
-                .category(EXTENSION_NAME)
-                .description("Width of the camera frame in pixels.")
-                .build());
-
-        IntegerProperty cameraFrameHeightPxProperty = PathPrefs.createPersistentPreference("cameraFrameHeightPxProperty", 1040);
-        items.add(new PropertyItemBuilder<>(cameraFrameHeightPxProperty, Integer.class)
-                .name("Camera Frame Height #px")
-                .category(EXTENSION_NAME)
-                .description("Height of the camera frame in pixels.")
-                .build());
+        // camera pixel dimensions moved to config file
 
         // --- Tile overlap ---
-        DoubleProperty tileOverlapPercentProperty = PathPrefs.createPersistentPreference("tileOverlapPercentProperty", 0.0);
+        DoubleProperty tileOverlapPercentProperty =
+                PathPrefs.createPersistentPreference("tileOverlapPercentProperty", 0.0);
         items.add(new PropertyItemBuilder<>(tileOverlapPercentProperty, Double.class)
                 .name("Tile Overlap Percent")
                 .category(EXTENSION_NAME)
                 .description("Percentage of overlap between adjacent tiles.")
                 .build());
+        preferencesList.add(Map.of(
+                "name",     "Tile Overlap Percent",
+                "property", tileOverlapPercentProperty
+        ));
 
         // --- Compression type for OME Pyramid Writer ---
-        ObjectProperty<OMEPyramidWriter.CompressionType> compressionType = PathPrefs.createPersistentPreference(
-                "compressionType",
-                OMEPyramidWriter.CompressionType.DEFAULT,
-                OMEPyramidWriter.CompressionType.class);
+        ObjectProperty<OMEPyramidWriter.CompressionType> compressionType =
+                PathPrefs.createPersistentPreference(
+                        "compressionType",
+                        OMEPyramidWriter.CompressionType.DEFAULT,
+                        OMEPyramidWriter.CompressionType.class
+                );
         items.add(new PropertyItemBuilder<>(compressionType, OMEPyramidWriter.CompressionType.class)
                 .propertyType(PropertyItemBuilder.PropertyType.CHOICE)
                 .name("Compression type")
@@ -222,6 +210,10 @@ public class AddQPPreferences {
                 .choices(Arrays.asList(OMEPyramidWriter.CompressionType.values()))
                 .description("Type of compression used for final images.")
                 .build());
+        preferencesList.add(Map.of(
+                "name",     "Compression type",
+                "property", compressionType
+        ));
     }
 
     /**
@@ -233,13 +225,28 @@ public class AddQPPreferences {
      * @return The associated property, or null if not found.
      */
     public Object getProperty(String name) {
-        for (Map<String, Object> pref : preferencesList) {
-            if (name.equals(pref.get("name"))) {
-                return pref.get("property");
-            }
-        }
-        return null;
+        return preferencesList.stream()
+                .filter(m -> name.equals(m.get("name")))
+                .map(m -> m.get("property"))
+                .findFirst().orElse(null);
     }
+    /** Typed getters for ease of use elsewhere in your code: */
+    public static BooleanProperty flipXProperty() {
+        return (BooleanProperty) getInstance().getProperty("Flip macro image X");
+    }
+
+    public static BooleanProperty flipYProperty() {
+        return (BooleanProperty) getInstance().getProperty("Flip macro image Y");
+    }
+
+    public static BooleanProperty invertedXProperty() {
+        return (BooleanProperty) getInstance().getProperty("Inverted X stage");
+    }
+
+    public static BooleanProperty invertedYProperty() {
+        return (BooleanProperty) getInstance().getProperty("Inverted Y stage");
+    }
+
 }
 
 

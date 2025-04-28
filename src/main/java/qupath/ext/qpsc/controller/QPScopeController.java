@@ -1,4 +1,4 @@
-package qupath.ext.qpsc;
+package qupath.ext.qpsc.controller;
 
 import java.io.IOException;
 import java.util.concurrent.CompletableFuture;

@@ -2,27 +2,19 @@ package qupath.ext.qpsc;
 
 import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
-import javafx.beans.property.BooleanProperty;
-import javafx.beans.property.IntegerProperty;
-import javafx.beans.property.Property;
-import javafx.scene.Scene;
 import javafx.scene.control.Menu;
 import javafx.scene.control.MenuItem;
-import javafx.stage.Stage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import qupath.ext.qpsc.ui.InterfaceController;
+import qupath.ext.qpsc.controller.QPScopeController;
 import qupath.fx.dialogs.Dialogs;
-import qupath.fx.prefs.controlsfx.PropertyItemBuilder;
 import qupath.lib.common.Version;
 import qupath.lib.gui.QuPathGUI;
 import qupath.lib.gui.extensions.GitHubProject;
 import qupath.lib.gui.extensions.QuPathExtension;
-import qupath.lib.gui.prefs.PathPrefs;
-
-import java.io.IOException;
+import java.util.Set;
 import java.util.ResourceBundle;
-
+import qupath.ext.qpsc.utilities.MicroscopeConfigManager;
 
 /**
  * Entry point for the QP Scope extension.
@@ -38,7 +30,8 @@ import java.util.ResourceBundle;
 public class SetupScope implements QuPathExtension, GitHubProject {
 
 	private static final Logger logger = LoggerFactory.getLogger(SetupScope.class);
-
+	/** Remember whether our YAML passed validation */
+	private boolean configValid;
 	// Load extension metadata from the resource bundle (place your properties file under src/main/resources)
 	private static final ResourceBundle resources = ResourceBundle.getBundle("qupath.ext.qpsc.ui.strings");
 	private static final String EXTENSION_NAME = resources.getString("name");
@@ -86,9 +79,39 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 	@Override
 	public void installExtension(QuPathGUI qupath) {
 		logger.info("Installing extension: " + EXTENSION_NAME);
-		AddQPPreferences.getInstance();
-		// Ensure UI changes occur on the JavaFX Application Thread.
+
+		// 1) Validate microscope YAML up front
+		configValid = validateMicroscopeConfig();
+		if (!configValid) {
+			// Warn user once
+			Platform.runLater(() -> Dialogs.showWarningNotification(
+					EXTENSION_NAME + " configuration",
+					"Some required microscope settings are missing or invalid.\n" +
+							"All workflows except “Test” have been disabled.\n" +
+							"Please correct your YAML and restart QuPath."
+			));
+		}
+
+		// 2) Fire up the menu on the JavaFX thread
 		Platform.runLater(() -> addMenuItem(qupath));
+	}
+	/**
+	 * Checks for required keys in your YAML via the singleton manager.
+	 * @return true if everything is present
+	 */
+	private boolean validateMicroscopeConfig() {
+		// Define each nested path of keys you require
+		Set<String[]> required = Set.of(
+				new String[]{"microscope", "name"},
+				new String[]{"microscope", "serialNumber"},
+				new String[]{"parts", "stage", "type"},
+				new String[]{"parts", "camera", "pixelSize"}
+				// …add whatever else you absolutely need…
+		);
+//TODO fix path from fixed
+		var mgr = MicroscopeConfigManager.getInstance("F:\\QPScopeExtension\\smartpath_configurations\\config_PPM.yml");
+		var missing = mgr.validateRequiredKeys(required);
+		return missing.isEmpty();
 	}
 
 	/**
@@ -97,20 +120,7 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 	 *
 	 * @param qupath The current QuPath GUI instance.
 	 */
-//	private void addMenuItem(QuPathGUI qupath) {
-//		// Retrieve or create the menu under "Extensions > [Extension Name]"
-//		var menu = qupath.getMenu("Extensions>" + EXTENSION_NAME, true);
-//		var menuItem = new javafx.scene.control.MenuItem("Launch " + EXTENSION_NAME);
-//		menuItem.setOnAction(e -> {
-//			if (QPScopeChecks.checkEnvironment()) {
-//				// Delegate to the workflow controller.
-//				QPScopeController.getInstance().startWorkflow();
-//			}
-//
-//		});
-//		menu.getItems().add(menuItem);
-//
-//	}
+
 	private void addMenuItem(QuPathGUI qupath) {
 		// Get or create the extension menu
 		Menu extensionMenu = qupath.getMenu("Extensions>" + EXTENSION_NAME, true);
@@ -119,14 +129,18 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 
 		// Option 1: Bounding Box workflow
 		MenuItem boundingBoxOption = new MenuItem("Start with Bounding Box");
+		boundingBoxOption.setDisable(!configValid);
 		boundingBoxOption.setOnAction(e -> QPScopeController.getInstance().startWorkflow("boundingBox"));
 
 		// Option 2: Existing Image workflow. Disable if no image is open.
 		MenuItem existingImageOption = new MenuItem("Start with Existing Image");
-		existingImageOption.setOnAction(e -> QPScopeController.getInstance().startWorkflow("existingImage"));
 		existingImageOption.disableProperty().bind(
-				Bindings.createBooleanBinding(() -> qupath.getImageData() == null, qupath.imageDataProperty())
+			Bindings.or(
+				Bindings.createBooleanBinding(() -> qupath.getImageData() == null, qupath.imageDataProperty()),
+				Bindings.createBooleanBinding(() -> !configValid,   qupath.imageDataProperty())
+			)
 		);
+		existingImageOption.setOnAction(e -> QPScopeController.getInstance().startWorkflow("existingImage"));
 
 		// Option 3: Test entry (for development only)
 		MenuItem testEntryOption = new MenuItem("Test Entry");
