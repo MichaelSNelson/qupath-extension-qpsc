@@ -3,6 +3,7 @@ package qupath.ext.qpsc;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.utilities.MinorFunctions;
 import qupath.ext.qpsc.utilities.UtilityFunctions;
 import qupath.ext.qpsc.utilities.TransformationFunctions;
@@ -63,19 +64,8 @@ class CoordinateTransformationTest {
     void testAffineTransformationAndOffset() {
         // Build the scaling transform based on “inverted” stage prefs
         AffineTransform scaling = new AffineTransform();
-        boolean invertedX = QPEx.getQuPath().getPreferencePane().getPropertySheet()
-                .getItems().stream()
-                .filter(item -> "Inverted X stage".equals(item.getName()))
-                .findFirst()
-                .map(item -> (Boolean)item.getValue())
-                .orElse(false);
-
-        boolean invertedY = QPEx.getQuPath().getPreferencePane().getPropertySheet()
-                .getItems().stream()
-                .filter(item -> "Inverted Y stage".equals(item.getName()))
-                .findFirst()
-                .map(item -> (Boolean)item.getValue())
-                .orElse(true);
+        boolean invertedX = QPPreferenceDialog.getInvertedXProperty();
+        boolean invertedY = QPPreferenceDialog.getInvertedYProperty();
 
         double sx = invertedX ? -ORIGINAL_PIXEL_SIZE : ORIGINAL_PIXEL_SIZE;
         double sy = invertedY ? -ORIGINAL_PIXEL_SIZE : ORIGINAL_PIXEL_SIZE;
@@ -98,8 +88,8 @@ class CoordinateTransformationTest {
         double[] result = TransformationFunctions.qpToMicroscopeCoordinates(qpCoords, fullTransform);
 
         // And assert on its elements:
-        assertEquals(stageCoords.get(0), result[0], 1.0, "X coordinate within 1 µm");
-        assertEquals(stageCoords.get(1), result[1], 1.0, "Y coordinate within 1 µm");
+        assertEquals(stageCoords[0], result[0], 1.0, "X coordinate within 1 µm");
+        assertEquals(stageCoords[1], result[1], 1.0, "Y coordinate within 1 µm");
     }
     }
 }

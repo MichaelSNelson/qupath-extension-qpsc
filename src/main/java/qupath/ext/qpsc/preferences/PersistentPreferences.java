@@ -1,4 +1,4 @@
-package qupath.ext.qpsc;
+package qupath.ext.qpsc.preferences;
 
 import javafx.beans.property.StringProperty;
 import qupath.lib.gui.prefs.PathPrefs;

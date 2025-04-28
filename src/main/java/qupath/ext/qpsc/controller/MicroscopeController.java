@@ -6,7 +6,7 @@ import java.util.logging.Logger;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import qupath.ext.qpsc.QPPreferenceDialog;
+import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.lib.objects.PathObject;
 import qupath.lib.gui.QuPathGUI;
 import qupath.ext.qpsc.utilities.MinorFunctions;

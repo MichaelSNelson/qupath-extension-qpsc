@@ -50,6 +50,7 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter:5.9.1")
     testImplementation("org.assertj:assertj-core:3.24.2")
     testImplementation(libs.bundles.logging)
+    testImplementation(libs.qupath.fxtras)
 }
 
 tasks.test {
