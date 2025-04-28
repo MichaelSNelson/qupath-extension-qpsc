@@ -91,5 +91,4 @@ class CoordinateTransformationTest {
         assertEquals(stageCoords[0], result[0], 1.0, "X coordinate within 1 µm");
         assertEquals(stageCoords[1], result[1], 1.0, "Y coordinate within 1 µm");
     }
-    }
 }
