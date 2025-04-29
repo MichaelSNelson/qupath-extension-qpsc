@@ -197,7 +197,7 @@ public class TransformationFunctions {
      * Applies an offset to a vector of coordinates, either for sending to the stage
      * (adding the offset) or for retrieving from the stage (subtracting the offset).
      *
-     * <p>For example, if your QuPath‐derived stage coordinates are [x, y] and you need
+     * <p>For example, if your QuPath derived stage coordinates are [x, y] and you need
      * to compensate by an offset [dx, dy], then calling
      * {@code applyOffset(List.of(x, y), List.of(dx, dy), true)} will yield
      * {@code new double[]{ x + dx, y + dy }}.</p>

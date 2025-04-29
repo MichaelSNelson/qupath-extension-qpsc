@@ -149,11 +149,11 @@ public class MinorFunctions {
     }
 
     /**
-     * Reads the previously written “_StageCoordinates.txt” file for an image and parses out
-     * the minimum and maximum stage‐coordinate extremes.
+     * Reads the previously written _StageCoordinates.txt file for an image and parses out
+     * the minimum and maximum stage coordinate extremes.
      * <p>
-     * The file is expected to live alongside the image (same base name with “_StageCoordinates.txt”)
-     * and contain exactly two lines, each with two comma‐separated doubles:
+     * The file is expected to live alongside the image (same base name with "_StageCoordinates.txt")
+     * and contain exactly two lines, each with two comma separated doubles:
      * <ul>
      *   <li>Line 1: &lt;minX&gt;, &lt;minY&gt;</li>
      *   <li>Line 2: &lt;maxX&gt;, &lt;maxY&gt;</li>
@@ -169,7 +169,7 @@ public class MinorFunctions {
      * the method logs an error and returns {@code null}.
      *
      * @param imagePath  the full path to the original image file (including its extension);
-     *                   the method will replace the extension with “_StageCoordinates.txt” to locate the extremes file
+     *                   the method will replace the extension with _StageCoordinates.txt to locate the extremes file
      * @return a {@code double[2][2]} of {minX,minY} and {maxX,maxY}, or {@code null} on any I/O or format error
      */
     public static double[][] readTileExtremesFromFile(String imagePath) {
@@ -205,12 +205,12 @@ public class MinorFunctions {
         }
     }
     /**
-     * Retrieves the current stage‐to‐QuPath offset.
+     * Retrieves the current stage to QuPath offset.
      * <p>
      * In the future this will load from your YAML config or QuPath properties.
-     * For now it simply returns half the camera frame size in microns using stub values.
+     * For now, it simply returns half the camera frame size in microns using stub values.
      *
-     * @return a two‐element list [offsetX, offsetY] in microns
+     * @return a two element list [offsetX, offsetY] in microns
      */
     public static double[] getCurrentOffset() {
         // TODO: replace with values read from YAML (e.g. via MicroscopeConfigManager)

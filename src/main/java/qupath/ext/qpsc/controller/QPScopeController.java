@@ -4,10 +4,7 @@ import java.io.IOException;
 import java.util.concurrent.CompletableFuture;
 import java.util.logging.Logger;
 import javafx.concurrent.Task;
-import javafx.scene.Scene;
-import javafx.stage.Stage;
-import qupath.fx.dialogs.Dialogs;
-import qupath.ext.qpsc.ui.InterfaceController;
+import qupath.ext.qpsc.controller.MicroscopeController;
 
 public class QPScopeController {
 
@@ -55,6 +52,15 @@ public class QPScopeController {
         return future;
     }
 
+    /** Route the menu-selection to the right workflow */
+    public void startWorkflow(String mode) throws IOException {
+        switch (mode) {
+            case "boundingBox"  -> MicroscopeController.getInstance().startBoundingBoxWorkflow();
+            case "existingImage"-> MicroscopeController.getInstance().startExistingImageWorkflow();
+            case "test"         -> MicroscopeController.getInstance().runTestWorkflow();
+            default             -> logger.warning("Unknown workflow mode " + mode);
+        }
+    }
     private void launchPythonProcess() {
         logger.info("Launching Python process...");
         Task<Void> task = new Task<>() {
@@ -82,21 +88,4 @@ public class QPScopeController {
         logger.info("QPScopeController: Interaction complete.");
     }
 
-    /**
-     * Starts the workflow for microscope control.
-     * For now, this method simply pops up an informational message indicating that the workflow would run here.
-     */
-    public void startWorkflow(String modalInput) {
-        logger.info("Starting workflow: [Dummy implementation]");
-        try {
-            InterfaceController.createAndShow().thenAccept(result -> {
-                // Do something with the result when the user clicks OK.
-                // For now, you could log the result or display another info dialog.
-                System.out.println("User provided: " + result);
-            });
-        } catch (IOException e) {
-            e.printStackTrace();
-            // Optionally, show an error message.
-        }
-    }
 }

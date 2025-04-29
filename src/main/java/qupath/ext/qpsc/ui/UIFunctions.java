@@ -22,6 +22,7 @@ import qupath.lib.objects.PathObject;
 import qupath.lib.scripting.QP;
 
 import java.awt.geom.AffineTransform;
+import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -37,6 +38,24 @@ import java.util.function.Consumer;
 public class UIFunctions {
     private static final Logger logger = LoggerFactory.getLogger(UIFunctions.class);
     private static Stage progressBarStage;
+
+
+
+//TODO DELETE, for testing only
+    /**
+     * Ask the user for a pair of stage coordinates (comma-separated).
+     *
+     * @return the string the user typed, or {@code null} if they cancelled.
+     */
+    public static String askForCoordinates() {
+        TextInputDialog dlg = new TextInputDialog("0.0, 0.0");
+        dlg.setTitle("Enter Coordinates");
+        dlg.setHeaderText("Provide stage coordinates (X , Y)");
+        dlg.setContentText("Coordinates (µm):");
+
+        Optional<String> txt = dlg.showAndWait();
+        return txt.orElse(null);
+    }
 
     /**
      * Helper to add a label-control pair to a GridPane row.
@@ -196,7 +215,7 @@ public class UIFunctions {
         ButtonType moveType  = new ButtonType("Move to tile", ButtonBar.ButtonData.APPLY);
         dlg.getDialogPane().getButtonTypes().addAll(okType, cancelType, moveType);
 
-        // Grab the JavaFX Button node for “Move to tile”
+        // Grab the JavaFX Button node for "Move to tile"
         Button moveBtn = (Button) dlg.getDialogPane().lookupButton(moveType);
 
         // --- bind disable: only enable when exactly 1 tile is selected ---
@@ -207,7 +226,7 @@ public class UIFunctions {
                 selection
         ));
 
-        // --- on “Move to tile” click, actually send the command ---
+        // --- on "Move to tile" click, actually send the command ---
         moveBtn.addEventFilter(ActionEvent.ACTION, ev -> {
             ev.consume();
             PathObject tile = selection.stream()
@@ -258,7 +277,7 @@ public class UIFunctions {
     public static Map<String,Object> handleStageAlignment(
             PathObject tile, QuPathGUI gui,
             String virtualEnvPath, String pythonScriptPath,
-            AffineTransform transform, double[] offset) {
+            AffineTransform transform, double[] offset) throws IOException, InterruptedException {
 
         QP.selectObjects(tile);
         double x = tile.getROI().getCentroidX();
@@ -276,20 +295,18 @@ public class UIFunctions {
                 Double.toString(stageCoords[1])
         );
 
-        UtilityFunctions.runPythonCommand(
-                virtualEnvPath,
-                pythonScriptPath,
+        UtilityFunctions.execCommand(
                 pythonArgs,
-                "moveStageToCoordinates.py"
+                "moveStageToCoordinates"
         );
 
         gui.getViewer().setCenterPixelLocation(x, y);
 
         boolean ok = stageToQuPathAlignmentGUI2();
         if (ok) {
-            List<String> resp = UtilityFunctions.runPythonCommand(virtualEnvPath, pythonScriptPath, null,
-                    "getStageCoordinates.py");
-            assert resp != null;
+            int resp = UtilityFunctions.execCommand( null,
+                    "getStageCoordinates");
+
             double[] currentStage = MinorFunctions.convertListToPrimitiveArray(resp);
             currentStage = TransformationFunctions.applyOffset(currentStage, offset, false);
             transform = TransformationFunctions.addTranslationToScaledAffine(transform, qpCoords, currentStage, offset);

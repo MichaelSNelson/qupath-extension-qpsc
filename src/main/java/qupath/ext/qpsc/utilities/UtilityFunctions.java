@@ -4,6 +4,7 @@ import javafx.application.Platform;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qupath.ext.basicstitching.stitching.StitchingImplementations;
+import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.ui.UIFunctions;
 import qupath.lib.gui.QuPathGUI;
 import qupath.lib.gui.scripting.QPEx;
@@ -26,12 +27,11 @@ import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 /**
- * General utility functions for stitching, Python calls, tiling, etc.
+ * General utility functions for stitching, command line calls, tiling, etc.
  */
 public class UtilityFunctions {
     private static final Logger logger = LoggerFactory.getLogger(UtilityFunctions.class);
@@ -113,11 +113,7 @@ public class UtilityFunctions {
     }
 
     // 2) Run a Python script and capture output
-    public static List<String> runPythonCommand(
-            String anacondaEnvPath,
-            String pythonScriptPath,
-            List<String> arguments,
-            String script) {
+    public static int execCommand(String... args) throws IOException, InterruptedException {
 
         AtomicInteger tifCount = new AtomicInteger(0);
         AtomicReference<String> value1 = new AtomicReference<>();
@@ -125,22 +121,18 @@ public class UtilityFunctions {
         AtomicBoolean errorOccurred = new AtomicBoolean(false);
         List<String> tifLines = new ArrayList<>();
 
-        String argsJoined = (arguments != null)
-                ? arguments.stream().map(arg -> "\"" + arg + "\"").collect(Collectors.joining(" "))
-                : "";
-
         try {
-            String pythonExe = new File(anacondaEnvPath, "python.exe").getCanonicalPath();
-            String scriptFull = (script != null)
-                    ? new File(new File(pythonScriptPath).getParent(), script).getCanonicalPath()
-                    : pythonScriptPath;
+            // turn the var-arg array into a mutable list
+            List<String> cmd = new ArrayList<>(List.of(args));
+            cmd.addFirst(QPPreferenceDialog.getRunCommandProperty());
 
-            logger.info("Running Python command");
-            String cmd = String.format("\"%s\" -u \"%s\" %s", pythonExe, scriptFull, argsJoined);
-            Process process = Runtime.getRuntime().exec(cmd);
 
-            boolean useProgress = (arguments == null || arguments.size() == 2);
-            int totalTifs = useProgress ? MinorFunctions.countTifEntriesInTileConfig(arguments) : 0;
+            ProcessBuilder pb = new ProcessBuilder(cmd);
+            pb.inheritIO();
+            Process process = pb.start();
+
+            boolean useProgress = args.length==1 || args.length==2;
+            int totalTifs = useProgress ? MinorFunctions.countTifEntriesInTileConfig(cmd) : 0;
             if (useProgress && totalTifs>0)
                 UIFunctions.showProgressBar(tifCount, totalTifs, process, 20000);
 
@@ -153,7 +145,7 @@ public class UtilityFunctions {
                     tifCount.incrementAndGet();
                 } else if (line.startsWith("QuPath:")) {
                     logger.info(line.substring("QuPath:".length()));
-                } else if (arguments==null || arguments.size()==2) {
+                } else if (args.length==1 || args.length==2) {
                     String[] p = line.split("\\s+");
                     if (p.length>=2) {
                         value1.set(p[0]);
@@ -191,9 +183,31 @@ public class UtilityFunctions {
         } catch (Exception e) {
             logger.error("runPythonCommand failed", e);
         }
-        return null;
+        return new ProcessBuilder(command).inheritIO().start().waitFor();
     }
+    /**
+     * Executes a command and returns all lines written to stdout.
+     *
+     * @param cmd the executable + its arguments
+     * @return list of stdout lines (never {@code null})
+     */
+    public static List<String> execCommandAndCapture(String... cmd)
+            throws IOException, InterruptedException {
 
+        Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
+        List<String> out = new ArrayList<>();
+        try (BufferedReader r =
+                     new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+            String line;
+            while ((line = r.readLine()) != null)
+                out.add(line);
+        }
+        int exit = p.waitFor();
+        if (exit != 0)
+            throw new IOException("Command " + String.join(" ", cmd) +
+                    " exited with " + exit);
+        return out;
+    }
     // 3) Delete folder + its files
     public static void deleteTilesAndFolder(String folderPath) {
         try {
@@ -302,7 +316,7 @@ public class UtilityFunctions {
             logger.info("TileConfiguration written to {}", configPath);
 
         } else {
-            // … your “existing annotation” branch (convert closures to loops) …
+            // … your "existing annotation" branch (convert closures to loops) …
             String modality = imagingModalityWithIndex.replaceAll("(_\\d+)$", "");
             QP.getDetectionObjects().stream()
                     .filter(o -> o.getPathClass().toString().toLowerCase().contains(modality))
@@ -335,7 +349,7 @@ public class UtilityFunctions {
         }
     }
 
-    // 7) Core tile‐writing logic
+    // 7) Core tile  writing logic
     public static void createTileConfiguration(
             double bBoxX,
             double bBoxY,
@@ -404,7 +418,7 @@ public class UtilityFunctions {
         RectangleROI roi = (RectangleROI) sel.getFirst().getROI();
         double[] coords = {roi.getBoundsX(), roi.getBoundsY()};
 
-        // Find the first URI via Stream API (and handle the empty‐case if needed):
+        // Find the first URI via Stream API (and handle the empty case if needed):
         String uri = QP.getCurrentServer()
                 .getURIs()
                 .stream()
@@ -424,22 +438,24 @@ public class UtilityFunctions {
                 String.valueOf(stageBounds[0][1] + coords[1]*scaleY)
         );
 
-        // Read from preferences:
-        String envPath = QPEx.getQuPath().getPreferencePane()
-                .getPropertySheet().getItems().stream()
-                .filter(i -> "Python Environment".equals(i.getName()))
-                .findFirst()
-                .map(i -> (String) i.getValue())
-                .orElseThrow();
-
-        String scriptPath = QPEx.getQuPath().getPreferencePane()
-                .getPropertySheet().getItems().stream()
-                .filter(i -> "PycroManager Path".equals(i.getName()))
-                .findFirst()
-                .map(i -> (String)i.getValue())
-                .orElseThrow();
-
-        runPythonCommand(envPath, scriptPath, target, "moveStageToCoordinates.py");
+        execCommand(target, "moveStageToCoordinates.py");
         logger.info("Moving stage to selected tile...");
+    }
+
+    /**
+     * Build an OS-appropriate command that copies {@code src} to {@code dst}.
+     */
+    public static String[] buildCopyCommand(Path src, Path dst) {
+        String srcAbs = src.toAbsolutePath().toString();
+        String dstAbs = dst.toAbsolutePath().toString();
+
+        boolean windows = System.getProperty("os.name")
+                .toLowerCase().contains("win");
+        if (windows) {
+            // cmd / c copy /Y "src" "dst"
+            return new String[]{"cmd", "/c", "copy", "/Y", srcAbs, dstAbs};
+        }
+        // /bin/sh -c cp "src" "dst"
+        return new String[]{"/bin/sh", "-c", "cp \"" + srcAbs + "\" \"" + dstAbs + "\""};
     }
 }

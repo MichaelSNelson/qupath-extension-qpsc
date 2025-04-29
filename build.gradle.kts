@@ -41,7 +41,7 @@ dependencies {
     implementation("qupath.ext.basicstitching:basic-stitching:0.2.0")
     implementation("io.github.qupath:qupath-extension-bioformats:0.6.0-rc4")
     // If you aren't using Groovy, this can be removed
-    //shadow(libs.bundles.groovy)
+    shadow(libs.bundles.groovy)
 
     // For testing
     testImplementation(libs.bundles.qupath)

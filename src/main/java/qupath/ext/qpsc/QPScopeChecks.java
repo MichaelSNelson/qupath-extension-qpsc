@@ -1,7 +1,10 @@
 package qupath.ext.qpsc;
 
+import qupath.ext.qpsc.utilities.MicroscopeConfigManager;
 import qupath.fx.dialogs.Dialogs;
 import qupath.lib.gui.QuPathGUI;
+import qupath.ext.qpsc.preferences.QPPreferenceDialog;
+import java.util.Set;
 
 
 /**
@@ -46,6 +49,24 @@ public class QPScopeChecks {
         // All checks passed.
         return true;
     }
+    /**
+     * Validate the YAML config and return true if all required keys are present.
+     */
+    public static boolean validateMicroscopeConfig() {
+        // Define the nested keys you absolutely need:
+        Set<String[]> required = Set.of(
+                new String[]{"microscope", "name"},
+                new String[]{"microscope", "serialNumber"},
+                new String[]{"parts", "stage", "type"},
+                new String[]{"parts", "camera", "pixelSize"}
+        );
+
+        String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
+        var mgr = MicroscopeConfigManager.getInstance(configPath);
+
+        var missing = mgr.validateRequiredKeys(required);
+        return missing.isEmpty();
+    }
 
     /**
      * Dummy check for hardware accessibility.
@@ -65,4 +86,5 @@ public class QPScopeChecks {
         // TODO: Implement real state checking logic.
         return true;
     }
+
 }

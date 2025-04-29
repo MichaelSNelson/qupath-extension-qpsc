@@ -48,7 +48,7 @@ public class QPProjectFunctions {
             boolean isSlideFlippedX,
             boolean isSlideFlippedY) throws IOException {
 
-        // 1) Read the “First Scan Type” preference:
+        // 1) Read the "First Scan Type" preference:
         String firstImagingMode = preferences.stream()
                 .filter(item -> "First Scan Type".equals(item.getName()))
                 .findFirst()
