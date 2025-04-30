@@ -102,11 +102,11 @@ public class QPProjectFunctions {
             String projectsFolderPath,
             String sampleLabel,
             String imagingModality) {
-        Project project = QP.getProject();
+        Project<?> project = QP.getProject();
         String imagingModeWithIndex = MinorFunctions.getUniqueFolderName(
                 projectsFolderPath + File.separator + sampleLabel + File.separator + imagingModality);
         String tempTileDirectory = projectsFolderPath + File.separator + sampleLabel + File.separator + imagingModeWithIndex;
-        ProjectImageEntry matchingImage = QP.getProjectEntry();
+        ProjectImageEntry<?> matchingImage = QP.getProjectEntry();
 
         Map<String,Object> result = new HashMap<>();
         result.put("matchingImage", matchingImage);

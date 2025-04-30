@@ -35,7 +35,7 @@ public class QPPreferenceDialog {
     private static final StringProperty microscopeConfigFileProperty =
             PathPrefs.createPersistentPreference(
                     "microscopeConfigFileProperty",
-                    "F:/QPScopeExtension/smartpath_configurations/microscopes/config_CAMM.yml");
+                    "F:/QPScopeExtension/smartpath_configurations/microscopes/config_PPM.yml");
 
     private static final StringProperty projectsFolderProperty =
             PathPrefs.createPersistentPreference(
