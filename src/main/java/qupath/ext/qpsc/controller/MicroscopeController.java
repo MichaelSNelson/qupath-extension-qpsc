@@ -1,6 +1,7 @@
 package qupath.ext.qpsc.controller;
 
 import java.awt.geom.AffineTransform;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import org.slf4j.Logger;
@@ -135,24 +136,50 @@ public class MicroscopeController {
         };
     }
 
-
     /**
-     * Move the stage to the given coordinates via the CLI.
+     * Move the stage to the given X,Y coordinates.
+     * The Z‐axis will be handled by the microscope (e.g. via autofocus).
      *
-     * @param x Microns in stage-coordinate X
-     * @param y Microns in stage-coordinate Y
+     * @param x Microns in stage‐coordinate X
+     * @param y Microns in stage‐coordinate Y
      */
     public void moveStageTo(double x, double y) {
-        try {
-            // 60-second timeout, no regex for progress updates
-            CliExecutor.ExecResult res = CliExecutor.execComplexCommand(
-                    10,                   // timeout in seconds
-                    null,                 // no progress regex
-                    "moveStageToCoordinates",
-                    Double.toString(x),
-                    Double.toString(y)
-            );
+        // pass null for Z ⇒ microscope CLI will autofocus/z‐handle itself
+        moveStageTo(x, y, null);
+    }
 
+    /**
+     * Move the stage to the given X,Y,Z coordinates.
+     *
+     * @param x Microns in stage‐coordinate X
+     * @param y Microns in stage‐coordinate Y
+     * @param z Microns in stage‐coordinate Z
+     */
+    public void moveStageTo(double x, double y, double z) {
+        moveStageTo(x, y, Double.valueOf(z));
+    }
+
+    /**
+     * Core implementation: builds up the argument list and invokes the CLI.
+     *
+     * @param x Microns in stage‐coordinate X
+     * @param y Microns in stage‐coordinate Y
+     * @param z Optional Z coordinate; if null, CLI is expected to autofocus or ignore Z.
+     */
+    private void moveStageTo(double x, double y, Double z) {
+        List<String> args = new ArrayList<>();
+        args.add("moveStageToCoordinates");
+        args.add(Double.toString(x));
+        args.add(Double.toString(y));
+        if (z != null) {
+            args.add(Double.toString(z));
+        }
+        try {
+            CliExecutor.ExecResult res = CliExecutor.execComplexCommand(
+                    10,           // timeout in seconds
+                    null,         // no progress regex
+                    args.toArray(new String[0])
+            );
             if (res.timedOut()) {
                 UIFunctions.notifyUserOfError(
                         "Microscope command timed out.\n" + res.stderr(),
@@ -164,10 +191,43 @@ public class MicroscopeController {
             }
         } catch (IOException | InterruptedException e) {
             UIFunctions.notifyUserOfError(
-                    "Failed to run stage-move command:\n" + e.getMessage(),
+                    "Failed to run stage‐move command:\n" + e.getMessage(),
                     "Stage Move");
         }
     }
+
+//    /**
+//     * Move the stage to the given coordinates via the CLI.
+//     *TODO MAYBE include a Z coordinate?
+//     * @param x Microns in stage-coordinate X
+//     * @param y Microns in stage-coordinate Y
+//     */
+//    public void moveStageTo(double x, double y) {
+//        try {
+//            // 60-second timeout, no regex for progress updates
+//            CliExecutor.ExecResult res = CliExecutor.execComplexCommand(
+//                    10,                   // timeout in seconds
+//                    null,                 // no progress regex
+//                    "moveStageToCoordinates",
+//                    Double.toString(x),
+//                    Double.toString(y)
+//            );
+//
+//            if (res.timedOut()) {
+//                UIFunctions.notifyUserOfError(
+//                        "Microscope command timed out.\n" + res.stderr(),
+//                        "Stage Move");
+//            } else if (res.exitCode() != 0) {
+//                UIFunctions.notifyUserOfError(
+//                        "Microscope CLI returned exit code " + res.exitCode() + "\n" + res.stderr(),
+//                        "Stage Move");
+//            }
+//        } catch (IOException | InterruptedException e) {
+//            UIFunctions.notifyUserOfError(
+//                    "Failed to run stage-move command:\n" + e.getMessage(),
+//                    "Stage Move");
+//        }
+//    }
 
 
     // Then in your JavaFX button-handler:
