@@ -49,6 +49,8 @@ public class QPScopeChecks {
         // All checks passed.
         return true;
     }
+
+    //TODO adjust after finalizing config and yml file structure
     /**
      * Validate the YAML config and return true if all required keys are present.
      */
@@ -56,9 +58,10 @@ public class QPScopeChecks {
         // Define the nested keys you absolutely need:
         Set<String[]> required = Set.of(
                 new String[]{"microscope", "name"},
-                new String[]{"microscope", "serialNumber"},
-                new String[]{"parts", "stage", "type"},
-                new String[]{"parts", "camera", "pixelSize"}
+                new String[]{"fake", "key"},
+                new String[]{"stage"},
+                new String[]{"imagingMode"},
+                new String[]{"slideSize"}
         );
 
         String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();

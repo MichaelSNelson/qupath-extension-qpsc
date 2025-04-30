@@ -35,12 +35,12 @@ public class QPPreferenceDialog {
     private static final StringProperty microscopeConfigFileProperty =
             PathPrefs.createPersistentPreference(
                     "microscopeConfigFileProperty",
-                    "C:\\ImageAnalysis\\QPExtension0.5.0\\config\\config_CAMM.yml");
+                    "F:/QPScopeExtension/smartpath_configurations/microscopes/config_CAMM.yml");
 
     private static final StringProperty projectsFolderProperty =
             PathPrefs.createPersistentPreference(
                     "projectsFolderProperty",
-                    "C:\\ImageAnalysis\\QPExtension0.5.0\\data\\slides");
+                    "F:/QPScopeExtension/data/slides");
     private static final StringProperty extensionLocationProperty =
             PathPrefs.createPersistentPreference(
                     "extensionPathProperty",

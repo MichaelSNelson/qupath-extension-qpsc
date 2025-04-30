@@ -92,10 +92,10 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 	}
 
 	private void addMenuItem(QuPathGUI qupath) {
-		// Create or get the top‐level “Extensions > QP Scope” menu
+		// Create or get the top level Extensions > QP Scope menu
 		var extensionMenu = qupath.getMenu("Extensions>" + EXTENSION_NAME, true);
 
-		// 1) Start with a bounding‐box workflow
+		// 1) Start with a bounding box workflow
 		MenuItem boundingBoxOption = new MenuItem("Start with Bounding Box");
 		boundingBoxOption.setDisable(!configValid);
 		boundingBoxOption.setOnAction(e ->

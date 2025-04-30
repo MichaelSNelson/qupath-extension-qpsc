@@ -1,5 +1,7 @@
 package qupath.ext.qpsc.ui;
 
+import javafx.animation.KeyFrame;
+import javafx.animation.Timeline;
 import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
 import javafx.collections.ObservableList;
@@ -11,6 +13,7 @@ import javafx.scene.layout.GridPane;
 import javafx.scene.layout.VBox;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
+import javafx.util.Duration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qupath.ext.qpsc.controller.MicroscopeController;
@@ -18,6 +21,7 @@ import qupath.ext.qpsc.utilities.MinorFunctions;
 import qupath.ext.qpsc.utilities.TransformationFunctions;
 import qupath.ext.qpsc.utilities.UtilityFunctions;
 import qupath.lib.gui.QuPathGUI;
+import qupath.lib.gui.scripting.QPEx;
 import qupath.lib.objects.PathObject;
 import qupath.lib.scripting.QP;
 
@@ -72,79 +76,184 @@ public class UIFunctions {
         pane.add(node, 0, rowIndex, 2, 1);
     }
 
-    /**
-     * Displays and updates a progress bar based on a Python process's stdout progress.
-     * @param progressCounter AtomicInteger tracking completed file count.
-     * @param totalFiles total number of files expected.
-     * @param pythonProcess external Process to monitor.
-     * @param timeout milliseconds of stalled output before abort.
-     */
-    public static void showProgressBar(AtomicInteger progressCounter, int totalFiles,
-                                       Process pythonProcess, int timeout) {
-        Platform.runLater(() -> {
-            AtomicLong startTime = new AtomicLong();
-            AtomicLong lastUpdateTime = new AtomicLong(System.currentTimeMillis());
-            AtomicInteger lastProgress = new AtomicInteger(0);
 
-            progressBarStage = new Stage();
-            progressBarStage.initModality(Modality.NONE);
-            progressBarStage.setTitle("Microscope acquisition progress");
+    public static class ProgressHandle {
+        private final Stage stage;
+        private final Timeline timeline;
 
-            VBox vbox = new VBox(10);
-            ProgressBar progressBar = new ProgressBar(0);
-            progressBar.setPrefWidth(300);
-            Label timeLabel = new Label("Estimating time...");
-            Label progressLabel = new Label("Processing files...");
-            vbox.getChildren().addAll(progressBar, timeLabel, progressLabel);
+        private ProgressHandle(Stage stage, Timeline timeline) {
+            this.stage   = stage;
+            this.timeline = timeline;
+        }
 
-            progressBarStage.setScene(new Scene(vbox));
-            progressBarStage.setAlwaysOnTop(true);
-            progressBarStage.show();
-
-            ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor();
-            executor.scheduleAtFixedRate(() -> {
-                int current = progressCounter.get();
-                long now = System.currentTimeMillis();
-                if (current > 0) {
-                    if (startTime.get() == 0) {
-                        startTime.set(now);
-                    }
-                    double fraction = current / (double) totalFiles;
-                    long elapsed = now - startTime.get();
-                    long sinceLast = now - lastUpdateTime.get();
-                    double perUnit = elapsed / (double) current;
-                    int estTotal = (int) (perUnit * totalFiles);
-                    int remainingSec = (estTotal - (int) elapsed) / 1000;
-
-                    Platform.runLater(() -> {
-                        progressBar.setProgress(fraction);
-                        timeLabel.setText("Rough estimate of remaining time: " + remainingSec + " seconds");
-                        progressLabel.setText(String.format("Processed %d out of %d files...", current, totalFiles));
-                    });
-
-                    if (!pythonProcess.isAlive() || sinceLast > timeout) {
-                        executor.shutdownNow();
-                        Platform.runLater(() -> {
-                            progressLabel.setText("Process stalled and was terminated.");
-                            notifyUserOfError(
-                                    "Timeout reached when waiting for images from microscope. Acquisition halted.",
-                                    "Acquisition process");
-                            new Thread(() -> {
-                                try { Thread.sleep(2000); } catch (InterruptedException ignored) {}
-                                Platform.runLater(progressBarStage::close);
-                            }).start();
-                        });
-                    } else if (fraction >= 1.0) {
-                        executor.shutdownNow();
-                        Platform.runLater(progressBarStage::close);
-                    } else if (current > lastProgress.get()) {
-                        lastProgress.set(current);
-                        lastUpdateTime.set(now);
-                    }
-                }
-            }, 200, 200, TimeUnit.MILLISECONDS);
-        });
+        /** Stops updates and closes the progress bar window. */
+        public void close() {
+            Platform.runLater(() -> {
+                timeline.stop();
+                stage.close();
+            });
+        }
     }
+    /**
+     * Show a progress bar that watches an AtomicInteger and updates itself periodically.
+     * @param progressCounter Thread-safe counter (incremented externally as work completes).
+     * @param totalFiles      The max value of progressCounter.
+     * @param process         The background Process to watch for liveness.
+     * @param timeoutMs       If no progress for this many ms, bar will auto-terminate.
+     * @return a ProgressHandle you can .close() when you’re done (or ignore if you let it timeout).
+     */
+    /**
+     * Shows a progress bar window that watches an AtomicInteger and updates every 200 ms.
+     *
+     * @param progressCounter thread safe counter (increment yourself as work completes)
+     * @param totalFiles      max value of progressCounter (for a fraction)
+     * @param process         the external Process we can watch for isAlive()
+     * @param timeoutMs       if no progress for this many ms, the bar auto closes
+     * @return a ProgressHandle; just call handle.close() when you’re done (or ignore it if it auto closes)
+     */
+    public static ProgressHandle showProgressBarAsync(
+            AtomicInteger progressCounter,
+            int totalFiles,
+            Process process,
+            int timeoutMs) {
+
+        // 1) Prepare the Stage + controls (on FX thread)
+        Stage stage = new Stage();
+        ProgressBar progressBar = new ProgressBar(0);
+        progressBar.setPrefWidth(300);
+        Label timeLabel     = new Label("Estimating time…");
+        Label progressLabel = new Label("Processed 0 of " + totalFiles);
+        VBox vbox = new VBox(10, progressBar, timeLabel, progressLabel);
+        vbox.setStyle("-fx-padding: 10;");
+
+        Platform.runLater(() -> {
+            stage.initModality(Modality.NONE);
+            stage.setTitle("Microscope acquisition progress");
+            stage.setScene(new Scene(vbox));
+            stage.setAlwaysOnTop(true);
+            stage.show();
+        });
+
+        // 2) Shared timing state
+        AtomicLong startTime      = new AtomicLong(0);
+        AtomicLong lastUpdateTime = new AtomicLong(System.currentTimeMillis());
+
+        // 3) Build the Timeline in two steps so we can reference it in the lambda
+        final Timeline timeline = new Timeline();
+        KeyFrame keyFrame = new KeyFrame(Duration.millis(200), evt -> {
+            int current = progressCounter.get();
+            long now = System.currentTimeMillis();
+
+            // Record start time once work begins
+            if (current > 0 && startTime.get() == 0) {
+                startTime.set(now);
+            }
+
+            // Update fraction & labels
+            double fraction = totalFiles > 0 ? current / (double) totalFiles : 0.0;
+            progressBar.setProgress(fraction);
+            progressLabel.setText("Processed " + current + " of " + totalFiles);
+
+            if (startTime.get() > 0 && current > 0) {
+                long elapsed = now - startTime.get();
+                long remMs   = (long) ((elapsed / (double) current) * (totalFiles - current));
+                timeLabel.setText("Remaining: " + (remMs / 1000) + " s");
+            }
+
+            // Check for stall or completion
+            boolean stalled = (!process.isAlive())
+                    || (current == lastUpdateTime.get() && now - lastUpdateTime.get() > timeoutMs);
+
+            if (fraction >= 1.0 || stalled) {
+                timeline.stop();
+                stage.close();
+            } else {
+                lastUpdateTime.set(now);
+            }
+        });
+        timeline.getKeyFrames().add(keyFrame);
+        timeline.setCycleCount(Timeline.INDEFINITE);
+
+        // 4) Start it on the FX thread
+        Platform.runLater(timeline::play);
+
+        // 5) Return the handle so caller can close early if desired
+        return new ProgressHandle(stage, timeline);
+    }
+
+//    /**
+//     * Displays and updates a progress bar based on a Python process's stdout progress.
+//     * @param progressCounter AtomicInteger tracking completed file count.
+//     * @param totalFiles total number of files expected.
+//     * @param pythonProcess external Process to monitor.
+//     * @param timeout milliseconds of stalled output before abort.
+//     */
+//    public static void showProgressBar(AtomicInteger progressCounter, int totalFiles,
+//                                       Process pythonProcess, int timeout) {
+//        Platform.runLater(() -> {
+//            AtomicLong startTime = new AtomicLong();
+//            AtomicLong lastUpdateTime = new AtomicLong(System.currentTimeMillis());
+//            AtomicInteger lastProgress = new AtomicInteger(0);
+//
+//            progressBarStage = new Stage();
+//            progressBarStage.initModality(Modality.NONE);
+//            progressBarStage.setTitle("Microscope acquisition progress");
+//
+//            VBox vbox = new VBox(10);
+//            ProgressBar progressBar = new ProgressBar(0);
+//            progressBar.setPrefWidth(300);
+//            Label timeLabel = new Label("Estimating time...");
+//            Label progressLabel = new Label("Processing files...");
+//            vbox.getChildren().addAll(progressBar, timeLabel, progressLabel);
+//
+//            progressBarStage.setScene(new Scene(vbox));
+//            progressBarStage.setAlwaysOnTop(true);
+//            progressBarStage.show();
+//
+//            ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor();
+//            executor.scheduleAtFixedRate(() -> {
+//                int current = progressCounter.get();
+//                long now = System.currentTimeMillis();
+//                if (current > 0) {
+//                    if (startTime.get() == 0) {
+//                        startTime.set(now);
+//                    }
+//                    double fraction = current / (double) totalFiles;
+//                    long elapsed = now - startTime.get();
+//                    long sinceLast = now - lastUpdateTime.get();
+//                    double perUnit = elapsed / (double) current;
+//                    int estTotal = (int) (perUnit * totalFiles);
+//                    int remainingSec = (estTotal - (int) elapsed) / 1000;
+//
+//                    Platform.runLater(() -> {
+//                        progressBar.setProgress(fraction);
+//                        timeLabel.setText("Rough estimate of remaining time: " + remainingSec + " seconds");
+//                        progressLabel.setText(String.format("Processed %d out of %d files...", current, totalFiles));
+//                    });
+//
+//                    if (!pythonProcess.isAlive() || sinceLast > timeout) {
+//                        executor.shutdownNow();
+//                        Platform.runLater(() -> {
+//                            progressLabel.setText("Process stalled and was terminated.");
+//                            notifyUserOfError(
+//                                    "Timeout reached when waiting for images from microscope. Acquisition halted.",
+//                                    "Acquisition process");
+//                            new Thread(() -> {
+//                                try { Thread.sleep(2000); } catch (InterruptedException ignored) {}
+//                                Platform.runLater(progressBarStage::close);
+//                            }).start();
+//                        });
+//                    } else if (fraction >= 1.0) {
+//                        executor.shutdownNow();
+//                        Platform.runLater(progressBarStage::close);
+//                    } else if (current > lastProgress.get()) {
+//                        lastProgress.set(current);
+//                        lastUpdateTime.set(now);
+//                    }
+//                }
+//            }, 200, 200, TimeUnit.MILLISECONDS);
+//        });
+//    }
 
     /**
      * Shows an error dialog on the JavaFX thread.
@@ -218,40 +327,39 @@ public class UIFunctions {
         // Grab the JavaFX Button node for "Move to tile"
         Button moveBtn = (Button) dlg.getDialogPane().lookupButton(moveType);
 
-        // --- bind disable: only enable when exactly 1 tile is selected ---
-        ObservableList<PathObject> selection = (ObservableList<PathObject>) QP.getSelectedObjects();
-        moveBtn.disableProperty().bind(Bindings.createBooleanBinding(() ->
-                        // count how many of the selected objects are actual tiles
-                        selection.stream().filter(PathObject::isTile).count() != 1,
-                selection
-        ));
-
-        // --- on "Move to tile" click, actually send the command ---
         moveBtn.addEventFilter(ActionEvent.ACTION, ev -> {
-            ev.consume();
-            PathObject tile = selection.stream()
-                    .filter(PathObject::isTile)
-                    .findFirst()
-                    .get();   // safe: we know count == 1
-            MicroscopeController.getInstance().moveStageToSelectedTile(tile);
-        });
+            ev.consume();  // prevent dialog from closing
 
-        // --- OK / Cancel logic ---
-        dlg.setResultConverter(btn -> {
-            if (btn == okType) {
-                long tileCount = selection.stream().filter(PathObject::isTile).count();
-                if (tileCount != 1) {
-                    UIFunctions.showAlertDialog("Please select exactly one tile before continuing.");
-                    return false;       // stays open
+            // Grab the current selection
+            Collection<PathObject> sel = QP.getSelectedObjects();
+            long tileCount = sel.stream().filter(PathObject::isTile).count();
+
+            if (tileCount != 1) {
+                // Warn and stay open
+                UIFunctions.notifyUserOfError(
+                        "Please select exactly one tile before moving the stage.",
+                        "Stage Move");
+            } else {
+                // Good: perform the move then close
+                PathObject tile = sel.stream()
+                        .filter(PathObject::isTile)
+                        .findFirst().get();
+                try {
+                    MicroscopeController.getInstance().moveStageToSelectedTile(tile);
+                } catch (IOException | InterruptedException e) {
+                    throw new RuntimeException(e);
                 }
-                return true;            // close and return true
+                dlg.setResult(Boolean.TRUE);
+                dlg.close();
             }
-            return false;               // Cancel or other => false
         });
 
+        // 4) Convert the OK button to simply close & return true
+        dlg.setResultConverter(btn -> btn == okType);
+
+        // 5) Show and return whether OK was hit (or move was successful)
         return dlg.showAndWait().orElse(false);
     }
-
 
     /**
      * Confirmation dialog for current stage position accuracy.
@@ -276,7 +384,6 @@ public class UIFunctions {
      */
     public static Map<String,Object> handleStageAlignment(
             PathObject tile, QuPathGUI gui,
-            String virtualEnvPath, String pythonScriptPath,
             AffineTransform transform, double[] offset) throws IOException, InterruptedException {
 
         QP.selectObjects(tile);
@@ -289,14 +396,10 @@ public class UIFunctions {
         // THEN apply offset
         stageCoords = TransformationFunctions.applyOffset(stageCoords, offset, true);
 
-        // Build the Python arguments by indexing into the array
-        List<String> pythonArgs = List.of(
-                Double.toString(stageCoords[0]),
-                Double.toString(stageCoords[1])
-        );
+
 
         UtilityFunctions.execCommand(
-                pythonArgs,
+                Arrays.toString(stageCoords),
                 "moveStageToCoordinates"
         );
 
@@ -304,10 +407,10 @@ public class UIFunctions {
 
         boolean ok = stageToQuPathAlignmentGUI2();
         if (ok) {
-            int resp = UtilityFunctions.execCommand( null,
-                    "getStageCoordinates");
+            List<String> out = UtilityFunctions.execCommandAndCapture("getStageCoordinates");
+            double[] currentStage =
+                    MinorFunctions.convertListToPrimitiveArray(out);   // << expects List<String>
 
-            double[] currentStage = MinorFunctions.convertListToPrimitiveArray(resp);
             currentStage = TransformationFunctions.applyOffset(currentStage, offset, false);
             transform = TransformationFunctions.addTranslationToScaledAffine(transform, qpCoords, currentStage, offset);
         }

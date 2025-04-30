@@ -23,7 +23,7 @@ class CoordinateTransformationTest {
 
     private static final Logger logger = LoggerFactory.getLogger(CoordinateTransformationTest.class);
 
-    private static final String TEST_FOLDER = "C:/ImageAnalysis/QPExtension0.5.0/data/test";
+    private static final String TEST_FOLDER = "F:/QPScopeExtension/data/test";
     private static final double ORIGINAL_PIXEL_SIZE = 1.108;
     private static final double ACQUISITION_PIXEL_SIZE = 0.2201;
     private static final int CAMERA_WIDTH = 1392;
@@ -38,7 +38,7 @@ class CoordinateTransformationTest {
         annotation.setName("Default box");
         List<PathObject> annotations = List.of(annotation);
 
-        // Step 2: compute frame sizes in QP‐pixels
+        // Step 2: compute frame sizes in QP pixels
         double frameWidth  = ACQUISITION_PIXEL_SIZE * CAMERA_WIDTH  / ORIGINAL_PIXEL_SIZE;
         double frameHeight = ACQUISITION_PIXEL_SIZE * CAMERA_HEIGHT / ORIGINAL_PIXEL_SIZE;
         logger.info("frameWidthQPPixels = {}", frameWidth);
@@ -51,8 +51,8 @@ class CoordinateTransformationTest {
                         frameWidth,
                         frameHeight,
                         0,                 // overlap percent
-                        null,              // no bounding‐box coords
-                        true,              // create QuPath‐tile objects
+                        null,              // no bounding box coords
+                        true,              // create QuPath tile objects
                         annotations,        // our single annotation
                         true,
                         false
@@ -62,7 +62,7 @@ class CoordinateTransformationTest {
 
     @Test
     void testAffineTransformationAndOffset() {
-        // Build the scaling transform based on “inverted” stage prefs
+        // Build the scaling transform based on inverted stage prefs
         AffineTransform scaling = new AffineTransform();
         boolean invertedX = QPPreferenceDialog.getInvertedXProperty();
         boolean invertedY = QPPreferenceDialog.getInvertedYProperty();
@@ -76,7 +76,7 @@ class CoordinateTransformationTest {
         List<String> stageCoordsStr = List.of("18838", "13730");
         double [] stageCoords = MinorFunctions.convertListToPrimitiveArray(stageCoordsStr);
 
-        // The offset from tile‐center to stage
+        // The offset from tile center to stage
         double [] offset = MinorFunctions.getCurrentOffset();
 
         // Compute the full transform: scale + translation
@@ -84,7 +84,7 @@ class CoordinateTransformationTest {
                 scaling, qpCoords, stageCoords, offset
         );
 
-        // When we re‐apply it to our qpCoords, we should land at stageCoords (±1 µm)
+        // When we re apply it to our qpCoords, we should land at stageCoords (±1 µm)
         double[] result = TransformationFunctions.qpToMicroscopeCoordinates(qpCoords, fullTransform);
 
         // And assert on its elements:
