@@ -72,6 +72,7 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 
 		// 1) Register all our persistent preferences
 		QPPreferenceDialog.installPreferences(qupath);
+		MicroscopeConfigManager.getInstance(QPPreferenceDialog.getMicroscopeConfigFileProperty());
 
 		// 2) Validate microscope YAML up-front via QPScopeChecks
 		configValid = QPScopeChecks.validateMicroscopeConfig();

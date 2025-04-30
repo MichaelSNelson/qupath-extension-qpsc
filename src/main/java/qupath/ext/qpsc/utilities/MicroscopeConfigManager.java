@@ -49,6 +49,12 @@ public class MicroscopeConfigManager {
         }
         return instance;
     }
+    public static synchronized MicroscopeConfigManager getInstance() {
+        if (instance == null) {
+            throw new IllegalStateException("MicroscopeConfigManager must first be initialized with a configuration path!");
+        }
+        return instance;
+    }
 
     @SuppressWarnings("unchecked")
     private static Map<String, Object> loadConfig(String configPath) {

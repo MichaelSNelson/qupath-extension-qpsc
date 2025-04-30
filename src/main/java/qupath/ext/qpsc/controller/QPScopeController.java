@@ -5,6 +5,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.logging.Logger;
 import javafx.concurrent.Task;
 import qupath.ext.qpsc.controller.MicroscopeController;
+import qupath.ext.qpsc.ui.InterfaceController;
 
 public class QPScopeController {
 
@@ -57,7 +58,7 @@ public class QPScopeController {
         switch (mode) {
             case "boundingBox"  -> MicroscopeController.getInstance().startBoundingBoxWorkflow();
             case "existingImage"-> MicroscopeController.getInstance().startExistingImageWorkflow();
-            case "test"         -> MicroscopeController.getInstance().runTestWorkflow();
+            case "test"         -> InterfaceController.showTestStageMovementDialog();
             default             -> logger.warning("Unknown workflow mode " + mode);
         }
     }

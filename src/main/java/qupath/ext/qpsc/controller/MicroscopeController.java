@@ -10,9 +10,11 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
 
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.service.CliExecutor;
+import qupath.ext.qpsc.utilities.MicroscopeConfigManager;
 import qupath.lib.gui.QuPathGUI;
 import qupath.ext.qpsc.utilities.TransformationFunctions;
 import qupath.ext.qpsc.utilities.UtilityFunctions;
@@ -246,6 +248,24 @@ public class MicroscopeController {
                         "Here is where the Existing-image workflow will run."));
     }
 
+    public boolean isWithinBounds(double x, double y) {
+        var xlimits = MicroscopeConfigManager.getInstance().getSection("stage", "xlimit");
+        var ylimits = MicroscopeConfigManager.getInstance().getSection("stage", "ylimit");
 
+        if (xlimits == null || ylimits == null) {
+            logger.error("Stage limits missing from config");
+            return false;
+        }
+
+        double xLow = ((Number)xlimits.get("low")).doubleValue();
+        double xHigh = ((Number)xlimits.get("high")).doubleValue();
+        double yLow = ((Number)ylimits.get("low")).doubleValue();
+        double yHigh = ((Number)ylimits.get("high")).doubleValue();
+
+        boolean withinX = (x >= Math.min(xLow, xHigh) && x <= Math.max(xLow, xHigh));
+        boolean withinY = (y >= Math.min(yLow, yHigh) && y <= Math.max(yLow, yHigh));
+
+        return withinX && withinY;
+    }
 }
 

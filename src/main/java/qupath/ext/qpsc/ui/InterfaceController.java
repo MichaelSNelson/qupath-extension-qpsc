@@ -1,18 +1,17 @@
 package qupath.ext.qpsc.ui;
 
+import javafx.application.Platform;
 import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Scene;
-import javafx.scene.control.Button;
-import javafx.scene.control.Label;
-import javafx.scene.control.Spinner;
-import javafx.scene.control.SpinnerValueFactory;
-import javafx.scene.control.TextField;
+import javafx.scene.control.*;
+import javafx.scene.layout.GridPane;
 import javafx.scene.layout.VBox;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
+import qupath.ext.qpsc.controller.MicroscopeController;
 import qupath.fx.dialogs.Dialogs;
-
+import javafx.geometry.Insets;
 import java.io.IOException;
 import java.util.ResourceBundle;
 import java.util.concurrent.CompletableFuture;
@@ -133,4 +132,65 @@ public class InterfaceController extends VBox {
             return "UserInputResult{sampleName='" + sampleName + "', pixelSize=" + pixelSize + "}";
         }
     }
+
+    public static void showTestStageMovementDialog() {
+        Platform.runLater(() -> {
+            ResourceBundle resources = ResourceBundle.getBundle("qupath.ext.qpsc.ui.strings");
+
+            Dialog<Void> dialog = new Dialog<>();
+            dialog.setTitle(resources.getString("testDialog.title"));
+            dialog.setHeaderText(resources.getString("testDialog.header"));
+
+            TextField xField = new TextField();
+            TextField yField = new TextField();
+            Label statusLabel = new Label();
+
+            GridPane grid = new GridPane();
+            grid.setHgap(10);
+            grid.setVgap(10);
+            grid.setPadding(new Insets(20));
+
+            grid.add(new Label(resources.getString("testDialog.label.x")), 0, 0);
+            grid.add(xField, 1, 0);
+            grid.add(new Label(resources.getString("testDialog.label.y")), 0, 1);
+            grid.add(yField, 1, 1);
+            grid.add(statusLabel, 0, 2, 2, 1);
+
+            ButtonType moveButtonType = new ButtonType(resources.getString("testDialog.button.move"), ButtonBar.ButtonData.APPLY);
+            ButtonType getCoordsButtonType = new ButtonType(resources.getString("testDialog.button.getCoords"), ButtonBar.ButtonData.OTHER);
+            dialog.getDialogPane().getButtonTypes().addAll(moveButtonType, getCoordsButtonType, ButtonType.CLOSE);
+
+            Button moveBtn = (Button) dialog.getDialogPane().lookupButton(moveButtonType);
+            Button getCoordsBtn = (Button) dialog.getDialogPane().lookupButton(getCoordsButtonType);
+
+            moveBtn.setOnAction(e -> {
+                try {
+                    double x = Double.parseDouble(xField.getText());
+                    double y = Double.parseDouble(yField.getText());
+                    if (MicroscopeController.getInstance().isWithinBounds(x, y)) {
+                        MicroscopeController.getInstance().moveStageTo(x, y);
+                        statusLabel.setText("Stage moved successfully!");
+                    } else {
+                        UIFunctions.notifyUserOfError("Coordinates out of bounds.", "Stage Move");
+                    }
+                } catch (Exception ex) {
+                    UIFunctions.notifyUserOfError(ex.getMessage(), "Stage Move");
+                }
+            });
+
+            getCoordsBtn.setOnAction(e -> {
+                try {
+                    double[] coords = MicroscopeController.getInstance().getStagePosition();
+                    statusLabel.setText(String.format("Current: X=%.2f µm, Y=%.2f µm", coords[0], coords[1]));
+                } catch (Exception ex) {
+                    UIFunctions.notifyUserOfError(ex.getMessage(), "Get Coordinates");
+                }
+            });
+
+            dialog.getDialogPane().setContent(grid);
+            dialog.initModality(Modality.NONE);
+            dialog.show();
+        });
+    }
+
 }
