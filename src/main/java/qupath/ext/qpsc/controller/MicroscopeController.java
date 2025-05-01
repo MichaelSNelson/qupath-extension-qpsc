@@ -188,7 +188,9 @@ public class MicroscopeController {
                     10,       // timeout in seconds
                     null,     // no progress regex
                     CMD_MOVE_STAGE_XY,
+                    "-x",
                     Double.toString(x),
+                    "-y",
                     Double.toString(y)
             );
             if (res.timedOut()) {
@@ -218,6 +220,7 @@ public class MicroscopeController {
                     10,       // timeout in seconds
                     null,     // no progress regex
                     CMD_MOVE_STAGE_Z,
+                    "-z",
                     Double.toString(z)
             );
             if (res.timedOut()) {
@@ -245,6 +248,7 @@ public class MicroscopeController {
             var res = CliExecutor.execComplexCommand(
                     3, null,
                     CMD_MOVE_STAGE_P,
+                    "-angle",
                     Double.toString(p)
             );
             if (res.timedOut()) {
