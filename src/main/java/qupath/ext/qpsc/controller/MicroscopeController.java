@@ -1,9 +1,8 @@
 package qupath.ext.qpsc.controller;
 
 import java.awt.geom.AffineTransform;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
+import java.util.*;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.io.BufferedReader;
@@ -11,7 +10,6 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Map;
 
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.service.CliExecutor;
@@ -36,6 +34,17 @@ public class MicroscopeController {
     private AffineTransform currentTransform;
     private String pythonEnv;
     private String pythonScript;
+    private static final ResourceBundle BUNDLE =
+            ResourceBundle.getBundle("qupath.ext.qpsc.ui.strings");
+
+    // now load from strings.properties
+    private static final String CMD_GET_STAGE_XY  = BUNDLE.getString("command.getStagePositionXY");
+    private static final String CMD_GET_STAGE_Z   = BUNDLE.getString("command.getStagePositionZ");
+    private static final String CMD_GET_STAGE_P   = BUNDLE.getString("command.getStagePositionP");
+
+    private static final String CMD_MOVE_STAGE_XY = BUNDLE.getString("command.moveStageXY");
+    private static final String CMD_MOVE_STAGE_Z  = BUNDLE.getString("command.moveStageZ");
+    private static final String CMD_MOVE_STAGE_P  = BUNDLE.getString("command.moveStageP");
 
 
     public static synchronized MicroscopeController getInstance() {
@@ -108,7 +117,7 @@ public class MicroscopeController {
     }
 
 
-    /** Build a platform-appropriate copy command */
+    /** Build a platform appropriate copy command */
     private static String[] buildCopyCommand(Path src, Path dst) {
         if (System.getProperty("os.name").toLowerCase().contains("win")) {
             // Windows: use cmd /c copy "src" "dst"
@@ -122,14 +131,18 @@ public class MicroscopeController {
     }
 
 
-    public double[] getStagePosition() throws IOException, InterruptedException {
-        // Run with a 5 s timeout (for example)
-        String out = CliExecutor.execCommandAndGetOutput(5,
-                "getStagePositionForQuPath");
-        // Expect 1234.5 678.9
-        String[] parts = out.split("\\s+");
+    /**
+     * Query the microscope for its current X,Y stage position.
+     *
+     * @return a two element array [x, y] in microns
+     * @throws IOException if the CLI returns non zero or unparsable output
+     * @throws InterruptedException if the process is interrupted
+     */
+    public double[] getStagePositionXY() throws IOException, InterruptedException {
+        String out = CliExecutor.execCommandAndGetOutput(5, CMD_GET_STAGE_XY);
+        String[] parts = out.trim().split("\\s+");
         if (parts.length < 2)
-            throw new IOException("Unexpected output: " + out );
+            throw new IOException("Unexpected output for XY position: " + out);
         return new double[]{
                 Double.parseDouble(parts[0]),
                 Double.parseDouble(parts[1])
@@ -137,65 +150,118 @@ public class MicroscopeController {
     }
 
     /**
-     * Move the stage to the given X,Y coordinates.
-     * The Z‐axis will be handled by the microscope (e.g. via autofocus).
+     * Query the microscope for its current Z stage position.
      *
-     * @param x Microns in stage‐coordinate X
-     * @param y Microns in stage‐coordinate Y
+     * @return the Z coordinate in microns
+     * @throws IOException if the CLI returns non‐zero or unparsable output
+     * @throws InterruptedException if the process is interrupted
      */
-    public void moveStageTo(double x, double y) {
-        // pass null for Z ⇒ microscope CLI will autofocus/z‐handle itself
-        moveStageTo(x, y, null);
-    }
-
-    /**
-     * Move the stage to the given X,Y,Z coordinates.
-     *
-     * @param x Microns in stage‐coordinate X
-     * @param y Microns in stage‐coordinate Y
-     * @param z Microns in stage‐coordinate Z
-     */
-    public void moveStageTo(double x, double y, double z) {
-        moveStageTo(x, y, Double.valueOf(z));
-    }
-
-    /**
-     * Core implementation: builds up the argument list and invokes the CLI.
-     *
-     * @param x Microns in stage‐coordinate X
-     * @param y Microns in stage‐coordinate Y
-     * @param z Optional Z coordinate; if null, CLI is expected to autofocus or ignore Z.
-     */
-    private void moveStageTo(double x, double y, Double z) {
-        List<String> args = new ArrayList<>();
-        args.add("moveStageToCoordinates");
-        args.add(Double.toString(x));
-        args.add(Double.toString(y));
-        if (z != null) {
-            args.add(Double.toString(z));
+    public double getStagePositionZ() throws IOException, InterruptedException {
+        String out = CliExecutor.execCommandAndGetOutput(5, CMD_GET_STAGE_Z);
+        try {
+            return Double.parseDouble(out.trim());
+        } catch (NumberFormatException e) {
+            throw new IOException("Unexpected output for Z position: " + out, e);
         }
+    }
+    /**
+     * Query the current polarizer (P) position from the stage.
+     * @return The P coordinate (degrees or whatever units your CLI returns).
+     */
+    public double getStagePositionP() throws IOException, InterruptedException {
+        String out = CliExecutor.execCommandAndGetOutput(5, CMD_GET_STAGE_P);
+        try {
+            return Double.parseDouble(out.trim());
+        } catch (NumberFormatException e) {
+            throw new IOException("Unexpected output for P position: " + out, e);
+        }
+    }
+    /**
+     * Move the stage in X,Y only.  Z will not be touched.
+     *
+     * @param x target X in microns
+     * @param y target Y in microns
+     */
+    public void moveStageXY(double x, double y) {
         try {
             CliExecutor.ExecResult res = CliExecutor.execComplexCommand(
-                    10,           // timeout in seconds
-                    null,         // no progress regex
-                    args.toArray(new String[0])
+                    10,       // timeout in seconds
+                    null,     // no progress regex
+                    CMD_MOVE_STAGE_XY,
+                    Double.toString(x),
+                    Double.toString(y)
             );
             if (res.timedOut()) {
                 UIFunctions.notifyUserOfError(
-                        "Microscope command timed out.\n" + res.stderr(),
-                        "Stage Move");
+                        "Move‐XY command timed out:\n" + res.stderr(),
+                        "Stage Move XY");
             } else if (res.exitCode() != 0) {
                 UIFunctions.notifyUserOfError(
-                        "Microscope CLI returned exit code " + res.exitCode() + "\n" + res.stderr(),
-                        "Stage Move");
+                        "Move‐XY returned exit code " + res.exitCode() + "\n" + res.stderr(),
+                        "Stage Move XY");
             }
         } catch (IOException | InterruptedException e) {
             UIFunctions.notifyUserOfError(
-                    "Failed to run stage‐move command:\n" + e.getMessage(),
-                    "Stage Move");
+                    "Failed to run Move‐XY:\n" + e.getMessage(),
+                    "Stage Move XY");
         }
     }
 
+    /**
+     * Move the stage in Z only.  X,Y will not be touched.
+     *
+     * @param z target Z in microns
+     */
+    public void moveStageZ(double z) {
+        try {
+            CliExecutor.ExecResult res = CliExecutor.execComplexCommand(
+                    10,       // timeout in seconds
+                    null,     // no progress regex
+                    CMD_MOVE_STAGE_Z,
+                    Double.toString(z)
+            );
+            if (res.timedOut()) {
+                UIFunctions.notifyUserOfError(
+                        "Move‐Z command timed out:\n" + res.stderr(),
+                        "Stage Move Z");
+            } else if (res.exitCode() != 0) {
+                UIFunctions.notifyUserOfError(
+                        "Move‐Z returned exit code " + res.exitCode() + "\n" + res.stderr(),
+                        "Stage Move Z");
+            }
+        } catch (IOException | InterruptedException e) {
+            UIFunctions.notifyUserOfError(
+                    "Failed to run Move‐Z:\n" + e.getMessage(),
+                    "Stage Move Z");
+        }
+    }
+
+    /**
+     * Rotate the polarizer to the given angle p.
+     * @param p The target polarizer coordinate.
+     */
+    public void moveStageP(double p) {
+        try {
+            var res = CliExecutor.execComplexCommand(
+                    3, null,
+                    CMD_MOVE_STAGE_P,
+                    Double.toString(p)
+            );
+            if (res.timedOut()) {
+                UIFunctions.notifyUserOfError(
+                        "Move-P command timed out:\n" + res.stderr(),
+                        "Polarizer Move");
+            } else if (res.exitCode() != 0) {
+                UIFunctions.notifyUserOfError(
+                        "Move-P returned exit code " + res.exitCode() + "\n" + res.stderr(),
+                        "Polarizer Move");
+            }
+        } catch (Exception e) {
+            UIFunctions.notifyUserOfError(
+                    "Failed to run Move-P:\n" + e.getMessage(),
+                    "Polarizer Move");
+        }
+    }
 //    /**
 //     * Move the stage to the given coordinates via the CLI.
 //     *TODO MAYBE include a Z coordinate?
@@ -245,7 +311,7 @@ public class MicroscopeController {
 
         // 3) actually move hardware
         try {
-            moveStageTo(adjusted[0], adjusted[1]);
+            moveStageXY(adjusted[0], adjusted[1]);
             // maybe pop a confirmation dialog here
         } catch (Exception e) {
             UIFunctions.notifyUserOfError(
@@ -308,7 +374,7 @@ public class MicroscopeController {
                         "Here is where the Existing-image workflow will run."));
     }
 
-    public boolean isWithinBounds(double x, double y) {
+    public boolean isWithinBoundsXY(double x, double y) {
         var xlimits = MicroscopeConfigManager.getInstance().getSection("stage", "xlimit");
         var ylimits = MicroscopeConfigManager.getInstance().getSection("stage", "ylimit");
 

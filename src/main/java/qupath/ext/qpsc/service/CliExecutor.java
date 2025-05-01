@@ -29,7 +29,6 @@ public class CliExecutor {
     public static int execCommandExitCode(String... args)
             throws IOException, InterruptedException {
         List<String> cmd = new ArrayList<>();
-        cmd.add(QPPreferenceDialog.getRunCommandProperty());
         cmd.addAll(Arrays.asList(args));
         Process p = new ProcessBuilder(cmd).inheritIO().start();
         return p.waitFor();
@@ -41,7 +40,7 @@ public class CliExecutor {
      * @param timeoutSec  Number of seconds to wait before forcibly killing.
      *                    Use 0 for wait forever.
      * @param args        All arguments that go **after** your run-command
-     *                    (e.g. getStagePositionForQuPath).
+
      * @return The full stdout (trimmed) if exit==0.
      * @throws IOException          on I/O error or non-zero exit.
      * @throws InterruptedException if the waiter is interrupted.
@@ -51,7 +50,7 @@ public class CliExecutor {
 
         // 1) Build the full command
         List<String> cmd = new ArrayList<>();
-        cmd.add(QPPreferenceDialog.getRunCommandProperty());  // e.g. "smartpath"
+
         cmd.addAll(Arrays.asList(args));
 
         // 2) Start the process
@@ -101,7 +100,6 @@ public class CliExecutor {
         // 0) Build full command
         //------------------------------------------------------------
         List<String> cmd = new ArrayList<>();
-        cmd.add(QPPreferenceDialog.getRunCommandProperty());   // e.g. smartpath
         cmd.addAll(List.of(args));
 
         //------------------------------------------------------------

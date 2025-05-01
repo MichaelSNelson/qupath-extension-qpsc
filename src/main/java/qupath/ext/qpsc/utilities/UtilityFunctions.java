@@ -115,14 +115,13 @@ public class UtilityFunctions {
     /**
      * Execute the microscope CLI with the given arguments and return the exit code.
      *
-     * @param args everything that should come *after* the run-command stored in
-     *             {@link QPPreferenceDialog#getRunCommandProperty()}.
+     * @param args everything
      * @return the exit-code returned by the process (0 = success)
      */
     public static int execCommand(String... args) throws IOException, InterruptedException {
 
             List<String> cmd = new ArrayList<>();
-            cmd.add(QPPreferenceDialog.getRunCommandProperty());   // e.g. "smartpath"
+
             cmd.addAll(List.of(args));
 
             ProcessBuilder pb = new ProcessBuilder(cmd);

@@ -29,9 +29,6 @@ public class QPPreferenceDialog {
     private static final BooleanProperty invertedYProperty =
             PathPrefs.createPersistentPreference("isInvertedYProperty", true);
 
-    private static final StringProperty runCommandProperty =
-            PathPrefs.createPersistentPreference("runCommandName", "smartpath");
-
     private static final StringProperty microscopeConfigFileProperty =
             PathPrefs.createPersistentPreference(
                     "microscopeConfigFileProperty",
@@ -91,12 +88,6 @@ public class QPPreferenceDialog {
                 .name("Inverted Y stage")
                 .category(CATEGORY)
                 .description("Stage Y axis is inverted relative to QuPath.")
-                .build());
-
-        items.add(new PropertyItemBuilder<>(runCommandProperty, String.class)
-                .name("Command line call")
-                .category(CATEGORY)
-                .description("Command for microscope control, e.g. 'smartpath getStageCoordinates' or 'smartpath moveToCoordinates'.")
                 .build());
 
         items.add(new PropertyItemBuilder<>(microscopeConfigFileProperty, String.class)
@@ -161,9 +152,7 @@ public class QPPreferenceDialog {
     public static boolean getInvertedYProperty() {
         return invertedYProperty.get();
     }
-    public static String getRunCommandProperty() {
-        return runCommandProperty.get();
-    }
+
     public static String getMicroscopeConfigFileProperty() {
         return microscopeConfigFileProperty.get();
     }
