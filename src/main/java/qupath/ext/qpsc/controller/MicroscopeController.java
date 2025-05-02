@@ -180,10 +180,12 @@ public class MicroscopeController {
      * Query the current polarizer (P) position from the stage.
      * @return The P coordinate (degrees or whatever units your CLI returns).
      */
-    public double getStagePositionP() throws IOException, InterruptedException {
+    public double getStagePositionR() throws IOException, InterruptedException {
         String out = CliExecutor.execCommandAndGetOutput(5, CMD_GET_STAGE_P);
         try {
-            return Double.parseDouble(out.trim());
+            // Strip parentheses and commas, then split on whitespace
+            String cleaned = out.replaceAll("[(),]", "").trim();
+             return Double.parseDouble(cleaned);
         } catch (NumberFormatException e) {
             throw new IOException("Unexpected output for P position: " + out, e);
         }
@@ -253,15 +255,15 @@ public class MicroscopeController {
 
     /**
      * Rotate the polarizer to the given angle p.
-     * @param p The target polarizer coordinate.
+     * @param r The target polarizer coordinate.
      */
-    public void moveStageP(double p) {
+    public void moveStageR(double r) {
         try {
             var res = CliExecutor.execComplexCommand(
                     3, null,
                     CMD_MOVE_STAGE_P,
                     "-angle",
-                    Double.toString(p)
+                    Double.toString(r)
             );
             if (res.timedOut()) {
                 UIFunctions.notifyUserOfError(
@@ -409,5 +411,23 @@ public class MicroscopeController {
 
         return withinX && withinY;
     }
+    public boolean isWithinBoundsZ(double z) {
+        var zlimits = MicroscopeConfigManager.getInstance().getSection("stage", "zlimit");
+
+        if (zlimits == null ) {
+            logger.error("Stage limits missing from config");
+            return false;
+        }
+
+        double zLow = ((Number)zlimits.get("low")).doubleValue();
+        double zHigh = ((Number)zlimits.get("high")).doubleValue();
+
+
+        boolean withinZ = (z >= Math.min(zLow, zHigh) && z <= Math.max(zLow, zHigh));
+
+
+        return withinZ ;
+    }
+
 }
 
