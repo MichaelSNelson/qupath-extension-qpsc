@@ -61,10 +61,10 @@ public class CliExecutor {
 
 
         // 2) Start the process
-        //ProcessBuilder pb = new ProcessBuilder(cmd);
+        ProcessBuilder pb = new ProcessBuilder(cmd);
         logger.info("→ Running external command: {}", String.join(" ", cmd));
 
-        ProcessBuilder pb = new ProcessBuilder("cmd.exe", "/c", "get_stageXY");
+        //ProcessBuilder pb = new ProcessBuilder("cmd.exe", "/c", "get_stageXY");
         Process p = pb.start();
 
         // 3) Wait with timeout
