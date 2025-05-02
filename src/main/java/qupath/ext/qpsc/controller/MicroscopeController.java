@@ -139,7 +139,7 @@ public class MicroscopeController {
      * @throws InterruptedException if the process is interrupted
      */
     public double[] getStagePositionXY() throws IOException, InterruptedException {
-        String out = CliExecutor.execCommandAndGetOutput(20, CMD_GET_STAGE_XY);
+        String out = CliExecutor.execCommandAndGetOutput(10, CMD_GET_STAGE_XY);
         logger.info("getStagePositionXY raw output: {}", out);
 
         // Strip parentheses and commas, then split on whitespace
@@ -169,7 +169,7 @@ public class MicroscopeController {
      * @throws InterruptedException if the process is interrupted
      */
     public double getStagePositionZ() throws IOException, InterruptedException {
-        String out = CliExecutor.execCommandAndGetOutput(5, CMD_GET_STAGE_Z);
+        String out = CliExecutor.execCommandAndGetOutput(10, CMD_GET_STAGE_Z);
         try {
             return Double.parseDouble(out.trim());
         } catch (NumberFormatException e) {
@@ -181,7 +181,7 @@ public class MicroscopeController {
      * @return The P coordinate (degrees or whatever units your CLI returns).
      */
     public double getStagePositionR() throws IOException, InterruptedException {
-        String out = CliExecutor.execCommandAndGetOutput(5, CMD_GET_STAGE_P);
+        String out = CliExecutor.execCommandAndGetOutput(10, CMD_GET_STAGE_P);
         try {
             // Strip parentheses and commas, then split on whitespace
             String cleaned = out.replaceAll("[(),]", "").trim();
@@ -224,7 +224,7 @@ public class MicroscopeController {
     }
 
     /**
-     * Move the stage in Z only.  X,Y will not be touched.
+     * Move the stage in Z only.
      *
      * @param z target Z in microns
      */
