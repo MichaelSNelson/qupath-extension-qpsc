@@ -11,7 +11,10 @@ import javafx.scene.layout.VBox;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
 import javafx.util.StringConverter;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import qupath.ext.qpsc.controller.MicroscopeController;
+import qupath.ext.qpsc.controller.QPScopeController;
 import qupath.fx.dialogs.Dialogs;
 import javafx.geometry.Insets;
 import java.io.IOException;
@@ -21,7 +24,8 @@ import java.util.concurrent.CompletableFuture;
 public class InterfaceController extends VBox {
 
     private static final ResourceBundle resources = ResourceBundle.getBundle("qupath.ext.qpsc.ui.strings");
-
+    private static final Logger logger =
+            LoggerFactory.getLogger(InterfaceController.class);
     @FXML
     private TextField sampleNameField;
 
@@ -162,9 +166,17 @@ public class InterfaceController extends VBox {
             } catch (Exception e) {
                 // leave blank on error
             }
-
+            //get an initial value of r
+            double r = 0;
+            try {
+                r = MicroscopeController.getInstance().getStagePositionR();
+                logger.info("initial rotational stage position:" + r);
+            } catch (Exception e) {
+                // leave blank on error
+            }
             // --- Spinner for polarizer angle 0–179, wraps, as before ---
-            Spinner<Integer> angleSpinner = new Spinner<>(0, 179, 0, 1);
+            Spinner<Integer> angleSpinner = new Spinner<>(0, 179, r, 1);
+
             angleSpinner.setEditable(true);
             angleSpinner.getEditor().setTextFormatter(new TextFormatter<Integer>(
                     new StringConverter<>() {
@@ -176,14 +188,7 @@ public class InterfaceController extends VBox {
                     }
             ));
             Label currentAngleLabel = new Label();
-            try {
-                double p = MicroscopeController.getInstance().getStagePositionR();
-                angleSpinner.getValueFactory().setValue((int) Math.round(p / 2.0));
-                currentAngleLabel.setText(
-                        res.getString("testDialog.label.currentAngle") + ": " + String.format("%.1f°", p));
-            } catch (Exception e) {
-                currentAngleLabel.setText(res.getString("testDialog.label.currentAngle") + ": ?");
-            }
+
             angleSpinner.valueProperty().addListener((obs, o, n) -> {
                 int realAngle = ((n % 180) + 180) % 180 * 2;
                 try {
