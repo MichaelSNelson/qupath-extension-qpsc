@@ -1,6 +1,7 @@
 package qupath.ext.qpsc.ui;
 
 import javafx.application.Platform;
+import javafx.event.ActionEvent;
 import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Scene;
@@ -199,7 +200,8 @@ public class InterfaceController extends VBox {
             Button moveBtn = (Button) dialog.getDialogPane().lookupButton(moveXY);
             Button getBtn  = (Button) dialog.getDialogPane().lookupButton(getXY);
 
-            moveBtn.setOnAction(e -> {
+            moveBtn.addEventFilter(ActionEvent.ACTION, event -> {
+                event.consume();
                 try {
                     double x = Double.parseDouble(xField.getText());
                     double y = Double.parseDouble(yField.getText());
@@ -217,13 +219,18 @@ public class InterfaceController extends VBox {
                 }
             });
 
-            getBtn.setOnAction(e -> {
+
+            getBtn.addEventFilter(ActionEvent.ACTION, event -> {
+                event.consume();   // ← prevent dialog from closing
+
                 try {
                     double[] xy = MicroscopeController.getInstance().getStagePositionXY();
                     xField.setText(String.format("%.2f", xy[0]));
                     yField.setText(String.format("%.2f", xy[1]));
+                    statusLabel.setText(res.getString("testDialog.status.gotCoords"));
                 } catch (Exception ex) {
-                    UIFunctions.notifyUserOfError(ex.getMessage(),
+                    UIFunctions.notifyUserOfError(
+                            ex.getMessage(),
                             res.getString("testDialog.title"));
                 }
             });
