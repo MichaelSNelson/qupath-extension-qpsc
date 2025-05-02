@@ -151,6 +151,7 @@ public class MicroscopeController {
         }
 
         try {
+            logger.info("XY coordinates: "+parts[0]+"  "+ parts[1]);
             return new double[]{
                     Double.parseDouble(parts[0]),
                     Double.parseDouble(parts[1])
@@ -171,7 +172,9 @@ public class MicroscopeController {
     public double getStagePositionZ() throws IOException, InterruptedException {
         String out = CliExecutor.execCommandAndGetOutput(10, CMD_GET_STAGE_Z);
         try {
-            return Double.parseDouble(out.trim());
+            String z = out.trim();
+             logger.info("Z stage position um:" + z);
+            return Double.parseDouble(z);
         } catch (NumberFormatException e) {
             throw new IOException("Unexpected output for Z position: " + out, e);
         }
@@ -185,6 +188,7 @@ public class MicroscopeController {
         try {
             // Strip parentheses and commas, then split on whitespace
             String cleaned = out.replaceAll("[(),]", "").trim();
+            logger.info("Rotational stage angle" + cleaned);
              return Double.parseDouble(cleaned);
         } catch (NumberFormatException e) {
             throw new IOException("Unexpected output for P position: " + out, e);
