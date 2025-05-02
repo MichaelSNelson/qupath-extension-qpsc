@@ -139,16 +139,26 @@ public class MicroscopeController {
      * @throws InterruptedException if the process is interrupted
      */
     public double[] getStagePositionXY() throws IOException, InterruptedException {
-
         String out = CliExecutor.execCommandAndGetOutput(20, CMD_GET_STAGE_XY);
-        String[] parts = out.trim().split("\\s+");
+        logger.info("getStagePositionXY raw output: {}", out);
 
-        if (parts.length < 2)
+        // Strip parentheses and commas, then split on whitespace
+        String cleaned = out.replaceAll("[(),]", "").trim();
+        String[] parts = cleaned.split("\\s+");
+        if (parts.length < 2) {
+            logger.error("Unexpected output format for XY position: “{}”", out);
             throw new IOException("Unexpected output for XY position: " + out);
-        return new double[]{
-                Double.parseDouble(parts[0]),
-                Double.parseDouble(parts[1])
-        };
+        }
+
+        try {
+            return new double[]{
+                    Double.parseDouble(parts[0]),
+                    Double.parseDouble(parts[1])
+            };
+        } catch (NumberFormatException e) {
+            logger.error("Failed to parse stage position numbers from “{}”", out, e);
+            throw new IOException("Cannot parse stage position: " + out, e);
+        }
     }
 
     /**

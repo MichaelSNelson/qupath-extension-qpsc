@@ -43,65 +43,64 @@ public class CliExecutor {
         Process p = new ProcessBuilder(cmd).inheritIO().start();
         return p.waitFor();
     }
-    /**
-     * Run the microscope CLI with a timeout, capture its stdout, and
-     * throw if it fails or times out.
-     *
-     * @param timeoutSec  Number of seconds to wait before forcibly killing.
-     *                    Use 0 for wait forever.
-     * @param args        All arguments that go **after** your run-command
 
-     * @return The full stdout (trimmed) if exit==0.
-     * @throws IOException          on I/O error or non-zero exit.
-     * @throws InterruptedException if the waiter is interrupted.
+    /**
+     * Execute a CLI command (resolved against the user’s configured CLI folder),
+     * wait up to the specified timeout, capture its standard output, and return it.
+     *
+     * <p>The first element of {@code args} is treated as the executable name
+     * (without “.exe”), which is looked up in the folder returned by
+     * {@link QPPreferenceDialog#getCliFolder()}.
+     * Any remaining elements of {@code args} are passed as command-line arguments.</p>
+     *
+     * @param timeoutSec Number of seconds to wait before forcibly killing the process;
+     *                   zero means wait indefinitely.
+     * @param args       Command name (first element, no extension) followed by any arguments to pass.
+     * @return the trimmed stdout of the process.
+     * @throws IOException          if an I/O error occurs, the process exits non-zero,
+     *                              or the process times out.
+     * @throws InterruptedException if the current thread is interrupted while waiting.
      */
     public static String execCommandAndGetOutput(int timeoutSec, String... args)
             throws IOException, InterruptedException {
 
-        // 1) Build the full command
-        List<String> cmd = new ArrayList<>();
-        // 1) take the executable name as args[0]
+        // 1) Resolve executable path
         String exeName = args[0] + (MinorFunctions.isWindows() ? ".exe" : "");
-        // 2) build its absolute path via the user‐set folder
         String cliFolder = QPPreferenceDialog.getCliFolder();
         Path exePath = Paths.get(cliFolder, exeName);
+
+        // 2) Build command list
+        List<String> cmd = new ArrayList<>();
         cmd.add(exePath.toString());
-
-        // 3) then the remaining arguments:
-        cmd.addAll(Arrays.asList(Arrays.copyOfRange(args, 1, args.length)));
-
-        // 4) log exactly what we’re about to run
-        logger.info("→ Running external command: {}  (resolved via {})",
-                cmd, cliFolder);
-
-    // 5) kick off the process
-
-        ProcessBuilder pb = new ProcessBuilder(cmd);
-        logger.info("→ Running external command: {}", String.join(" ", cmd));
-
-        //ProcessBuilder pb = new ProcessBuilder("cmd.exe", "/c", "get_stageXY");
-        Process p = pb.start();
-
-        // 3) Wait with timeout
-        boolean finished;
-        if (timeoutSec > 0) {
-            finished = p.waitFor(timeoutSec, TimeUnit.SECONDS);
-            if (!finished) {
-                p.destroyForcibly();
-                throw new IOException("Command timed out after " + timeoutSec + " s");
-            }
-        } else {
-            p.waitFor();
+        if (args.length > 1) {
+            cmd.addAll(Arrays.asList(args).subList(1, args.length));
         }
 
-        // 4) Read stdout and stderr
-        String stdout = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-        String stderr = new String(p.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
+        // 3) Log exactly what we’re about to run
+        logger.info("→ Running external command: {}  (resolved via {})", cmd, cliFolder);
 
-        // 5) Check exit code
-        int exit = p.exitValue();
-        if (exit != 0) {
-            throw new IOException("Command " + cmd + " failed (exit " + exit + "):\n" + stderr.trim());
+        // 4) Start the process
+        ProcessBuilder pb = new ProcessBuilder(cmd);
+        Process process = pb.start();
+
+        // 5) Wait for completion or timeout
+        if (timeoutSec > 0) {
+            if (!process.waitFor(timeoutSec, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                throw new IOException("Command timed out after " + timeoutSec + " seconds");
+            }
+        } else {
+            process.waitFor();
+        }
+
+        // 6) Capture stdout and stderr
+        String stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        String stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
+
+        // 7) Check exit code
+        int exitCode = process.exitValue();
+        if (exitCode != 0) {
+            throw new IOException("Command " + cmd + " failed (exit " + exitCode + "):\n" + stderr.trim());
         }
 
         return stdout.trim();
@@ -124,8 +123,17 @@ public class CliExecutor {
         //------------------------------------------------------------
         // 0) Build full command
         //------------------------------------------------------------
+        String exeName = args[0] + (MinorFunctions.isWindows() ? ".exe" : "");
+        String cliFolder = QPPreferenceDialog.getCliFolder();
+        Path exePath = Paths.get(cliFolder, exeName);
+
         List<String> cmd = new ArrayList<>();
-        cmd.addAll(List.of(args));
+        cmd.add(exePath.toString());
+        if (args.length > 1) {
+            cmd.addAll(Arrays.asList(args).subList(1, args.length));
+        }
+
+        logger.info("→ Running external command: {}  (resolved via {})", cmd, cliFolder);
 
         //------------------------------------------------------------
         // 1) Launch
