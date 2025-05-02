@@ -56,7 +56,10 @@ public class CliExecutor {
 
         // 1) Build the full command
         List<String> cmd = new ArrayList<>();
-
+        if (System.getProperty("os.name").toLowerCase().contains("win")) {
+            cmd.add("cmd");
+            cmd.add("/c");
+        }
         cmd.addAll(Arrays.asList(args));
 
 
