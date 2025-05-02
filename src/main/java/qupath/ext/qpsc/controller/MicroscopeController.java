@@ -155,7 +155,7 @@ public class MicroscopeController {
      * Query the microscope for its current Z stage position.
      *
      * @return the Z coordinate in microns
-     * @throws IOException if the CLI returns non‐zero or unparsable output
+     * @throws IOException if the CLI returns non zero or unparsable output
      * @throws InterruptedException if the process is interrupted
      */
     public double getStagePositionZ() throws IOException, InterruptedException {

@@ -11,7 +11,9 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
-import java.util.logging.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.regex.Pattern;
 
 import qupath.ext.qpsc.controller.QPScopeController;
@@ -21,7 +23,7 @@ import qupath.ext.qpsc.utilities.MinorFunctions;
 
 
 public class CliExecutor {
-    private static final Logger logger = Logger.getLogger(CliExecutor.class.getName());
+    private static final Logger logger = LoggerFactory.getLogger(CliExecutor.class.getName());
     /** Result of a CLI call. */
     public record ExecResult(
             int            exitCode,
@@ -57,11 +59,11 @@ public class CliExecutor {
 
         cmd.addAll(Arrays.asList(args));
 
-        logger.info(cmd.get(0));
-
 
         // 2) Start the process
         //ProcessBuilder pb = new ProcessBuilder(cmd);
+        logger.info("→ Running external command: {}", String.join(" ", cmd));
+
         ProcessBuilder pb = new ProcessBuilder("cmd.exe", "/c", "get_stageXY");
         Process p = pb.start();
 
