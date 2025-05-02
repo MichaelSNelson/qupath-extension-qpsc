@@ -5,6 +5,8 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -13,13 +15,15 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
+import java.io.*;
 import java.util.regex.Pattern;
 
-import qupath.ext.qpsc.controller.QPScopeController;
+import qupath.ext.qpsc.utilities.MinorFunctions;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.ui.UIFunctions;
 import qupath.ext.qpsc.utilities.MinorFunctions;
+
+
 
 
 public class CliExecutor {
@@ -56,14 +60,22 @@ public class CliExecutor {
 
         // 1) Build the full command
         List<String> cmd = new ArrayList<>();
-        if (System.getProperty("os.name").toLowerCase().contains("win")) {
-            cmd.add("cmd");
-            cmd.add("/c");
-        }
-        cmd.addAll(Arrays.asList(args));
+        // 1) take the executable name as args[0]
+        String exeName = args[0] + (MinorFunctions.isWindows() ? ".exe" : "");
+        // 2) build its absolute path via the user‐set folder
+        String cliFolder = QPPreferenceDialog.getCliFolder();
+        Path exePath = Paths.get(cliFolder, exeName);
+        cmd.add(exePath.toString());
 
+        // 3) then the remaining arguments:
+        cmd.addAll(Arrays.asList(Arrays.copyOfRange(args, 1, args.length)));
 
-        // 2) Start the process
+        // 4) log exactly what we’re about to run
+        logger.info("→ Running external command: {}  (resolved via {})",
+                cmd, cliFolder);
+
+    // 5) kick off the process
+
         ProcessBuilder pb = new ProcessBuilder(cmd);
         logger.info("→ Running external command: {}", String.join(" ", cmd));
 

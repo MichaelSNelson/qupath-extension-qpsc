@@ -43,7 +43,13 @@ public class MinorFunctions {
         return out;
     }
 
-
+    /**
+     * @return true if running on Windows, false otherwise
+     */
+    public static boolean isWindows() {
+        String os = System.getProperty("os.name");
+        return os != null && os.toLowerCase().contains("win");
+    }
     /**
      * Reads a JSON file via Gson into a nested Map.
      * @throws IOException if file access fails
