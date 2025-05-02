@@ -139,8 +139,10 @@ public class MicroscopeController {
      * @throws InterruptedException if the process is interrupted
      */
     public double[] getStagePositionXY() throws IOException, InterruptedException {
-        String out = CliExecutor.execCommandAndGetOutput(5, CMD_GET_STAGE_XY);
+
+        String out = CliExecutor.execCommandAndGetOutput(20, CMD_GET_STAGE_XY);
         String[] parts = out.trim().split("\\s+");
+
         if (parts.length < 2)
             throw new IOException("Unexpected output for XY position: " + out);
         return new double[]{
