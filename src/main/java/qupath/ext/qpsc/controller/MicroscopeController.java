@@ -25,7 +25,6 @@ import static qupath.ext.qpsc.utilities.MinorFunctions.getCurrentOffset;
 
 public class MicroscopeController {
 
-    private final String smartpathCmd = "smartpath";  // or read from prefs
     private static final Logger logger =
             LoggerFactory.getLogger(QPScopeController.class);
     private static MicroscopeController instance;

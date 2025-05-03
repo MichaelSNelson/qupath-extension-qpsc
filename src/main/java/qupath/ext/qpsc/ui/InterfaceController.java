@@ -11,7 +11,10 @@ import javafx.scene.layout.VBox;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
 import javafx.util.StringConverter;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import qupath.ext.qpsc.controller.MicroscopeController;
+import qupath.ext.qpsc.controller.QPScopeController;
 import qupath.fx.dialogs.Dialogs;
 import javafx.geometry.Insets;
 import java.io.IOException;
@@ -21,7 +24,8 @@ import java.util.concurrent.CompletableFuture;
 public class InterfaceController extends VBox {
 
     private static final ResourceBundle resources = ResourceBundle.getBundle("qupath.ext.qpsc.ui.strings");
-
+    private static final Logger logger =
+            LoggerFactory.getLogger(InterfaceController.class);
     @FXML
     private TextField sampleNameField;
 
@@ -135,118 +139,6 @@ public class InterfaceController extends VBox {
         }
     }
 
-    public static void showTestStageMovementDialog() {
-        Platform.runLater(() -> {
-            var res = ResourceBundle.getBundle("qupath.ext.qpsc.ui.strings");
-            Dialog<Void> dlg = new Dialog<>();
-            dlg.setTitle(res.getString("testDialog.title"));
-            dlg.setHeaderText(res.getString("testDialog.header"));
-
-            // Fields and status labels
-            TextField xField = new TextField();
-            TextField yField = new TextField();
-            Label xyStatus = new Label();
-
-            TextField zField = new TextField();
-            Label zStatus = new Label();
-
-            TextField rField = new TextField();
-            Label rStatus = new Label();
-
-            // --- Initialize from hardware ---
-            try {
-                double[] xy = MicroscopeController.getInstance().getStagePositionXY();
-                xField.setText(String.format("%.2f", xy[0]));
-                yField.setText(String.format("%.2f", xy[1]));
-            } catch (Exception e) {
-                // leave blank on error
-            }
-            try {
-                double z = MicroscopeController.getInstance().getStagePositionZ();
-                zField.setText(String.format("%.2f", z));
-            } catch (Exception e) { }
-            try {
-                double r = MicroscopeController.getInstance().getStagePositionR();
-                rField.setText(String.format("%.2f", r));
-            } catch (Exception e) { }
-
-            // --- Buttons ---
-            ButtonType moveXYType = new ButtonType(
-                    res.getString("testDialog.button.moveXY"), ButtonBar.ButtonData.APPLY);
-            ButtonType moveZType  = new ButtonType(
-                    res.getString("testDialog.button.moveZ"), ButtonBar.ButtonData.APPLY);
-            ButtonType moveRType  = new ButtonType(
-                    res.getString("testDialog.button.moveR"), ButtonBar.ButtonData.APPLY);
-            dlg.getDialogPane().getButtonTypes().addAll(
-                    moveXYType, moveZType, moveRType, ButtonType.CLOSE);
-
-            Button moveXYBtn = (Button) dlg.getDialogPane().lookupButton(moveXYType);
-            Button moveZBtn  = (Button) dlg.getDialogPane().lookupButton(moveZType);
-            Button moveRBtn  = (Button) dlg.getDialogPane().lookupButton(moveRType);
-
-            moveXYBtn.setOnAction(e -> {
-                try {
-                    double x = Double.parseDouble(xField.getText());
-                    double y = Double.parseDouble(yField.getText());
-                    MicroscopeController.getInstance().moveStageXY(x, y);
-                    xyStatus.setText(String.format(
-                            res.getString("testDialog.status.xyMoved"), x, y));
-                } catch (Exception ex) {
-                    UIFunctions.notifyUserOfError(
-                            ex.getMessage(), res.getString("testDialog.title"));
-                }
-            });
-
-            moveZBtn.setOnAction(e -> {
-                try {
-                    double z = Double.parseDouble(zField.getText());
-                    MicroscopeController.getInstance().moveStageZ(z);
-                    zStatus.setText(String.format(
-                            res.getString("testDialog.status.zMoved"), z));
-                } catch (Exception ex) {
-                    UIFunctions.notifyUserOfError(
-                            ex.getMessage(), res.getString("testDialog.title"));
-                }
-            });
-
-            moveRBtn.setOnAction(e -> {
-                try {
-                    double r = Double.parseDouble(rField.getText());
-                    MicroscopeController.getInstance().moveStageR(r);
-                    rStatus.setText(String.format(
-                            res.getString("testDialog.status.rMoved"), r));
-                } catch (Exception ex) {
-                    UIFunctions.notifyUserOfError(
-                            ex.getMessage(), res.getString("testDialog.title"));
-                }
-            });
-
-            // --- Layout ---
-            GridPane grid = new GridPane();
-            grid.setHgap(10);
-            grid.setVgap(8);
-            grid.setPadding(new Insets(20));
-
-            grid.add(new Label(res.getString("testDialog.label.x")), 0, 0);
-            grid.add(xField, 1, 0);
-            grid.add(moveXYBtn, 2, 0);
-            grid.add(xyStatus, 1, 1, 2, 1);
-
-            grid.add(new Label(res.getString("testDialog.label.z")), 0, 2);
-            grid.add(zField, 1, 2);
-            grid.add(moveZBtn, 2, 2);
-            grid.add(zStatus, 1, 3, 2, 1);
-
-            grid.add(new Label(res.getString("testDialog.label.r")), 0, 4);
-            grid.add(rField, 1, 4);
-            grid.add(moveRBtn, 2, 4);
-            grid.add(rStatus, 1, 5, 2, 1);
-
-            dlg.getDialogPane().setContent(grid);
-            dlg.initModality(Modality.NONE);
-            dlg.show();
-        });
-    }
 
 
 }
