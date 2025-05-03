@@ -138,17 +138,22 @@ public class InterfaceController extends VBox {
     public static void showTestStageMovementDialog() {
         Platform.runLater(() -> {
             var res = ResourceBundle.getBundle("qupath.ext.qpsc.ui.strings");
-            Dialog<Void> dialog = new Dialog<>();
-            dialog.setTitle(res.getString("testDialog.title"));
-            dialog.setHeaderText(res.getString("testDialog.header"));
+            Dialog<Void> dlg = new Dialog<>();
+            dlg.setTitle(res.getString("testDialog.title"));
+            dlg.setHeaderText(res.getString("testDialog.header"));
 
-            // --- X, Y, Z fields + a single status label ---
+            // Fields and status labels
             TextField xField = new TextField();
             TextField yField = new TextField();
-            TextField zField = new TextField();
-            Label statusLabel = new Label();
+            Label xyStatus = new Label();
 
-            // Pre-fill X/Y/Z from hardware
+            TextField zField = new TextField();
+            Label zStatus = new Label();
+
+            TextField rField = new TextField();
+            Label rStatus = new Label();
+
+            // --- Initialize from hardware ---
             try {
                 double[] xy = MicroscopeController.getInstance().getStagePositionXY();
                 xField.setText(String.format("%.2f", xy[0]));
@@ -159,122 +164,89 @@ public class InterfaceController extends VBox {
             try {
                 double z = MicroscopeController.getInstance().getStagePositionZ();
                 zField.setText(String.format("%.2f", z));
-            } catch (Exception e) {
-                // leave blank on error
-            }
-
-            // --- Spinner for polarizer angle 0–179, wraps, as before ---
-            Spinner<Integer> angleSpinner = new Spinner<>(0, 179, 0, 1);
-            angleSpinner.setEditable(true);
-            angleSpinner.getEditor().setTextFormatter(new TextFormatter<Integer>(
-                    new StringConverter<>() {
-                        @Override public String toString(Integer i)        { return i == null ? "" : i.toString(); }
-                        @Override public Integer fromString(String s)       {
-                            try { return Integer.parseInt(s); }
-                            catch (NumberFormatException e) { return angleSpinner.getValue(); }
-                        }
-                    }
-            ));
-            Label currentAngleLabel = new Label();
+            } catch (Exception e) { }
             try {
-                double p = MicroscopeController.getInstance().getStagePositionR();
-                angleSpinner.getValueFactory().setValue((int) Math.round(p / 2.0));
-                currentAngleLabel.setText(
-                        res.getString("testDialog.label.currentAngle") + ": " + String.format("%.1f°", p));
-            } catch (Exception e) {
-                currentAngleLabel.setText(res.getString("testDialog.label.currentAngle") + ": ?");
-            }
-            angleSpinner.valueProperty().addListener((obs, o, n) -> {
-                int realAngle = ((n % 180) + 180) % 180 * 2;
-                try {
-                    MicroscopeController.getInstance().moveStageR(realAngle);
-                    double actual = MicroscopeController.getInstance().getStagePositionR();
-                    currentAngleLabel.setText(
-                            res.getString("testDialog.label.currentAngle") + ": " + String.format("%.1f°", actual));
-                } catch (Exception ex) {
-                    UIFunctions.notifyUserOfError(ex.getMessage(), res.getString("testDialog.title"));
-                }
-            });
+                double r = MicroscopeController.getInstance().getStagePositionR();
+                rField.setText(String.format("%.2f", r));
+            } catch (Exception e) { }
 
-            // --- Buttons: Move XY, Get XY, Move Z, Close ---
-            ButtonType moveXY  = new ButtonType(res.getString("testDialog.button.moveXY"),  ButtonBar.ButtonData.APPLY);
-            ButtonType getXY   = new ButtonType(res.getString("testDialog.button.getCoords"), ButtonBar.ButtonData.OTHER);
-            ButtonType moveZ   = new ButtonType(res.getString("testDialog.button.moveZ"),   ButtonBar.ButtonData.APPLY);
-            dialog.getDialogPane().getButtonTypes().addAll(moveXY, getXY, moveZ, ButtonType.CLOSE);
+            // --- Buttons ---
+            ButtonType moveXYType = new ButtonType(
+                    res.getString("testDialog.button.moveXY"), ButtonBar.ButtonData.APPLY);
+            ButtonType moveZType  = new ButtonType(
+                    res.getString("testDialog.button.moveZ"), ButtonBar.ButtonData.APPLY);
+            ButtonType moveRType  = new ButtonType(
+                    res.getString("testDialog.button.moveR"), ButtonBar.ButtonData.APPLY);
+            dlg.getDialogPane().getButtonTypes().addAll(
+                    moveXYType, moveZType, moveRType, ButtonType.CLOSE);
 
-            var btnMoveXY = (Button) dialog.getDialogPane().lookupButton(moveXY);
-            var btnGetXY  = (Button) dialog.getDialogPane().lookupButton(getXY);
-            var btnMoveZ  = (Button) dialog.getDialogPane().lookupButton(moveZ);
+            Button moveXYBtn = (Button) dlg.getDialogPane().lookupButton(moveXYType);
+            Button moveZBtn  = (Button) dlg.getDialogPane().lookupButton(moveZType);
+            Button moveRBtn  = (Button) dlg.getDialogPane().lookupButton(moveRType);
 
-            // Move XY
-            btnMoveXY.addEventFilter(ActionEvent.ACTION, ev -> {
-                ev.consume();
+            moveXYBtn.setOnAction(e -> {
                 try {
                     double x = Double.parseDouble(xField.getText());
                     double y = Double.parseDouble(yField.getText());
-                    if (MicroscopeController.getInstance().isWithinBoundsXY(x, y)) {
-                        MicroscopeController.getInstance().moveStageXY(x, y);
-                        statusLabel.setText(res.getString("testDialog.status.moveXYSuccess"));
-                    } else {
-                        UIFunctions.notifyUserOfError(
-                                res.getString("testDialog.error.outOfBoundsXY"),
-                                res.getString("testDialog.title"));
-                    }
+                    MicroscopeController.getInstance().moveStageXY(x, y);
+                    xyStatus.setText(String.format(
+                            res.getString("testDialog.status.xyMoved"), x, y));
                 } catch (Exception ex) {
-                    UIFunctions.notifyUserOfError(ex.getMessage(), res.getString("testDialog.title"));
+                    UIFunctions.notifyUserOfError(
+                            ex.getMessage(), res.getString("testDialog.title"));
                 }
             });
 
-            // Get XY
-            btnGetXY.addEventFilter(ActionEvent.ACTION, ev -> {
-                ev.consume();
-                try {
-                    double[] xy = MicroscopeController.getInstance().getStagePositionXY();
-                    xField.setText(String.format("%.2f", xy[0]));
-                    yField.setText(String.format("%.2f", xy[1]));
-                    statusLabel.setText(res.getString("testDialog.status.gotCoordsXY"));
-                } catch (Exception ex) {
-                    UIFunctions.notifyUserOfError(ex.getMessage(), res.getString("testDialog.title"));
-                }
-            });
-
-            // Move Z
-            btnMoveZ.addEventFilter(ActionEvent.ACTION, ev -> {
-                ev.consume();
+            moveZBtn.setOnAction(e -> {
                 try {
                     double z = Double.parseDouble(zField.getText());
-                    if (MicroscopeController.getInstance().isWithinBoundsZ(z)) {
-                        MicroscopeController.getInstance().moveStageZ(z);
-                        statusLabel.setText(res.getString("testDialog.status.moveZSuccess"));
-                    } else {
-                        UIFunctions.notifyUserOfError(
-                                res.getString("testDialog.error.outOfBoundsZ"),
-                                res.getString("testDialog.title"));
-                    }
+                    MicroscopeController.getInstance().moveStageZ(z);
+                    zStatus.setText(String.format(
+                            res.getString("testDialog.status.zMoved"), z));
                 } catch (Exception ex) {
-                    UIFunctions.notifyUserOfError(ex.getMessage(), res.getString("testDialog.title"));
+                    UIFunctions.notifyUserOfError(
+                            ex.getMessage(), res.getString("testDialog.title"));
                 }
             });
 
-            // --- Layout all controls ---
+            moveRBtn.setOnAction(e -> {
+                try {
+                    double r = Double.parseDouble(rField.getText());
+                    MicroscopeController.getInstance().moveStageR(r);
+                    rStatus.setText(String.format(
+                            res.getString("testDialog.status.rMoved"), r));
+                } catch (Exception ex) {
+                    UIFunctions.notifyUserOfError(
+                            ex.getMessage(), res.getString("testDialog.title"));
+                }
+            });
+
+            // --- Layout ---
             GridPane grid = new GridPane();
-            grid.setHgap(10);  grid.setVgap(10);  grid.setPadding(new Insets(20));
+            grid.setHgap(10);
+            grid.setVgap(8);
+            grid.setPadding(new Insets(20));
 
             grid.add(new Label(res.getString("testDialog.label.x")), 0, 0);
-            grid.add(xField,                                     1, 0);
-            grid.add(new Label(res.getString("testDialog.label.y")), 0, 1);
-            grid.add(yField,                                     1, 1);
+            grid.add(xField, 1, 0);
+            grid.add(moveXYBtn, 2, 0);
+            grid.add(xyStatus, 1, 1, 2, 1);
+
             grid.add(new Label(res.getString("testDialog.label.z")), 0, 2);
-            grid.add(zField,                                     1, 2);
-            grid.add(statusLabel,                                0, 3, 2, 1);
+            grid.add(zField, 1, 2);
+            grid.add(moveZBtn, 2, 2);
+            grid.add(zStatus, 1, 3, 2, 1);
 
-            grid.add(new Label(res.getString("testDialog.label.angleSpinner")), 0, 4);
-            grid.add(angleSpinner,                                           1, 4);
-            grid.add(currentAngleLabel,                                      0, 5, 2, 1);
+            grid.add(new Label(res.getString("testDialog.label.r")), 0, 4);
+            grid.add(rField, 1, 4);
+            grid.add(moveRBtn, 2, 4);
+            grid.add(rStatus, 1, 5, 2, 1);
 
-            dialog.getDialogPane().setContent(grid);
-            dialog.initModality(Modality.NONE);
-            dialog.show();
+            dlg.getDialogPane().setContent(grid);
+            dlg.initModality(Modality.NONE);
+            dlg.show();
         });
     }
+
+
 }
