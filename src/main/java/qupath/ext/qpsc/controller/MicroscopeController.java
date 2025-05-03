@@ -263,7 +263,7 @@ public class MicroscopeController {
     public void moveStageR(double r) {
         try {
             var res = CliExecutor.execComplexCommand(
-                    3, null,
+                    10, null,
                     CMD_MOVE_STAGE_P,
                     "-angle",
                     Double.toString(r)
