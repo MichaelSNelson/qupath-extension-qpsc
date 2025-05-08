@@ -131,64 +131,7 @@ public class UtilityFunctions {
         return process.waitFor();
     }
 
-//TODO used in fucntions that return something other than the exit code
-//    AtomicReference<String> value1 = new AtomicReference<>();
-//    AtomicReference<String> value2 = new AtomicReference<>();
-//    AtomicBoolean errorOccurred = new AtomicBoolean(false);
-//    List<String> tifLines = new ArrayList<>();
-//    boolean useProgress = args[0].equals("acquireWorkflow");
-//    AtomicInteger tifCount = new AtomicInteger(0);
-//    int totalTifs = useProgress ? MinorFunctions.countTifEntriesInTileConfig(cmd) : 0;
-//            if (useProgress && totalTifs>0)
-//            UIFunctions.showProgressBar(tifCount, totalTifs, process, 20000);
-//
-//    BufferedReader outR = new BufferedReader(new InputStreamReader(process.getInputStream()));
-//    BufferedReader errR = new BufferedReader(new InputStreamReader(process.getErrorStream()));
-//
-//    Thread tOut = new Thread(() -> outR.lines().forEach(line -> {
-//        if (line.contains("tiles done")) {
-//            tifLines.add(line);
-//            tifCount.incrementAndGet();
-//        } else if (line.startsWith("QuPath:")) {
-//            logger.info(line.substring("QuPath:".length()));
-//        } else if (args.length==1 || args.length==2) {
-//            String[] p = line.split("\\s+");
-//            if (p.length>=2) {
-//                value1.set(p[0]);
-//                value2.set(p[1]);
-//            }
-//        }
-//    }));
 
-//    Thread tErr = new Thread(() -> {
-//        try {
-//            String ln;
-//            while ((ln = errR.readLine()) != null) {
-//                logger.error("Error: {}", ln);
-//                if ("Exiting".equals(ln)) process.destroy();
-//                if ("Out of config".equals(ln))
-//                    UIFunctions.notifyUserOfError(ln, "Coordinates out of bounds");
-//            }
-//        } catch (IOException e) {
-//            logger.error("Error reading stderr", e);
-//        }
-//    });
-//
-//            tOut.start();
-//            tErr.start();
-//            tOut.join();
-//            tErr.join();
-//            process.waitFor();
-//
-//            if (errorOccurred.get()) return null;
-//            if (arguments==null || arguments.size()==2)
-//            return Arrays.asList(value1.get(), value2.get());
-//            else
-//                    return tifLines;
-//
-//} catch (Exception e) {
-//        logger.error("runPythonCommand failed", e);
-//        }
 
     /**
      * Executes a command and returns all lines written to stdout.
@@ -441,21 +384,5 @@ public class UtilityFunctions {
         logger.info("Moving stage to selected tile...");
     }
 
-    /**
-     * TODO Delete as no longer used for testing command line
-     * Build an OS-appropriate command that copies {@code src} to {@code dst}.
-     */
-    public static String[] buildCopyCommand(Path src, Path dst) {
-        String srcAbs = src.toAbsolutePath().toString();
-        String dstAbs = dst.toAbsolutePath().toString();
 
-        boolean windows = System.getProperty("os.name")
-                .toLowerCase().contains("win");
-        if (windows) {
-            // cmd / c copy /Y "src" "dst"
-            return new String[]{"cmd", "/c", "copy", "/Y", srcAbs, dstAbs};
-        }
-        // /bin/sh -c cp "src" "dst"
-        return new String[]{"/bin/sh", "-c", "cp \"" + srcAbs + "\" \"" + dstAbs + "\""};
-    }
 }

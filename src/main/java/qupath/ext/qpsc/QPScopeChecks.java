@@ -59,7 +59,7 @@ public class QPScopeChecks {
         Set<String[]> required = Set.of(
                 new String[]{"microscope", "name"},
                 new String[]{"stage"},
-                new String[]{"imagingMode"},
+                new String[]{"imagingMode", "BF_10x","detector", "width_px"},
                 new String[]{"slideSize"}
         );
 
