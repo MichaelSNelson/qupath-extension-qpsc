@@ -31,8 +31,13 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 /**
- * General utility functions for stitching, command line calls, tiling, etc.
+ * UtilityFunctions
+ *
+ * <p>Higher‐level file and scripting utilities:
+ *   - Build tile configurations (tiling an ROI, writing out TileConfiguration.txt).
+ *   - Anything that doesn’t fit neatly into “micro‐controller” or “UI” or “model.”
  */
+
 public class UtilityFunctions {
     private static final Logger logger = LoggerFactory.getLogger(UtilityFunctions.class);
 

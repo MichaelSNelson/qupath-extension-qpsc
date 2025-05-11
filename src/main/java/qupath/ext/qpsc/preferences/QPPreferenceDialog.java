@@ -13,9 +13,14 @@ import qupath.lib.images.writers.ome.OMEPyramidWriter;
 import java.util.Arrays;
 
 /**
- * Centralized registration and access for all persistent preferences
- * used by the QP Scope extension.
+ * QPPreferenceDialog
+ *
+ * <p>Registers and exposes the subset of extension preferences you
+ * want in QuPath’s Preferences Pane:
+ *   - Flip, invert, script paths, directories, compression, overlap, etc.
+ *   - Provides typed getters so other code can simply call invertedXProperty(), etc.
  */
+
 public class QPPreferenceDialog {
     private static final String CATEGORY = "Microscopy in QuPath";
 

@@ -24,6 +24,14 @@ import qupath.ext.qpsc.ui.UIFunctions;
 import qupath.ext.qpsc.utilities.MinorFunctions;
 
 
+/**
+ * CliExecutor
+ *
+ * <p>Core service for running your microscope CLI:
+ *   - Builds argument lists from your run‐command preference + args.
+ *   - Starts processes, applies timeouts, captures stdout/stderr.
+ *   - Returns structured ExecResult for callers to inspect exit codes, output, or errors.
+ */
 
 
 public class CliExecutor {

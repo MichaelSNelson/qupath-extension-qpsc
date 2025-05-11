@@ -13,9 +13,14 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 /**
- * Singleton manager to load and query microscope configuration from YAML,
- * including support for "LOCI"-based lookups via a shared resources_LOCI.yml file.
+ * MicroscopeConfigManager
+ *
+ * <p>Singleton for loading and querying your microscope YAML configuration:
+ *   - Parses nested YAML into a Map<String,Object>.
+ *   - Offers type‐safe getters (getDouble, getSection, getList, etc.).
+ *   - Validates required keys and reports missing paths.
  */
+
 public class MicroscopeConfigManager {
     private static final Logger logger = LoggerFactory.getLogger(MicroscopeConfigManager.class);
 

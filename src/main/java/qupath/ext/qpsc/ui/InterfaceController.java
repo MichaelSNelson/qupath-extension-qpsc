@@ -21,6 +21,14 @@ import java.io.IOException;
 import java.util.ResourceBundle;
 import java.util.concurrent.CompletableFuture;
 
+/**
+ * InterfaceController
+ *
+ * <p>JavaFX controller for your custom FXML dialog(s):
+ *   - Loads `interface.fxml`, binds UI fields (TextField, Spinner, Buttons).
+ *   - Collects sample name, pixel size, etc., then completes a CompletableFuture.
+ */
+
 public class InterfaceController extends VBox {
 
     private static final ResourceBundle resources = ResourceBundle.getBundle("qupath.ext.qpsc.ui.strings");

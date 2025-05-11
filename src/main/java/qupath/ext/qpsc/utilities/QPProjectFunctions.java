@@ -32,8 +32,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- n * Collection of project-level helper functions: create/open project, add images, etc.
- n */
+ * QPProjectFunctions
+ *
+ * <p>Project‐level helpers for QuPath projects:
+ *   - Create or load a .qpproj in a folder.
+ *   - Add images (with optional flipping/transforms) to a project.
+ *   - Save or synchronize ImageData.
+ */
+
 public class QPProjectFunctions {
     private static final Logger logger = LoggerFactory.getLogger(QPProjectFunctions.class);
 

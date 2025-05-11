@@ -19,6 +19,15 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+/**
+ * MinorFunctions
+ *
+ * <p>Miscellaneous small utilities:
+ *   - Converting List<?> → List<Double> or double[] arrays.
+ *   - Regex helpers, string parsing, filename manipulation.
+ *   - Anything too small to justify its own class.
+ */
+
 public class MinorFunctions {
     private static final Logger logger = LoggerFactory.getLogger(MinorFunctions.class);
 

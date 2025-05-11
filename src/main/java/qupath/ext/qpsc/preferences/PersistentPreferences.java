@@ -3,6 +3,13 @@ package qupath.ext.qpsc.preferences;
 import javafx.beans.property.StringProperty;
 import qupath.lib.gui.prefs.PathPrefs;
 
+/**
+ * PersistentPreferences
+ *
+ * <p>Helper for storing extension‐specific settings that should not appear
+ * in the main QuPath Preferences UI.
+ *   - Wraps JavaFX Properties in a singleton for easy access.
+ */
 public class PersistentPreferences {
 
     private static final StringProperty slideLabelSaved = PathPrefs.createPersistentPreference("SlideLabel", "First_Test");

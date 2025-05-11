@@ -13,8 +13,14 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Transformation utilities: coordinate mapping, file-based transforms, and tile selection.
+ * TransformationFunctions
+ *
+ * <p>Geometry utilities for coordinate transforms and tile configs:
+ *   - AffineTransform setup and composition (scaling + translation).
+ *   - Convert between QuPath pixel coords and stage real‐world coords.
+ *   - Read/transform TileConfiguration.txt files, compute image boundaries.
  */
+
 public class TransformationFunctions {
     private static final Logger logger = LoggerFactory.getLogger(TransformationFunctions.class);
 

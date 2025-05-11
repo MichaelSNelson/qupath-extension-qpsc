@@ -4,19 +4,29 @@ import javafx.animation.KeyFrame;
 import javafx.animation.Timeline;
 import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
+import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.event.ActionEvent;
 import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
+import javafx.scene.control.Button;
+import javafx.scene.control.Dialog;
+import javafx.scene.control.Label;
+import javafx.scene.control.TextField;
 import javafx.scene.layout.GridPane;
+import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
+import javafx.stage.DirectoryChooser;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
+import javafx.stage.Window;
 import javafx.util.Duration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qupath.ext.qpsc.controller.MicroscopeController;
+import qupath.ext.qpsc.preferences.QPPreferenceDialog;
+import qupath.ext.qpsc.utilities.MicroscopeConfigManager;
 import qupath.ext.qpsc.utilities.MinorFunctions;
 import qupath.ext.qpsc.utilities.TransformationFunctions;
 import qupath.ext.qpsc.utilities.UtilityFunctions;
@@ -25,9 +35,13 @@ import qupath.lib.gui.scripting.QPEx;
 import qupath.lib.objects.PathObject;
 import qupath.lib.scripting.QP;
 
+import javafx.geometry.Insets;
 import java.awt.geom.AffineTransform;
+import java.io.File;
 import java.io.IOException;
 import java.util.*;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -36,30 +50,19 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 /**
- * Utility class providing various UI functions for the QP Scope extension.
- * Includes methods to display dialogs, progress bars, and prompt the user for input.
+ * UIFunctions
+ *
+ * <p>Static UI helpers for common dialogs and notifications:
+ *   - Progress bar windows with live updates.
+ *   - Error and warning pop-ups.
+ *   - Stage alignment GUIs (tile selection, confirmation dialogs).
  */
+
 public class UIFunctions {
     private static final Logger logger = LoggerFactory.getLogger(UIFunctions.class);
     private static Stage progressBarStage;
 
 
-
-//TODO DELETE, for testing only
-    /**
-     * Ask the user for a pair of stage coordinates (comma-separated).
-     *
-     * @return the string the user typed, or {@code null} if they cancelled.
-     */
-    public static String askForCoordinates() {
-        TextInputDialog dlg = new TextInputDialog("0.0, 0.0");
-        dlg.setTitle("Enter Coordinates");
-        dlg.setHeaderText("Provide stage coordinates (X , Y)");
-        dlg.setContentText("Coordinates (µm):");
-
-        Optional<String> txt = dlg.showAndWait();
-        return txt.orElse(null);
-    }
 
     /**
      * Helper to add a label-control pair to a GridPane row.
@@ -429,5 +432,107 @@ public class UIFunctions {
         alert.setContentText(message);
         alert.initModality(Modality.APPLICATION_MODAL);
         alert.showAndWait();
+    }
+
+    /**
+     * Holds the user’s choices from the “sample setup” dialog.
+     */
+    public record SampleSetupResult(String sampleName, File projectsFolder, String modality) { }
+
+    /**
+     * Show a dialog to collect:
+     *  - Sample name (text)
+     *  - Projects folder (directory chooser, default from prefs)
+     *  - Modality (combo box, keys from microscope YAML imagingMode section)
+     *
+     * @return a CompletableFuture that completes with the user’s entries,
+     *         or is cancelled if the user hits “Cancel.”
+     */
+    public static CompletableFuture<SampleSetupResult> showSampleSetupDialog() {
+        CompletableFuture<SampleSetupResult> future = new CompletableFuture<>();
+
+        Platform.runLater(() -> {
+            // 1) Build the dialog
+            Dialog<SampleSetupResult> dlg = new Dialog<>();
+            dlg.initModality(Modality.APPLICATION_MODAL);
+            dlg.setTitle("New Sample Setup");
+            dlg.setHeaderText("Enter new sample details before acquisition");
+
+            // Buttons
+            ButtonType okType     = new ButtonType("OK", ButtonBar.ButtonData.OK_DONE);
+            ButtonType cancelType = new ButtonType("Cancel", ButtonBar.ButtonData.CANCEL_CLOSE);
+            dlg.getDialogPane().getButtonTypes().addAll(okType, cancelType);
+
+            // 2) Build fields
+            TextField sampleNameField = new TextField();
+            sampleNameField.setPromptText("e.g. MySample01");
+
+            // Projects folder field + browse
+            TextField folderField = new TextField();
+            folderField.setPrefColumnCount(30);
+            folderField.setText(QPPreferenceDialog.getProjectsFolderProperty());
+            Button browseBtn = new Button("Browse…");
+            browseBtn.setOnAction(e -> {
+                Window win = dlg.getDialogPane().getScene().getWindow();
+                DirectoryChooser chooser = new DirectoryChooser();
+                chooser.setTitle("Select Projects Folder");
+                chooser.setInitialDirectory(new File(folderField.getText()));
+                File chosen = chooser.showDialog(win);
+                if (chosen != null) folderField.setText(chosen.getAbsolutePath());
+            });
+            HBox folderBox = new HBox(5, folderField, browseBtn);
+
+            // Modality combo
+            // Load keys from YAML: imagingMode section
+            Set<String> modalities = MicroscopeConfigManager
+                    .getInstance(QPPreferenceDialog.getMicroscopeConfigFileProperty())    // ensure you’ve already called getInstance(path)
+                    .getSection("imagingMode")
+                    .keySet();
+            ComboBox<String> modalityBox = new ComboBox<>(
+                    FXCollections.observableArrayList(modalities)
+            );
+            modalityBox.setValue(modalities.iterator().next());
+
+            // 3) Layout in a grid
+            GridPane grid = new GridPane();
+            grid.setHgap(10);
+            grid.setVgap(10);
+            grid.setPadding(new Insets(20));
+            grid.add(new Label("Sample name:"),          0, 0);
+            grid.add(sampleNameField,                     1, 0);
+            grid.add(new Label("Projects folder:"),       0, 1);
+            grid.add(folderBox,                           1, 1);
+            grid.add(new Label("Modality:"),              0, 2);
+            grid.add(modalityBox,                         1, 2);
+
+            dlg.getDialogPane().setContent(grid);
+
+            // 4) Convert result on OK
+            dlg.setResultConverter(button -> {
+                if (button == okType) {
+                    String name = sampleNameField.getText().trim();
+                    File  folder = new File(folderField.getText().trim());
+                    String mod  = modalityBox.getValue();
+                    if (name.isEmpty() || !folder.isDirectory() || mod == null) {
+                        new Alert(Alert.AlertType.ERROR,
+                                "Please enter a name, valid folder, and select a modality.")
+                                .showAndWait();
+                        return null; // keep dialog open
+                    }
+                    return new SampleSetupResult(name, folder, mod);
+                }
+                return null; // on Cancel or close
+            });
+
+            // 5) Show and handle
+            Optional<SampleSetupResult> res = dlg.showAndWait();
+            if (res.isPresent()) {
+                future.complete(res.get());
+            } else {
+                future.cancel(true);
+            }
+        });
+
+        return future;
     }
 }
