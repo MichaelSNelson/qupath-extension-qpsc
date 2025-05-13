@@ -135,23 +135,35 @@ public class SetupScope implements QuPathExtension, GitHubProject {
                 }
 		);
 
-		// 3) Test entry (development only)
-		MenuItem testEntryOption = new MenuItem(res.getString("menu.stagecontrol"));
-		testEntryOption.setOnAction(e ->
+		// 3) Basic stage control (test only)
+		MenuItem stageControlOption = new MenuItem(res.getString("menu.stagecontrol"));
+		stageControlOption.setOnAction(e ->
                 {
                     try {
-                        QPScopeController.getInstance().startWorkflow("test");
+                        QPScopeController.getInstance().startWorkflow("basicStageInterface");
                     } catch (IOException ex) {
                         throw new RuntimeException(ex);
                     }
                 }
+		);
+		// 4) Testing #TODO remove before release
+		MenuItem testOption = new MenuItem("Test");
+		testOption.setOnAction(e ->
+				{
+					try {
+						QPScopeController.getInstance().startWorkflow("test");
+					} catch (IOException ex) {
+						throw new RuntimeException(ex);
+					}
+				}
 		);
 
 		// Add them straight to the QP Scope menu
 		extensionMenu.getItems().addAll(
 				boundingBoxOption,
 				existingImageOption,
-				testEntryOption
+				stageControlOption,
+				testOption
 		);
 
 		logger.info("Menu items added for extension: " + EXTENSION_NAME);
