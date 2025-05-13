@@ -17,7 +17,7 @@ import java.util.stream.Collectors;
  *
  * <p>Singleton for loading and querying your microscope YAML configuration:
  *   - Parses nested YAML into a Map<String,Object>.
- *   - Offers type‐safe getters (getDouble, getSection, getList, etc.).
+ *   - Offers type safe getters (getDouble, getSection, getList, etc.).
  *   - Validates required keys and reports missing paths.
  */
 

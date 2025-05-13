@@ -17,7 +17,7 @@ import java.util.regex.Pattern;
  *
  * <p>Geometry utilities for coordinate transforms and tile configs:
  *   - AffineTransform setup and composition (scaling + translation).
- *   - Convert between QuPath pixel coords and stage real‐world coords.
+ *   - Convert between QuPath pixel coords and stage real world coords.
  *   - Read/transform TileConfiguration.txt files, compute image boundaries.
  */
 

@@ -6,7 +6,7 @@ import qupath.lib.gui.prefs.PathPrefs;
 /**
  * PersistentPreferences
  *
- * <p>Helper for storing extension‐specific settings that should not appear
+ * <p>Helper for storing extension specific settings that should not appear
  * in the main QuPath Preferences UI.
  *   - Wraps JavaFX Properties in a singleton for easy access.
  */

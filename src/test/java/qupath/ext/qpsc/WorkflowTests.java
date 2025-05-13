@@ -4,7 +4,7 @@ package qupath.ext.qpsc;
 //
 //Coordinate transforms (e.g. TransformationFunctions):
 //
-//QP → stage, stage → QP, offset, boundary‐finding.
+//QP → stage, stage → QP, offset, boundary finding.
 //
 //        Tiling logic (in your UtilityFunctions or MinorFunctions):
 //
@@ -14,17 +14,17 @@ package qupath.ext.qpsc;
 //
 //        Missing keys, nested lookups, typed getters (getDouble, getList, etc).
 //
-//        “Golden‐file” tests for CLI adapters
+//        “Golden file” tests for CLI adapters
 //
 //Mock out the CLI process (e.g. using a fake ProcessBuilder) and assert that MicroscopeController.moveStageXY(…) builds the correct List<String> of arguments.
 //
-//Integration‐style tests (if possible)
+//Integration style tests (if possible)
 //
 //Bring up a headless JavaFX runtime and show that your small “Test” dialog doesn’t throw. (QuPath’s test harness supports this.)
 //
 //Run a “dry run” of your tiling → CLI → stitching pipeline against a dummy directory full of blank TIFFs.
 //
-//End‐to‐end smoke test
+//End to end smoke test
 //
 //A single JUnit test that runs your acquisition workflow against a toy image:
 //
