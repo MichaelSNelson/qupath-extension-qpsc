@@ -19,7 +19,7 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 
 public class SampleSetupController {
-    /** Holds the user’s last entries from the “sample setup” dialog. */
+    /** Holds the user’s last entries from the "sample setup " dialog. */
     private static SampleSetupResult lastSampleSetup;
 
     /** Expose the most recently completed SampleSetupResult, or null if none yet. */
@@ -34,7 +34,7 @@ public class SampleSetupController {
      *  - Modality (combo box, keys from microscope YAML imagingMode section)
      *
      * @return a CompletableFuture that completes with the user’s entries,
-     *         or is cancelled if the user hits “Cancel.”
+     *         or is cancelled if the user hits "Cancel. "
      */
     public static CompletableFuture<SampleSetupResult> showDialog() {
         CompletableFuture<SampleSetupResult> future = new CompletableFuture<>();
@@ -119,7 +119,7 @@ public class SampleSetupController {
         return future;
     }
 
-    /** Holds the user’s choices from the “sample setup” dialog. */
+    /** Holds the user’s choices from the "sample setup " dialog. */
     public record SampleSetupResult(String sampleName, File projectsFolder, String modality) { }
 }
 

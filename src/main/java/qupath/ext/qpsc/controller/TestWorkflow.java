@@ -21,7 +21,7 @@ import qupath.lib.projects.Project;
 
 public class TestWorkflow {
     private static final Logger logger = LoggerFactory.getLogger(TestWorkflow.class);
-    /** Entry point called by your “Test” menu item. */
+    /** Entry point called by your "Test " menu item. */
     public static void runTestWorkflow() {
         var res = ResourceBundle.getBundle("qupath.ext.qpsc.ui.strings");
 

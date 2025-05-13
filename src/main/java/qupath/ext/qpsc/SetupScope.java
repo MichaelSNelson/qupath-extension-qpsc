@@ -35,9 +35,9 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 	private static final Logger logger = LoggerFactory.getLogger(SetupScope.class);
 
 	// Load extension metadata
-	private static final ResourceBundle resources = ResourceBundle.getBundle("qupath.ext.qpsc.ui.strings");
-	private static final String EXTENSION_NAME        = resources.getString("name");
-	private static final String EXTENSION_DESCRIPTION = resources.getString("description");
+	private static final ResourceBundle res = ResourceBundle.getBundle("qupath.ext.qpsc.ui.strings");
+	private static final String EXTENSION_NAME        = res.getString("name");
+	private static final String EXTENSION_DESCRIPTION = res.getString("description");
 	private static final Version EXTENSION_QUPATH_VERSION =
 			Version.parse("v0.6.0");
 	private static final GitHubRepo EXTENSION_REPOSITORY =
@@ -97,7 +97,7 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 		var extensionMenu = qupath.getMenu("Extensions>" + EXTENSION_NAME, true);
 
 		// 1) Start with a bounding box workflow
-		MenuItem boundingBoxOption = new MenuItem("Start with Bounding Box");
+		MenuItem boundingBoxOption = new MenuItem(res.getString("menu.boundingbox"));
 		boundingBoxOption.setDisable(!configValid);
 		boundingBoxOption.setOnAction(e ->
                 {
@@ -110,7 +110,7 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 		);
 
 		// 2) Start with existing image (only enabled if an image is open & config is valid)
-		MenuItem existingImageOption = new MenuItem("Start with Existing Image");
+		MenuItem existingImageOption = new MenuItem(res.getString("menu.existingimage"));
 		existingImageOption.disableProperty().bind(
 				Bindings.or(
 						// no image open?
@@ -136,7 +136,7 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 		);
 
 		// 3) Test entry (development only)
-		MenuItem testEntryOption = new MenuItem("Test Entry");
+		MenuItem testEntryOption = new MenuItem(res.getString("menu.stagecontrol"));
 		testEntryOption.setOnAction(e ->
                 {
                     try {

@@ -26,7 +26,7 @@ import static qupath.ext.qpsc.utilities.MinorFunctions.getCurrentOffset;
  * MicroscopeController
  *
  * <p>Thin adapter to your microscope’s CLI:
- *   - Wraps command line calls (e.g. “smartpath getStagePositionForQuPath”).
+ *   - Wraps command line calls (e.g. "smartpath getStagePositionForQuPath ").
  *   - Exposes typed methods like moveStageXY, getStagePositionZ, moveStageP.
  *   - Handles timeouts and error pop-ups so higher layers don’t worry about CLI details.
  */
@@ -94,7 +94,7 @@ public class MicroscopeController {
         String cleaned = out.replaceAll("[(),]", "").trim();
         String[] parts = cleaned.split("\\s+");
         if (parts.length < 2) {
-            logger.error("Unexpected output format for XY position: “{}”", out);
+            logger.error("Unexpected output format for XY position: {}", out);
             throw new IOException("Unexpected output for XY position: " + out);
         }
 
@@ -105,7 +105,7 @@ public class MicroscopeController {
                     Double.parseDouble(parts[1])
             };
         } catch (NumberFormatException e) {
-            logger.error("Failed to parse stage position numbers from “{}”", out, e);
+            logger.error("Failed to parse stage position numbers from {}", out, e);
             throw new IOException("Cannot parse stage position: " + out, e);
         }
     }

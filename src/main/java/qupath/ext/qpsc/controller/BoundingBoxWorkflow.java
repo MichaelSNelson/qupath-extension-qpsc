@@ -24,7 +24,7 @@ import java.util.*;
 import java.util.concurrent.*;
 
 /**
- * Runs the full “bounding-box” acquisition workflow:
+ * Runs the full  "bounding box " acquisition workflow:
  * <ol>
  *   <li>Ask user for sample details (name, folder, modality)</li>
  *   <li>Ask user for bounding-box coordinates and focus flag</li>
@@ -51,7 +51,7 @@ public class BoundingBoxWorkflow {
     });
 
     /**
-     * Entry point for the “boundingBox” menu command.
+     * Entry point for the  "boundingBox " menu command.
      * Kicks off dialogs, then acquisition, then stitching, all without blocking the UI.
      */
     public static void run() {
@@ -135,11 +135,11 @@ public class BoundingBoxWorkflow {
                             // Kick off stitching on your stitching executor
                             CompletableFuture.runAsync(() -> {
                                 try {
-                                    // Show a quick “starting” notification
+                                    // Show a quick "starting " notification
                                     Platform.runLater(() ->
                                             qupath.fx.dialogs.Dialogs.showInfoNotification(
                                                     "Stitching",
-                                                    "Stitching “" + sample.sampleName() + "”…"));
+                                                    "Stitching " + sample.sampleName() + "…"));
 
                                     // **NEW**: match updated signature
                                     String outPath = UtilityFunctions.stitchImagesAndUpdateProject(
@@ -150,7 +150,7 @@ public class BoundingBoxWorkflow {
                                             qupathGUI,                                 // QuPathGUI instance
                                             project,                                   // your Project<BufferedImage>
                                             String.valueOf(QPPreferenceDialog                           // fetch compression choice
-                                                    .getCompressionTypeProperty()),                               // e.g. “DEFAULT”
+                                                    .getCompressionTypeProperty()),                               // e.g. "DEFAULT "
                                             pixelSize,                                 // µm per pixel
                                             /*downsample=*/ 1                          // your downsample factor
                                     );

@@ -35,7 +35,7 @@ import java.util.zip.ZipOutputStream;
  *
  * <p>Higher level file and scripting utilities:
  *   - Build tile configurations (tiling an ROI, writing out TileConfiguration.txt).
- *   - Anything that doesn’t fit neatly into “micro controller” or “UI” or “model.”
+ *   - Anything that doesn’t fit neatly into "micro controller " or "UI " or "model. "
  */
 
 public class UtilityFunctions {
@@ -50,7 +50,7 @@ public class UtilityFunctions {
      * @param projectsFolderPath  Root folder containing per sample subfolders.
      * @param sampleLabel         Subfolder name for this sample.
      * @param imagingModeWithIndex Subfolder name under sampleLabel, e.g. "4x_bf_1".
-     * @param annotationName      “bounds” or any annotation identifier.
+     * @param annotationName      "bounds " or any annotation identifier.
      * @param qupathGUI           QuPathGUI instance (to open the new image).
      * @param project             QuPath Project to update.
      * @param compression         OME pyramid compression type, e.g. "DEFAULT".
@@ -78,7 +78,7 @@ public class UtilityFunctions {
                 + sampleLabel + File.separator
                 + "SlideImages";
 
-        logger.info("Stitching tiles in “{}” → output in “{}”", tileFolder, stitchedFolder);
+        logger.info("Stitching tiles in '{}' → output in '{}'", tileFolder, stitchedFolder);
 
         // 2) Run the core stitching routine
         String outPath = StitchingImplementations.stitchCore(

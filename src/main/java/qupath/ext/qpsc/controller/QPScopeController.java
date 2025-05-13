@@ -11,7 +11,7 @@ import qupath.ext.qpsc.ui.StageMovementController;
 /**
  * QPScopeController
  *
- * <p>“Orchestrator” for your QuPath side workflow:
+ * <p>"Orchestrator " for your QuPath side workflow:
  *   - Presents dialogs and gathers user input (bounding box, sample name, etc.).
  *   - Drives the imaging pipeline sequence (tiling → acquisition → stitching).
  *   - Delegates low level calls to MicroscopeController and UtilityFunctions.

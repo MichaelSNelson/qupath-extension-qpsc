@@ -186,9 +186,9 @@ public class QPProjectFunctions {
 //     * </ul>
 //     *
 //     * @param qupathGUI            the QuPath GUI instance (used to set/open the project)
-//     * @param projectsFolderPath   absolute path to your root “projects” folder
+//     * @param projectsFolderPath   absolute path to your root "projects " folder
 //     * @param sampleLabel          name of the subfolder/project to create or open
-//     * @param preferences          the QuPath PreferenceSheet items (to read “First Scan Type”)
+//     * @param preferences          the QuPath PreferenceSheet items (to read "First Scan Type ")
 //     * @param isSlideFlippedX      whether to horizontally flip the slide image on import
 //     * @param isSlideFlippedY      whether to vertically flip the slide image on import
 //     * @return a Map<String,Object> containing the keys described above
@@ -202,19 +202,19 @@ public class QPProjectFunctions {
 //            boolean isSlideFlippedX,
 //            boolean isSlideFlippedY) throws IOException {
 //
-//        // 1) Read “First Scan Type” from the preferences list
+//        // 1) Read "First Scan Type " from the preferences list
 //        String firstImagingMode = preferences.stream()
 //                .filter(item -> "First Scan Type".equals(item.getName()))
 //                .findFirst()
 //                .map(item -> item.getValue().toString())
 //                .orElseThrow(() -> new IllegalArgumentException(
-//                        "Preference “First Scan Type” not found"));
+//                        "Preference "First Scan Type " not found"));
 //
 //        // 2) Create (or load) the QuPath project under projectsFolderPath/sampleLabel
 //        Project<BufferedImage> project = QPProjectFunctions.createProjectFolder(
 //                projectsFolderPath, sampleLabel);
 //
-//        // 2a) Make a unique subfolder name for this imaging mode (e.g. “4x_bf_1”)
+//        // 2a) Make a unique subfolder name for this imaging mode (e.g. "4x_bf_1 ")
 //        String imagingModeWithIndex = MinorFunctions.getUniqueFolderName(
 //                projectsFolderPath + File.separator + sampleLabel + File.separator + firstImagingMode);
 //

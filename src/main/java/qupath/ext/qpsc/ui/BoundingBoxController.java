@@ -21,7 +21,7 @@ public class BoundingBoxController {
     /**
      * Show a dialog asking the user to define a rectangular bounding box
      * (either by entering four comma-separated values or via four separate fields),
-     * plus an “In focus?” checkbox. Returns a CompletableFuture that completes
+     * plus an "In focus? " checkbox. Returns a CompletableFuture that completes
      * with the BoundingBoxResult when the user clicks OK, or is cancelled if
      * the user hits Cancel or closes the dialog.
      *

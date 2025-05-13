@@ -57,7 +57,7 @@ public class CliExecutor {
      * wait up to the specified timeout, capture its standard output, and return it.
      *
      * <p>The first element of {@code args} is treated as the executable name
-     * (without “.exe”), which is looked up in the folder returned by
+     * (without ".exe "), which is looked up in the folder returned by
      * {@link QPPreferenceDialog#getCliFolder()}.
      * Any remaining elements of {@code args} are passed as command-line arguments.</p>
      *
