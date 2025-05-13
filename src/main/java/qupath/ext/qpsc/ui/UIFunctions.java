@@ -63,23 +63,6 @@ public class UIFunctions {
     private static Stage progressBarStage;
 
 
-
-    /**
-     * Helper to add a label-control pair to a GridPane row.
-     */
-    public static void addToGrid(GridPane pane, Node label, Node control, int rowIndex) {
-        pane.add(label, 0, rowIndex);
-        pane.add(control, 1, rowIndex);
-    }
-
-    /**
-     * Helper to add a single node spanning two columns in a GridPane.
-     */
-    public static void addToGrid(GridPane pane, Node node, int rowIndex) {
-        pane.add(node, 0, rowIndex, 2, 1);
-    }
-
-
     public static class ProgressHandle {
         private final Stage stage;
         private final Timeline timeline;
@@ -105,15 +88,7 @@ public class UIFunctions {
      * @param timeoutMs       If no progress for this many ms, bar will auto-terminate.
      * @return a ProgressHandle you can .close() when you’re done (or ignore if you let it timeout).
      */
-    /**
-     * Shows a progress bar window that watches an AtomicInteger and updates every 200 ms.
-     *
-     * @param progressCounter thread safe counter (increment yourself as work completes)
-     * @param totalFiles      max value of progressCounter (for a fraction)
-     * @param process         the external Process we can watch for isAlive()
-     * @param timeoutMs       if no progress for this many ms, the bar auto closes
-     * @return a ProgressHandle; just call handle.close() when you’re done (or ignore it if it auto closes)
-     */
+
     public static ProgressHandle showProgressBarAsync(
             AtomicInteger progressCounter,
             int totalFiles,
@@ -184,79 +159,7 @@ public class UIFunctions {
         return new ProgressHandle(stage, timeline);
     }
 
-//    /**
-//     * Displays and updates a progress bar based on a Python process's stdout progress.
-//     * @param progressCounter AtomicInteger tracking completed file count.
-//     * @param totalFiles total number of files expected.
-//     * @param pythonProcess external Process to monitor.
-//     * @param timeout milliseconds of stalled output before abort.
-//     */
-//    public static void showProgressBar(AtomicInteger progressCounter, int totalFiles,
-//                                       Process pythonProcess, int timeout) {
-//        Platform.runLater(() -> {
-//            AtomicLong startTime = new AtomicLong();
-//            AtomicLong lastUpdateTime = new AtomicLong(System.currentTimeMillis());
-//            AtomicInteger lastProgress = new AtomicInteger(0);
-//
-//            progressBarStage = new Stage();
-//            progressBarStage.initModality(Modality.NONE);
-//            progressBarStage.setTitle("Microscope acquisition progress");
-//
-//            VBox vbox = new VBox(10);
-//            ProgressBar progressBar = new ProgressBar(0);
-//            progressBar.setPrefWidth(300);
-//            Label timeLabel = new Label("Estimating time...");
-//            Label progressLabel = new Label("Processing files...");
-//            vbox.getChildren().addAll(progressBar, timeLabel, progressLabel);
-//
-//            progressBarStage.setScene(new Scene(vbox));
-//            progressBarStage.setAlwaysOnTop(true);
-//            progressBarStage.show();
-//
-//            ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor();
-//            executor.scheduleAtFixedRate(() -> {
-//                int current = progressCounter.get();
-//                long now = System.currentTimeMillis();
-//                if (current > 0) {
-//                    if (startTime.get() == 0) {
-//                        startTime.set(now);
-//                    }
-//                    double fraction = current / (double) totalFiles;
-//                    long elapsed = now - startTime.get();
-//                    long sinceLast = now - lastUpdateTime.get();
-//                    double perUnit = elapsed / (double) current;
-//                    int estTotal = (int) (perUnit * totalFiles);
-//                    int remainingSec = (estTotal - (int) elapsed) / 1000;
-//
-//                    Platform.runLater(() -> {
-//                        progressBar.setProgress(fraction);
-//                        timeLabel.setText("Rough estimate of remaining time: " + remainingSec + " seconds");
-//                        progressLabel.setText(String.format("Processed %d out of %d files...", current, totalFiles));
-//                    });
-//
-//                    if (!pythonProcess.isAlive() || sinceLast > timeout) {
-//                        executor.shutdownNow();
-//                        Platform.runLater(() -> {
-//                            progressLabel.setText("Process stalled and was terminated.");
-//                            notifyUserOfError(
-//                                    "Timeout reached when waiting for images from microscope. Acquisition halted.",
-//                                    "Acquisition process");
-//                            new Thread(() -> {
-//                                try { Thread.sleep(2000); } catch (InterruptedException ignored) {}
-//                                Platform.runLater(progressBarStage::close);
-//                            }).start();
-//                        });
-//                    } else if (fraction >= 1.0) {
-//                        executor.shutdownNow();
-//                        Platform.runLater(progressBarStage::close);
-//                    } else if (current > lastProgress.get()) {
-//                        lastProgress.set(current);
-//                        lastUpdateTime.set(now);
-//                    }
-//                }
-//            }, 200, 200, TimeUnit.MILLISECONDS);
-//        });
-//    }
+
 
     /**
      * Shows an error dialog on the JavaFX thread.
@@ -434,105 +337,5 @@ public class UIFunctions {
         alert.showAndWait();
     }
 
-    /**
-     * Holds the user’s choices from the “sample setup” dialog.
-     */
-    public record SampleSetupResult(String sampleName, File projectsFolder, String modality) { }
 
-    /**
-     * Show a dialog to collect:
-     *  - Sample name (text)
-     *  - Projects folder (directory chooser, default from prefs)
-     *  - Modality (combo box, keys from microscope YAML imagingMode section)
-     *
-     * @return a CompletableFuture that completes with the user’s entries,
-     *         or is cancelled if the user hits “Cancel.”
-     */
-    public static CompletableFuture<SampleSetupResult> showSampleSetupDialog() {
-        CompletableFuture<SampleSetupResult> future = new CompletableFuture<>();
-
-        Platform.runLater(() -> {
-            // 1) Build the dialog
-            Dialog<SampleSetupResult> dlg = new Dialog<>();
-            dlg.initModality(Modality.APPLICATION_MODAL);
-            dlg.setTitle("New Sample Setup");
-            dlg.setHeaderText("Enter new sample details before acquisition");
-
-            // Buttons
-            ButtonType okType     = new ButtonType("OK", ButtonBar.ButtonData.OK_DONE);
-            ButtonType cancelType = new ButtonType("Cancel", ButtonBar.ButtonData.CANCEL_CLOSE);
-            dlg.getDialogPane().getButtonTypes().addAll(okType, cancelType);
-
-            // 2) Build fields
-            TextField sampleNameField = new TextField();
-            sampleNameField.setPromptText("e.g. MySample01");
-
-            // Projects folder field + browse
-            TextField folderField = new TextField();
-            folderField.setPrefColumnCount(30);
-            folderField.setText(QPPreferenceDialog.getProjectsFolderProperty());
-            Button browseBtn = new Button("Browse…");
-            browseBtn.setOnAction(e -> {
-                Window win = dlg.getDialogPane().getScene().getWindow();
-                DirectoryChooser chooser = new DirectoryChooser();
-                chooser.setTitle("Select Projects Folder");
-                chooser.setInitialDirectory(new File(folderField.getText()));
-                File chosen = chooser.showDialog(win);
-                if (chosen != null) folderField.setText(chosen.getAbsolutePath());
-            });
-            HBox folderBox = new HBox(5, folderField, browseBtn);
-
-            // Modality combo
-            // Load keys from YAML: imagingMode section
-            Set<String> modalities = MicroscopeConfigManager
-                    .getInstance(QPPreferenceDialog.getMicroscopeConfigFileProperty())    // ensure you’ve already called getInstance(path)
-                    .getSection("imagingMode")
-                    .keySet();
-            ComboBox<String> modalityBox = new ComboBox<>(
-                    FXCollections.observableArrayList(modalities)
-            );
-            modalityBox.setValue(modalities.iterator().next());
-
-            // 3) Layout in a grid
-            GridPane grid = new GridPane();
-            grid.setHgap(10);
-            grid.setVgap(10);
-            grid.setPadding(new Insets(20));
-            grid.add(new Label("Sample name:"),          0, 0);
-            grid.add(sampleNameField,                     1, 0);
-            grid.add(new Label("Projects folder:"),       0, 1);
-            grid.add(folderBox,                           1, 1);
-            grid.add(new Label("Modality:"),              0, 2);
-            grid.add(modalityBox,                         1, 2);
-
-            dlg.getDialogPane().setContent(grid);
-
-            // 4) Convert result on OK
-            dlg.setResultConverter(button -> {
-                if (button == okType) {
-                    String name = sampleNameField.getText().trim();
-                    File  folder = new File(folderField.getText().trim());
-                    String mod  = modalityBox.getValue();
-                    if (name.isEmpty() || !folder.isDirectory() || mod == null) {
-                        new Alert(Alert.AlertType.ERROR,
-                                "Please enter a name, valid folder, and select a modality.")
-                                .showAndWait();
-                        return null; // keep dialog open
-                    }
-                    return new SampleSetupResult(name, folder, mod);
-                }
-                return null; // on Cancel or close
-            });
-
-            // 5) Show and handle
-            Optional<SampleSetupResult> res = dlg.showAndWait();
-            if (res.isPresent()) {
-                future.complete(res.get());
-            } else {
-                future.cancel(true);
-            }
-        });
-
-        return future;
-    }
 }

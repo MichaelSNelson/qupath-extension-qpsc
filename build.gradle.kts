@@ -27,7 +27,7 @@ allprojects {
 
     }
 }
-
+val javafxVersion = "17.0.2"
 // TODO: Define your dependencies here
 dependencies {
 
@@ -51,8 +51,17 @@ dependencies {
     testImplementation("org.assertj:assertj-core:3.24.2")
     testImplementation(libs.bundles.logging)
     testImplementation(libs.qupath.fxtras)
+    testImplementation("org.openjfx:javafx-base:$javafxVersion")
+    testImplementation("org.openjfx:javafx-graphics:$javafxVersion")
+    testImplementation("org.openjfx:javafx-controls:$javafxVersion")
+    testImplementation("org.mockito:mockito-core:5.2.0")
+    testImplementation("org.mockito:mockito-junit-jupiter:5.2.0")
 }
 
 tasks.test {
     useJUnitPlatform()
+    jvmArgs = listOf(
+        "--add-modules", "javafx.base,javafx.graphics,javafx.controls",
+        "--add-opens", "javafx.graphics/javafx.stage=ALL-UNNAMED"
+    )
 }

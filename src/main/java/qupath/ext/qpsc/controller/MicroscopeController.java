@@ -26,7 +26,7 @@ import static qupath.ext.qpsc.utilities.MinorFunctions.getCurrentOffset;
  * MicroscopeController
  *
  * <p>Thin adapter to your microscope’s CLI:
- *   - Wraps command‐line calls (e.g. “smartpath getStagePositionForQuPath”).
+ *   - Wraps command line calls (e.g. “smartpath getStagePositionForQuPath”).
  *   - Exposes typed methods like moveStageXY, getStagePositionZ, moveStageP.
  *   - Handles timeouts and error pop-ups so higher layers don’t worry about CLI details.
  */
@@ -161,16 +161,16 @@ public class MicroscopeController {
             );
             if (res.timedOut()) {
                 UIFunctions.notifyUserOfError(
-                        "Move‐XY command timed out:\n" + res.stderr(),
+                        "Move XY command timed out:\n" + res.stderr(),
                         "Stage Move XY");
             } else if (res.exitCode() != 0) {
                 UIFunctions.notifyUserOfError(
-                        "Move‐XY returned exit code " + res.exitCode() + "\n" + res.stderr(),
+                        "Move XY returned exit code " + res.exitCode() + "\n" + res.stderr(),
                         "Stage Move XY");
             }
         } catch (IOException | InterruptedException e) {
             UIFunctions.notifyUserOfError(
-                    "Failed to run Move‐XY:\n" + e.getMessage(),
+                    "Failed to run Move XY:\n" + e.getMessage(),
                     "Stage Move XY");
         }
     }
@@ -191,16 +191,16 @@ public class MicroscopeController {
             );
             if (res.timedOut()) {
                 UIFunctions.notifyUserOfError(
-                        "Move‐Z command timed out:\n" + res.stderr(),
+                        "Move Z command timed out:\n" + res.stderr(),
                         "Stage Move Z");
             } else if (res.exitCode() != 0) {
                 UIFunctions.notifyUserOfError(
-                        "Move‐Z returned exit code " + res.exitCode() + "\n" + res.stderr(),
+                        "Move Z returned exit code " + res.exitCode() + "\n" + res.stderr(),
                         "Stage Move Z");
             }
         } catch (IOException | InterruptedException e) {
             UIFunctions.notifyUserOfError(
-                    "Failed to run Move‐Z:\n" + e.getMessage(),
+                    "Failed to run Move Z:\n" + e.getMessage(),
                     "Stage Move Z");
         }
     }
@@ -295,14 +295,6 @@ public class MicroscopeController {
         this.currentTransform = tx;
     }
 
-    /** Dummy bounding-box workflow – replace with your real steps later. */
-    public void startBoundingBoxWorkflow() {
-        logger.info("▶ Bounding-box workflow started (stub)");
-        javafx.application.Platform.runLater(() ->
-                qupath.fx.dialogs.Dialogs.showInfoNotification(
-                        "QP Scope • Bounding-box",
-                        "Here is where the Bounding-box workflow will run."));
-    }
 
     /** Dummy existing-image workflow – replace with your real steps later. */
     public void startExistingImageWorkflow() {
