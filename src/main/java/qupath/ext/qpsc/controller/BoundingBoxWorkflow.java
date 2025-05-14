@@ -94,17 +94,20 @@ public class BoundingBoxWorkflow {
                     Project<BufferedImage> project = (Project<BufferedImage>) pd.get("currentQuPathProject");
 
                     // 5) Compute frame size in microns from YAML
-                    double pixelSize = MicroscopeConfigManager
-                            .getInstance(QPPreferenceDialog.getMicroscopeConfigFileProperty())
-                            .getDouble("imagingMode", sample.modality(), "pixelSize_um");
-                    int cameraW = MicroscopeConfigManager
-                            .getInstance(QPPreferenceDialog.getMicroscopeConfigFileProperty())
-                            .getInteger("parts", "camera", "width_px");
-                    int cameraH = MicroscopeConfigManager
-                            .getInstance(QPPreferenceDialog.getMicroscopeConfigFileProperty())
-                            .getInteger("parts", "camera", "height_px");
-                    double frameWidth  = pixelSize * cameraW;
-                    double frameHeight = pixelSize * cameraH;
+                    MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(QPPreferenceDialog.getMicroscopeConfigFileProperty());
+                    System.out.println(mgr.getAllConfig());  // Check if YAML content is printed
+                    System.out.println(QPPreferenceDialog.getMicroscopeConfigFileProperty());
+                    double pixelSize = mgr.getDouble("imagingMode", sample.modality(), "pixelSize_um");
+                    System.out.println("Pixel size: " +pixelSize);
+
+                    //String detectorID = mgr.getString("imagingMode", sample.modality(), "detector");
+
+                    int cameraWidth = mgr.getInteger("imagingMode", sample.modality(), "detector", "width_px");
+
+                    int cameraHeight = mgr.getInteger("imagingMode", sample.modality(), "detector", "height_px");
+
+                    double frameWidth  = pixelSize * cameraWidth;
+                    double frameHeight = pixelSize * cameraHeight;
 
                     // 6) Write tile grid
                     UtilityFunctions.performTilingAndSaveConfiguration(

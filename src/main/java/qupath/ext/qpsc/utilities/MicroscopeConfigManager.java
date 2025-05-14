@@ -32,21 +32,33 @@ public class MicroscopeConfigManager {
 
     // Shared LOCI resource data loaded from resources_LOCI.yml
     private final Map<String, Object> resourceData;
+    private final Map<String, String> lociSectionMap;
 
     /**
      * Private constructor: loads both the microscope-specific YAML and the shared LOCI resources.
      *
      * @param configPath Filesystem path to the microscope YAML configuration file.
      */
+
+
     private MicroscopeConfigManager(String configPath) {
         this.configData = loadConfig(configPath);
         String resPath = computeResourcePath(configPath);
         this.resourceData = loadConfig(resPath);
-        if (resourceData.isEmpty()) {
-            logger.warn("Could not load LOCI resources from {}", resPath);
-        }
-    }
 
+        // Dynamically build field-to-section map from the top-level of resources_LOCI.yml
+        this.lociSectionMap = new HashMap<>();
+        for (String section : resourceData.keySet()) {
+            if (section.startsWith("ID_")) {
+                String field = section.substring(3) // remove "ID_"
+                        .replaceAll("_", "")           // e.g. "OBJECTIVE_LENS" → "OBJECTIVELENS"
+                        .toLowerCase();                // "OBJECTIVELENS" → "objectivelens"
+                lociSectionMap.put(field, section);
+            }
+        }
+        if (lociSectionMap.isEmpty())
+            logger.warn("No LOCI sections found in shared resources!");
+    }
     /**
      * Initializes and returns the singleton instance. Must be called first with the path to the microscope YAML.
      *
@@ -59,7 +71,18 @@ public class MicroscopeConfigManager {
         }
         return instance;
     }
-
+    /**
+     * Retrieves an unmodifiable view of the entire configuration map currently loaded
+     * from the microscope-specific YAML file.
+     *
+     * <p>This method provides a convenient way to inspect the entire loaded configuration,
+     * which can be helpful for debugging or validation purposes.</p>
+     *
+     * @return An unmodifiable Map containing the full configuration data.
+     */
+    public Map<String, Object> getAllConfig() {
+        return Collections.unmodifiableMap(configData);
+    }
     /**
      * Reloads both the microscope YAML and shared LOCI resources.
      *
@@ -75,17 +98,27 @@ public class MicroscopeConfigManager {
 
     /**
      * Computes the path to the shared LOCI resources file based on the microscope config path.
-     * For example, transforms
-     * ".../microscopes/config_PPM.yml" → ".../resources_LOCI.yml".
+     * For example, transforms ".../microscopes/config_PPM.yml" → ".../resources_LOCI.yml".
      *
      * @param configPath Path to the microscope YAML file.
-     * @return Path to resources_LOCI.yml.
+     * @return Path to resources_LOCI.yml (absolute path).
+     * @throws FileNotFoundException if the file does not exist.
      */
     private static String computeResourcePath(String configPath) {
         Path cfg = Paths.get(configPath);
         // Go up two levels: <...>/microscopes/config.yml → <...>/resources_LOCI.yml
-        return cfg.getParent().getParent().resolve("resources_LOCI.yml").toString();
+        Path resourcePath = cfg.getParent().getParent().resolve("resources_LOCI.yml").toAbsolutePath();
+
+        File resourceFile = resourcePath.toFile();
+        if (!resourceFile.exists()) {
+            Logger logger = LoggerFactory.getLogger(MicroscopeConfigManager.class);
+            logger.warn("Could not find shared LOCI resource file at: {}", resourcePath);
+            // Optionally, throw an error if this file is required:
+            // throw new FileNotFoundException("Shared LOCI resource file not found: " + resourcePath);
+        }
+        return resourcePath.toString();
     }
+
 
     /**
      * Loads a YAML file into a Map.
@@ -111,12 +144,12 @@ public class MicroscopeConfigManager {
         return new LinkedHashMap<>();
     }
 
+
     /**
-     * Retrieves a nested configuration item by a sequence of keys.
-     * If a value beginning with "LOCI" is encountered and further nesting is requested,
-     * this method will consult the shared resources_LOCI.yml for the corresponding data.
+     * Retrieves a nested configuration item by a sequence of keys, traversing the main config first.
+     * If a value beginning with "LOCI" is encountered, switches to resources_LOCI.yml to resolve details.
      *
-     * @param keys Sequence of nested keys (e.g., "imagingMode","BF_10x","detector","width_px").
+     * @param keys Sequence of nested keys (e.g., "imagingMode","BF_10x","detector","width_px")
      * @return The final value (String, Number, Map, List, etc.), or null if not found.
      */
     @SuppressWarnings("unchecked")
@@ -124,38 +157,62 @@ public class MicroscopeConfigManager {
         Object current = configData;
         for (int i = 0; i < keys.length; i++) {
             String key = keys[i];
-            // 1) Normal descent in the microscope config
+
+            // 1. Standard descent
             if (current instanceof Map<?, ?> map && map.containsKey(key)) {
                 current = map.get(key);
-                continue;
-            }
-            // 2) If current is a LOCI identifier, switch to resourceData
-            if (i > 0 && current instanceof String id && id.startsWith("LOCI")) {
-                String parentField = keys[i - 1];
-                String section;
-                switch (parentField) {
-                    case "detector"      -> section = "ID_Detector";
-                    case "objectiveLens" -> section = "ID_Objective";
-                    case "z_stage"       -> section = "ID_Stage";
-                    default                -> section = null;
-                }
-                if (section != null) {
+
+                // If this is a LOCI reference string and there are more keys,
+                // switch to resources and continue lookup
+                if (current instanceof String id && id.startsWith("LOCI") && i+1 < keys.length) {
+                    // Try to guess section name from the parent key
+                    String parentField = keys[i];
+                    String section = findResourceSectionForID(parentField, resourceData);
                     String normalized = id.replace('-', '_');
-                    Object sec = resourceData.get(section);
-                    if (sec instanceof Map<?, ?> secMap && secMap.containsKey(normalized)) {
-                        Object entry = ((Map<String, Object>) secMap).get(normalized);
-                        if (entry instanceof Map<?, ?> entryMap && entryMap.containsKey(key)) {
-                            current = entryMap.get(key);
-                            continue;
-                        }
+                    Object sectionObj = resourceData.get(section);
+                    if (sectionObj instanceof Map secMap && secMap.containsKey(normalized)) {
+                        current = ((Map<?,?>)secMap).get(normalized);
+                        // Now continue with the NEXT key in keys
+                        continue;
+                    } else {
+                        logger.warn("Could not find section {} or id {} in resources", section, normalized);
+                        return null;
                     }
                 }
+                // Else, continue as normal
+                continue;
             }
-            // 3) Not found
+
+            // If at this point current is a Map and has key, descend
+            if (current instanceof Map<?,?> map2 && map2.containsKey(key)) {
+                current = map2.get(key);
+                continue;
+            }
+
+            logger.warn("Key '{}' not found at step {}. Current: {}", key, i, current);
             return null;
         }
         return current;
     }
+
+    /**
+     * Guess the resource section name from the parent field or search all sections.
+     */
+    private static String findResourceSectionForID(String parentField, Map<String, Object> resourceData) {
+        // Simple mapping based on likely field names (expand if needed)
+        for (String section : resourceData.keySet()) {
+            // section: "ID_Detector", parentField: "detector"
+            if (section.toLowerCase().contains(parentField.toLowerCase())) {
+                return section;
+            }
+        }
+        // Fallback: just return the first (warn)
+        String fallback = resourceData.keySet().stream().findFirst().orElse(null);
+        if (fallback != null)
+            logger.warn("Falling back to first resource section '{}'", fallback);
+        return fallback;
+    }
+
 
     /**
      * Retrieves a String value from the config or resources.
