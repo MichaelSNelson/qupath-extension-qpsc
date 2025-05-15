@@ -116,7 +116,7 @@ public class BoundingBoxWorkflow {
                             frameWidth, frameHeight,
                             overlapPercent,
                             List.of(bb.x1(), bb.y1(), bb.x2(), bb.y2()),
-                            /*createTiles=*/ true,
+                            false,
                             Collections.emptyList(),
                             invertY, invertX);
 
