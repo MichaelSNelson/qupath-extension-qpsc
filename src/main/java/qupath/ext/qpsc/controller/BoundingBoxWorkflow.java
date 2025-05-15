@@ -95,11 +95,11 @@ public class BoundingBoxWorkflow {
                     // 5) Compute frame size in microns from YAML
                     MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(QPPreferenceDialog.getMicroscopeConfigFileProperty());
                     double pixelSize   = mgr.getDouble("imagingMode", sample.modality(), "pixelSize_um");
-                    String detectorID  = mgr.getString("imagingMode", sample.modality(), "detector");
+                    //String detectorID  = mgr.getString("imagingMode", sample.modality(), "detector");
 
                     // --- Get detector properties (width/height) from resources_LOCI ---
-                    int cameraWidth  = mgr.getInteger("ID_Detector", detectorID.replace("-", "_"), "width_px");
-                    int cameraHeight = mgr.getInteger("ID_Detector", detectorID.replace("-", "_"), "height_px");
+                    int cameraWidth  = mgr.getInteger("imagingMode", sample.modality(), "detector", "width_px");
+                    int cameraHeight = mgr.getInteger("imagingMode", sample.modality(), "detector", "height_px");
 
                     double frameWidth  = pixelSize * cameraWidth;
                     double frameHeight = pixelSize * cameraHeight;
@@ -115,23 +115,24 @@ public class BoundingBoxWorkflow {
                             Collections.emptyList(),
                             invertY, invertX);
 
-                    // 7) Prepare CLI arguments for acquisition — matches Groovy!
+                    // 7) Prepare CLI arguments for acquisition
                     String configFileLocation = QPPreferenceDialog.getMicroscopeConfigFileProperty();
                     String boundsMode         = "bounds";
 
                     List<String> cliArgs = List.of(
+                            res.getString("command.acquisitionWorkflow"),
                             configFileLocation,
                             projectsFolder,
                             sample.sampleName(),
                             modeWithIndex,
                             boundsMode
                     );
-
+                    logger.info(String.valueOf(cliArgs));
                     // Launch acquisition off FX thread
                     CompletableFuture<CliExecutor.ExecResult> scanFuture = CompletableFuture.supplyAsync(() -> {
                         try {
                             return CliExecutor.execComplexCommand(
-                                    /* timeoutSec= */ 300,
+                                    /* timeoutSec= */ 60,
                                     /* progressRegex= */ res.getString("acquisition.cli.progressRegex"),
                                     cliArgs.toArray(new String[0])
                             );
