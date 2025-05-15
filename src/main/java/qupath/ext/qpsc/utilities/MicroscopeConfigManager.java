@@ -146,71 +146,88 @@ public class MicroscopeConfigManager {
 
 
     /**
-     * Retrieves a nested configuration item by a sequence of keys, traversing the main config first.
-     * If a value beginning with "LOCI" is encountered, switches to resources_LOCI.yml to resolve details.
+     * Retrieve a deeply nested value from the microscope configuration,
+     * following references to resources_LOCI.yml dynamically if needed.
+     * <p>
+     * If a String value matching "LOCI-..." is encountered during traversal,
+     * this method will search all top-level sections of resources_LOCI.yml to find
+     * the corresponding entry and continue the lookup there.
+     * <p>
+     * All warning/error messages use strings from the resource bundle for localization.
      *
-     * @param keys Sequence of nested keys (e.g., "imagingMode","BF_10x","detector","width_px")
-     * @return The final value (String, Number, Map, List, etc.), or null if not found.
+     * @param keys Sequence of keys (e.g., "imagingMode", "BF_10x", "detector", "width_px").
+     * @return The value at the end of the key path, or null if not found.
      */
     @SuppressWarnings("unchecked")
     public Object getConfigItem(String... keys) {
+        ResourceBundle res = ResourceBundle.getBundle("qupath.ext.qpsc.ui.strings");
         Object current = configData;
+
         for (int i = 0; i < keys.length; i++) {
             String key = keys[i];
-
-            // 1. Standard descent
+            // Standard descent into the Map
             if (current instanceof Map<?, ?> map && map.containsKey(key)) {
                 current = map.get(key);
 
-                // If this is a LOCI reference string and there are more keys,
-                // switch to resources and continue lookup
+                // If this is a LOCI reference and more keys remain, switch to resourceData and continue
                 if (current instanceof String id && id.startsWith("LOCI") && i+1 < keys.length) {
-                    // Try to guess section name from the parent key
-                    String parentField = keys[i];
-                    String section = findResourceSectionForID(parentField, resourceData);
+                    logger.info(res.getString("configManager.switchingToResource"),
+                            id, Arrays.toString(keys), i, key);
+                    String section = findResourceSectionForID(key, resourceData, res);
+                    if (section == null) {
+                        logger.warn(res.getString("configManager.resourceSectionNotFound"),
+                                key, id, Arrays.toString(keys));
+                        return null;
+                    }
                     String normalized = id.replace('-', '_');
                     Object sectionObj = resourceData.get(section);
-                    if (sectionObj instanceof Map secMap && secMap.containsKey(normalized)) {
-                        current = ((Map<?,?>)secMap).get(normalized);
-                        // Now continue with the NEXT key in keys
-                        continue;
+                    if (sectionObj instanceof Map<?, ?> secMap && secMap.containsKey(normalized)) {
+                        current = ((Map<?, ?>) secMap).get(normalized);
+                        logger.info(res.getString("configManager.foundResourceEntry"),
+                                section, normalized, current);
+                        continue; // proceed with remaining keys
                     } else {
-                        logger.warn("Could not find section {} or id {} in resources", section, normalized);
+                        logger.warn(res.getString("configManager.resourceEntryNotFound"),
+                                normalized, section, Arrays.toString(keys));
                         return null;
                     }
                 }
-                // Else, continue as normal
                 continue;
             }
-
-            // If at this point current is a Map and has key, descend
+            // If at this point current is a Map, attempt descent
             if (current instanceof Map<?,?> map2 && map2.containsKey(key)) {
                 current = map2.get(key);
                 continue;
             }
-
-            logger.warn("Key '{}' not found at step {}. Current: {}", key, i, current);
+            // Not found – log full context
+            logger.warn(res.getString("configManager.keyNotFound"),
+                    key, i, current, Arrays.toString(keys));
             return null;
         }
+        logger.debug(res.getString("configManager.lookupSuccess"),
+                Arrays.toString(keys), current);
         return current;
     }
 
     /**
-     * Guess the resource section name from the parent field or search all sections.
+     * Helper to guess the correct resource section for a given parent field (e.g., "detector").
+     * Dynamically searches all top-level keys in resources_LOCI.yml.
+     * Logs and returns null if not found.
+     *
+     * @param parentField   The key referring to a hardware part ("detector", "objectiveLens", etc.)
+     * @param resourceData  The parsed LOCI resource map
+     * @param res           The strings ResourceBundle
+     * @return Section name in resourceData (e.g., "ID_Detector"), or null if not found
      */
-    private static String findResourceSectionForID(String parentField, Map<String, Object> resourceData) {
-        // Simple mapping based on likely field names (expand if needed)
+    private static String findResourceSectionForID(String parentField, Map<String, Object> resourceData, ResourceBundle res) {
         for (String section : resourceData.keySet()) {
-            // section: "ID_Detector", parentField: "detector"
             if (section.toLowerCase().contains(parentField.toLowerCase())) {
                 return section;
             }
         }
-        // Fallback: just return the first (warn)
-        String fallback = resourceData.keySet().stream().findFirst().orElse(null);
-        if (fallback != null)
-            logger.warn("Falling back to first resource section '{}'", fallback);
-        return fallback;
+        logger.warn(res.getString("configManager.sectionGuessFallback"), parentField, resourceData.keySet());
+        // Fallback: just use first section, but warn!
+        return resourceData.keySet().stream().findFirst().orElse(null);
     }
 
 
