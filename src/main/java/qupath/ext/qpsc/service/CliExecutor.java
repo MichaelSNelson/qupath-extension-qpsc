@@ -11,7 +11,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -115,71 +117,69 @@ public class CliExecutor {
     }
 
     /**
-     * Run the microscope CLI and capture its output.
+     * Runs a CLI command with an inactivity timeout: if no matching stdout line (e.g., "tiles done")
+     * is seen for the specified time, the process is killed and returns timedOut=true.
+     * The inactivity timer is reset every time progress is made (i.e., the regex matches a line).
      *
-     * @param timeoutSec      seconds after which the process will be destroyed (0 ⇒ wait forever)
-     * @param tilesDoneRegex  if non-null, every stdout line matching this regex
-     *                        increments the progress-counter.
-     * @param args            everything *after* the run-command stored in prefs.
-     * @return ExecResult with exit-code, stdout, stderr and timeout flag.
+     * @param inactivityTimeoutSec Timeout in seconds with no progress before killing process
+     * @param tilesDoneRegex   Regex to count progress (e.g., "tiles done"). Can be null.
+     * @param args             Command-line args after the executable.
+     * @return ExecResult containing exit code, timeout flag, and full stdout/stderr.
+     * @throws IOException          On I/O error.
+     * @throws InterruptedException If interrupted while waiting for the process to complete.
      */
     public static ExecResult execComplexCommand(
-            int timeoutSec,
+            int inactivityTimeoutSec,
             String tilesDoneRegex,
             String... args) throws IOException, InterruptedException {
 
-        //------------------------------------------------------------
-        // 0) Build full command
-        //------------------------------------------------------------
+        // ---- Build command (as before) ----
         String exeName = args[0] + (MinorFunctions.isWindows() ? ".exe" : "");
         String cliFolder = QPPreferenceDialog.getCliFolder();
-        Path exePath = Paths.get(cliFolder, exeName);
+        Path exePath = Path.of(cliFolder, exeName);
 
-        List<String> cmd = new ArrayList<>();
+        List<String> cmd = new java.util.ArrayList<>();
         cmd.add(exePath.toString());
-        if (args.length > 1) {
-            cmd.addAll(Arrays.asList(args).subList(1, args.length));
-        }
+        if (args.length > 1) cmd.addAll(Arrays.asList(args).subList(1, args.length));
+        logger.info("→ Running external command: {} (via folder: {})", cmd, cliFolder);
 
-        logger.info("→ Running external command: {}  (resolved via {})", cmd, cliFolder);
-
-        //------------------------------------------------------------
-        // 1) Launch
-        //------------------------------------------------------------
+        // ---- Launch process ----
         ProcessBuilder pb = new ProcessBuilder(cmd);
         Process process = pb.start();
 
-        //------------------------------------------------------------
-        // 2) Prepare output capture
-        //------------------------------------------------------------
+        // ---- Output capture ----
         StringBuilder out = new StringBuilder();
         StringBuilder err = new StringBuilder();
         BufferedReader outR = new BufferedReader(new InputStreamReader(process.getInputStream()));
         BufferedReader errR = new BufferedReader(new InputStreamReader(process.getErrorStream()));
 
-        //------------------------------------------------------------
-        // 3) Optional tiles done progress-bar ---------------------
-        //------------------------------------------------------------
+        // ---- Progress counter and timer ----
         AtomicInteger tifCounter = new AtomicInteger();
         UIFunctions.ProgressHandle progressHandle = null;
-        Pattern   tilesPat   = tilesDoneRegex == null ? null : Pattern.compile(tilesDoneRegex);
-        int       totalTifs  = 0;
+        Pattern tilesPat = tilesDoneRegex == null ? null : Pattern.compile(tilesDoneRegex);
+        int totalTifs = 0;
         if (tilesPat != null) {
             totalTifs = MinorFunctions.countTifEntriesInTileConfig(List.of(args));
             if (totalTifs > 0)
                 progressHandle = UIFunctions.showProgressBarAsync(tifCounter, totalTifs, process, 20000);
         }
 
-        //------------------------------------------------------------
-        // 4) Consume stdout / stderr on background threads
-        //------------------------------------------------------------
+        // --- Inactivity timer ---
+        AtomicLong lastProgressTime = new AtomicLong(System.currentTimeMillis());
+        AtomicBoolean timedOut = new AtomicBoolean(false);
+
+        // ---- Output Thread ----
         Thread tOut = new Thread(() -> {
             try {
                 String line;
                 while ((line = outR.readLine()) != null) {
                     out.append(line).append('\n');
-                    if (tilesPat != null && tilesPat.matcher(line).find())
+                    if (tilesPat != null && tilesPat.matcher(line).find()) {
                         tifCounter.incrementAndGet();
+                        lastProgressTime.set(System.currentTimeMillis());
+                    }
+                    // To reset timer on *any* output, uncomment the following line:
+                    // else lastProgressTime.set(System.currentTimeMillis());
                 }
             } catch (IOException ignored) { }
         });
@@ -193,26 +193,35 @@ public class CliExecutor {
         tOut.start();
         tErr.start();
 
-        //------------------------------------------------------------
-        // 5) Wait (with optional timeout)
-        //------------------------------------------------------------
-        boolean timedOut = false;
-        if (timeoutSec > 0) {
-            timedOut = !process.waitFor(timeoutSec, TimeUnit.SECONDS);
-            if (timedOut) {
-                process.destroyForcibly();
-                err.append("Process killed after ").append(timeoutSec).append(" s timeout\n");
-            }
-        } else {
-            process.waitFor();
-        }
+        // ---- Timeout Thread ----
+        Thread timeoutThread = new Thread(() -> {
+            try {
+                while (process.isAlive()) {
+                    long now = System.currentTimeMillis();
+                    long idle = (now - lastProgressTime.get()) / 1000L;
+                    if (idle > inactivityTimeoutSec) {
+                        timedOut.set(true);
+                        process.destroyForcibly();
+                        err.append("Process killed after inactivity timeout of ")
+                                .append(inactivityTimeoutSec).append(" seconds\n");
+                        break;
+                    }
+                    Thread.sleep(1000);
+                }
+            } catch (InterruptedException ignored) {}
+        });
+        timeoutThread.setDaemon(true);
+        timeoutThread.start();
 
+        // ---- Wait for process to exit ----
+        process.waitFor();
         tOut.join();
         tErr.join();
-        if (progressHandle != null)
-            progressHandle.close();          // closes bar if still visible
+        timeoutThread.join(100);
 
-        return new ExecResult(process.exitValue(), timedOut, out, err);
+        if (progressHandle != null) progressHandle.close();
+
+        return new ExecResult(process.exitValue(), timedOut.get(), out, err);
     }
 
 

@@ -59,19 +59,18 @@ public class BoundingBoxWorkflow {
 
         // 1) Sample setup → 2) Bounding box dialogs
         SampleSetupController.showDialog()
-                .thenCompose(sample ->
-                        BoundingBoxController.showDialog()
-                                .thenApply(bb -> Map.entry(sample, bb))
+                .thenCompose(sample -> BoundingBoxController.showDialog()
+                        .thenApply(bb -> Map.entry(sample, bb))
                 )
                 .thenAccept(pair -> {
                     var sample = pair.getKey();
                     var bb     = pair.getValue();
 
                     // 3) Read persistent prefs
-                    String projectsFolder    = QPPreferenceDialog.getProjectsFolderProperty();
-                    double overlapPercent    = QPPreferenceDialog.getTileOverlapPercentProperty();
-                    boolean invertX          = QPPreferenceDialog.getInvertedXProperty();
-                    boolean invertY          = QPPreferenceDialog.getInvertedYProperty();
+                    String projectsFolder = QPPreferenceDialog.getProjectsFolderProperty();
+                    double overlapPercent = QPPreferenceDialog.getTileOverlapPercentProperty();
+                    boolean invertX       = QPPreferenceDialog.getInvertedXProperty();
+                    boolean invertY       = QPPreferenceDialog.getInvertedYProperty();
 
                     // 4) Create/open the QuPath project and import any open image
                     QuPathGUI qupathGUI = QPEx.getQuPath();
@@ -88,23 +87,19 @@ public class BoundingBoxWorkflow {
                     } catch (IOException e) {
                         throw new UncheckedIOException(e);
                     }
-                    String tempTileDir        = (String) pd.get("tempTileDirectory");
-                    String modeWithIndex      = (String) pd.get("imagingModeWithIndex");
+                    String tempTileDir   = (String) pd.get("tempTileDirectory");
+                    String modeWithIndex = (String) pd.get("imagingModeWithIndex");
                     @SuppressWarnings("unchecked")
                     Project<BufferedImage> project = (Project<BufferedImage>) pd.get("currentQuPathProject");
 
                     // 5) Compute frame size in microns from YAML
                     MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(QPPreferenceDialog.getMicroscopeConfigFileProperty());
-                    System.out.println(mgr.getAllConfig());  // Check if YAML content is printed
-                    System.out.println(QPPreferenceDialog.getMicroscopeConfigFileProperty());
-                    double pixelSize = mgr.getDouble("imagingMode", sample.modality(), "pixelSize_um");
-                    System.out.println("Pixel size: " +pixelSize);
+                    double pixelSize   = mgr.getDouble("imagingMode", sample.modality(), "pixelSize_um");
+                    String detectorID  = mgr.getString("imagingMode", sample.modality(), "detector");
 
-                    //String detectorID = mgr.getString("imagingMode", sample.modality(), "detector");
-
-                    int cameraWidth = mgr.getInteger("imagingMode", sample.modality(), "detector", "width_px");
-
-                    int cameraHeight = mgr.getInteger("imagingMode", sample.modality(), "detector", "height_px");
+                    // --- Get detector properties (width/height) from resources_LOCI ---
+                    int cameraWidth  = mgr.getInteger("ID_Detector", detectorID.replace("-", "_"), "width_px");
+                    int cameraHeight = mgr.getInteger("ID_Detector", detectorID.replace("-", "_"), "height_px");
 
                     double frameWidth  = pixelSize * cameraWidth;
                     double frameHeight = pixelSize * cameraHeight;
@@ -120,13 +115,26 @@ public class BoundingBoxWorkflow {
                             Collections.emptyList(),
                             invertY, invertX);
 
-                    // 7) Launch acquisition CLI off the FX thread
+                    // 7) Prepare CLI arguments for acquisition — matches Groovy!
+                    String configFileLocation = QPPreferenceDialog.getMicroscopeConfigFileProperty();
+                    String boundsMode         = "bounds";
+
+                    List<String> cliArgs = List.of(
+                            configFileLocation,
+                            projectsFolder,
+                            sample.sampleName(),
+                            modeWithIndex,
+                            boundsMode
+                    );
+
+                    // Launch acquisition off FX thread
                     CompletableFuture<CliExecutor.ExecResult> scanFuture = CompletableFuture.supplyAsync(() -> {
                         try {
                             return CliExecutor.execComplexCommand(
                                     /* timeoutSec= */ 300,
-                                    /* progressRegex= */ "tiles done",
-                                    /* args= */ "acquireTiles", tempTileDir);
+                                    /* progressRegex= */ res.getString("acquisition.cli.progressRegex"),
+                                    cliArgs.toArray(new String[0])
+                            );
                         } catch (Exception e) {
                             throw new CompletionException(e);
                         }
