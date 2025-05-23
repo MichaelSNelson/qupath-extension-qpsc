@@ -101,13 +101,14 @@ public class MicroscopeConfigManager {
      * For example, transforms ".../microscopes/config_PPM.yml" → ".../resources_LOCI.yml".
      *
      * @param configPath Path to the microscope YAML file.
-     * @return Path to resources_LOCI.yml (absolute path).
-     * @throws FileNotFoundException if the file does not exist.
+     * @return Path to resources_LOCI.yml.
      */
     private static String computeResourcePath(String configPath) {
         Path cfg = Paths.get(configPath);
-        // Go up two levels: <...>/microscopes/config.yml → <...>/resources_LOCI.yml
-        Path resourcePath = cfg.getParent().getParent().resolve("resources_LOCI.yml").toAbsolutePath();
+        // Get the parent folder of the config file
+        Path baseDir = cfg.getParent();
+        // Append "resources/resources_LOCI.yml"
+        Path resourcePath = baseDir.resolve("resources").resolve("resources_LOCI.yml").toAbsolutePath();
 
         File resourceFile = resourcePath.toFile();
         if (!resourceFile.exists()) {
