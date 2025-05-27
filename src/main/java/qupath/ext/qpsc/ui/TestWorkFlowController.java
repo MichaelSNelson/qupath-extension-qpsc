@@ -11,6 +11,7 @@ import org.slf4j.LoggerFactory;
 import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.util.List;
 import java.util.ResourceBundle;
 import java.util.concurrent.CompletableFuture;
 
@@ -115,10 +116,17 @@ public class TestWorkFlowController {
      * sends a heartbeat every 2 seconds, terminating if the connection is lost.
      */
     private static void launchPythonHeartbeatClient() {
-        String pythonExe = "F:\\miniconda\\envs\\qubalab\\python.exe"; // Update with actual path!
-        String script = "F:\\QPScopeExtension\\heartbeat_client.py"; // Update with actual script path!
+        String pythonExe = "C:\\Users\\lociuser\\miniconda3\\python.exe";
+        String scriptPath = "D:\\2025QPSC\\qupath-extension-qpsc\\heartbeat_client.py";
+        String host = "127.0.0.1"; // Or "localhost"
+        List<String> cmd = List.of(
+                pythonExe,
+                scriptPath,
+                "--host", host,
+                "--port", String.valueOf(HEARTBEAT_PORT)
+        );
 
-        ProcessBuilder pb = new ProcessBuilder(pythonExe, script, String.valueOf(HEARTBEAT_PORT));
+        ProcessBuilder pb = new ProcessBuilder(cmd);
         pb.inheritIO(); // Pipe Python stdout/stderr to console for debugging
         try {
             Process p = pb.start();
