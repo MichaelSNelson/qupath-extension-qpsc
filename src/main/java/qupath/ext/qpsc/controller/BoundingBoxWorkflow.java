@@ -129,6 +129,7 @@ public class BoundingBoxWorkflow {
                     );
                     logger.info(String.valueOf(cliArgs));
                     // Launch acquisition off FX thread
+                    logger.info("Starting acquisition CLI command...");
                     CompletableFuture<CliExecutor.ExecResult> scanFuture = CompletableFuture.supplyAsync(() -> {
                         try {
                             return CliExecutor.execComplexCommand(
@@ -140,9 +141,10 @@ public class BoundingBoxWorkflow {
                             throw new CompletionException(e);
                         }
                     });
-
+                    logger.info("Starting stitching scanFuture");
                     // 8) When scan completes, schedule stitching
-                    scanFuture.thenAccept(scanRes -> {
+                    scanFuture.thenAcceptAsync(scanRes -> {
+                        logger.info("Acquisition completed with exit code: " + scanRes.exitCode());
                         if (scanRes.exitCode() == 0) {
                             // Kick off stitching on your stitching executor
                             CompletableFuture.runAsync(() -> {
@@ -187,6 +189,7 @@ public class BoundingBoxWorkflow {
                                 UIFunctions.notifyUserOfError(
                                         "Failed to launch acquisition:\n" + ex.getCause().getMessage(),
                                         res.getString("acquisition.error.title")));
+                        logger.info(ex.getCause().getMessage());
                         return null;
                     });
 

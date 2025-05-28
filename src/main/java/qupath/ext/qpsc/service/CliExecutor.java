@@ -139,11 +139,15 @@ public class CliExecutor {
         Path exePath = Path.of(cliFolder, exeName);
 
         List<String> cmd = new java.util.ArrayList<>();
+
         logger.info(String.valueOf(cmd));
         cmd.add(exePath.toString());
         if (args.length > 1) cmd.addAll(Arrays.asList(args).subList(1, args.length));
         logger.info("→ Running external command: {} (via folder: {})", cmd, cliFolder);
-
+        logger.info("cmd: " + cmd);
+        for (int i = 0; i < cmd.size(); i++) {
+            logger.info("Arg " + i + ": " + cmd.get(i));
+        }
         // ---- Launch process ----
         ProcessBuilder pb = new ProcessBuilder(cmd);
         Process process = pb.start();
@@ -160,7 +164,9 @@ public class CliExecutor {
         Pattern tilesPat = tilesDoneRegex == null ? null : Pattern.compile(tilesDoneRegex);
         int totalTifs = 0;
         if (tilesPat != null) {
-            totalTifs = MinorFunctions.countTifEntriesInTileConfig(List.of(args));
+            Path tileDir = Paths.get(args[2], args[3], args[4], args[5]);
+            totalTifs = MinorFunctions.countTifEntriesInTileConfig(List.of(tileDir.toString()));
+            logger.info("Starting progress bar");
             if (totalTifs > 0)
                 progressHandle = UIFunctions.showProgressBarAsync(tifCounter, totalTifs, process, 20000);
         }

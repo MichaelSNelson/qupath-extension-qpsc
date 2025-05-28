@@ -6,13 +6,16 @@ import javafx.scene.control.*;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.VBox;
 import javafx.stage.Modality;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import qupath.ext.qpsc.controller.BoundingBoxWorkflow;
 
 import java.util.Optional;
 import java.util.ResourceBundle;
 import java.util.concurrent.CompletableFuture;
 
 public class BoundingBoxController {
-
+    private static final Logger logger = LoggerFactory.getLogger(BoundingBoxController.class);
     /** Holds the bounding-box + focus flag. */
     public record BoundingBoxResult(double x1, double y1,
                                     double x2, double y2,
@@ -28,6 +31,7 @@ public class BoundingBoxController {
      * @return a CompletableFuture which yields the bounding box coordinates and focus flag
      */
     public static CompletableFuture<BoundingBoxResult> showDialog() {
+
         CompletableFuture<BoundingBoxResult> future = new CompletableFuture<>();
         ResourceBundle res = ResourceBundle.getBundle("qupath.ext.qpsc.ui.strings");
 
@@ -114,6 +118,7 @@ public class BoundingBoxController {
                     }
                 } catch (Exception e) {
                     // Show an error and keep the dialog open
+                    logger.info(e.getMessage());
                     new Alert(Alert.AlertType.ERROR,
                             res.getString("boundingBox.error.invalidInput") + "\n" + e.getMessage()
                     ).showAndWait();
