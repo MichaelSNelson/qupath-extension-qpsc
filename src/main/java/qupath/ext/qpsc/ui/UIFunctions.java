@@ -66,14 +66,12 @@ public class UIFunctions {
     public static class ProgressHandle {
         private final Stage stage;
         private final Timeline timeline;
-
-        private ProgressHandle(Stage stage, Timeline timeline) {
-            this.stage   = stage;
+        public ProgressHandle(Stage stage, Timeline timeline) {
+            this.stage = stage;
             this.timeline = timeline;
         }
-
-        /** Stops updates and closes the progress bar window. */
         public void close() {
+            logger.info("ProgressHandle.close() called.");
             Platform.runLater(() -> {
                 timeline.stop();
                 stage.close();
@@ -95,69 +93,82 @@ public class UIFunctions {
             Process process,
             int timeoutMs) {
 
-        // 1) Prepare the Stage + controls (on FX thread)
-        Stage stage = new Stage();
-        ProgressBar progressBar = new ProgressBar(0);
-        progressBar.setPrefWidth(300);
-        Label timeLabel     = new Label("Estimating time…");
-        Label progressLabel = new Label("Processed 0 of " + totalFiles);
-        VBox vbox = new VBox(10, progressBar, timeLabel, progressLabel);
-        vbox.setStyle("-fx-padding: 10;");
+        final ProgressHandle[] handleHolder = new ProgressHandle[1];
 
         Platform.runLater(() -> {
+            logger.info("Creating progress bar UI on FX thread.");
+            Stage stage = new Stage();
+            ProgressBar progressBar = new ProgressBar(0);
+            progressBar.setPrefWidth(300);
+            Label timeLabel = new Label("Estimating time…");
+            Label progressLabel = new Label("Processed 0 of " + totalFiles);
+            VBox vbox = new VBox(10, progressBar, timeLabel, progressLabel);
+            vbox.setStyle("-fx-padding: 10;");
+
             stage.initModality(Modality.NONE);
             stage.setTitle("Microscope acquisition progress");
             stage.setScene(new Scene(vbox));
             stage.setAlwaysOnTop(true);
             stage.show();
+
+            // Shared timing state
+            AtomicLong startTime = new AtomicLong(0);
+            AtomicLong lastUpdateTime = new AtomicLong(System.currentTimeMillis());
+
+            // Build the Timeline
+            final Timeline timeline = new Timeline();
+            KeyFrame keyFrame = new KeyFrame(Duration.millis(200), evt -> {
+                int current = progressCounter.get();
+                long now = System.currentTimeMillis();
+
+                // Record start time once work begins
+                if (current > 0 && startTime.get() == 0) {
+                    startTime.set(now);
+                }
+
+                // Update fraction & labels
+                double fraction = totalFiles > 0 ? current / (double) totalFiles : 0.0;
+                progressBar.setProgress(fraction);
+                progressLabel.setText("Processed " + current + " of " + totalFiles);
+
+                if (startTime.get() > 0 && current > 0) {
+                    long elapsed = now - startTime.get();
+                    long remMs = (long) ((elapsed / (double) current) * (totalFiles - current));
+                    timeLabel.setText("Remaining: " + (remMs / 1000) + " s");
+                }
+
+                // Check for stall or completion
+                boolean stalled = (!process.isAlive())
+                        || (current == lastUpdateTime.get() && now - lastUpdateTime.get() > timeoutMs);
+
+                if (fraction >= 1.0 || stalled) {
+                    logger.info("Progress bar closing (fraction={}, stalled={}, current={}, total={})", fraction, stalled, current, totalFiles);
+                    timeline.stop();
+                    stage.close();
+                } else {
+                    lastUpdateTime.set(now);
+                }
+            });
+            timeline.getKeyFrames().add(keyFrame);
+            timeline.setCycleCount(Timeline.INDEFINITE);
+
+            // Store the ProgressHandle so we can return it below
+            handleHolder[0] = new ProgressHandle(stage, timeline);
+
+            logger.info("Starting progress Timeline on FX thread.");
+            timeline.play();
         });
 
-        // 2) Shared timing state
-        AtomicLong startTime      = new AtomicLong(0);
-        AtomicLong lastUpdateTime = new AtomicLong(System.currentTimeMillis());
-
-        // 3) Build the Timeline in two steps so we can reference it in the lambda
-        final Timeline timeline = new Timeline();
-        KeyFrame keyFrame = new KeyFrame(Duration.millis(200), evt -> {
-            int current = progressCounter.get();
-            long now = System.currentTimeMillis();
-
-            // Record start time once work begins
-            if (current > 0 && startTime.get() == 0) {
-                startTime.set(now);
-            }
-
-            // Update fraction & labels
-            double fraction = totalFiles > 0 ? current / (double) totalFiles : 0.0;
-            progressBar.setProgress(fraction);
-            progressLabel.setText("Processed " + current + " of " + totalFiles);
-
-            if (startTime.get() > 0 && current > 0) {
-                long elapsed = now - startTime.get();
-                long remMs   = (long) ((elapsed / (double) current) * (totalFiles - current));
-                timeLabel.setText("Remaining: " + (remMs / 1000) + " s");
-            }
-
-            // Check for stall or completion
-            boolean stalled = (!process.isAlive())
-                    || (current == lastUpdateTime.get() && now - lastUpdateTime.get() > timeoutMs);
-
-            if (fraction >= 1.0 || stalled) {
-                timeline.stop();
-                stage.close();
-            } else {
-                lastUpdateTime.set(now);
-            }
-        });
-        timeline.getKeyFrames().add(keyFrame);
-        timeline.setCycleCount(Timeline.INDEFINITE);
-
-        // 4) Start it on the FX thread
-        Platform.runLater(timeline::play);
-
-        // 5) Return the handle so caller can close early if desired
-        return new ProgressHandle(stage, timeline);
+        // Wait for handle to be set before returning (avoid NPE)
+        while (handleHolder[0] == null) {
+            try {
+                Thread.sleep(10);
+            } catch (InterruptedException ignored) {}
+        }
+        logger.info("ProgressHandle returned to caller.");
+        return handleHolder[0];
     }
+
 
 
 
