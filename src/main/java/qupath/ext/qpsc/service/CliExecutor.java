@@ -139,7 +139,6 @@ public class CliExecutor {
         Path exePath = Path.of(cliFolder, exeName);
 
         List<String> cmd = new java.util.ArrayList<>();
-
         logger.info(String.valueOf(cmd));
         cmd.add(exePath.toString());
         if (args.length > 1) cmd.addAll(Arrays.asList(args).subList(1, args.length));
@@ -150,6 +149,7 @@ public class CliExecutor {
         }
         // ---- Launch process ----
         ProcessBuilder pb = new ProcessBuilder(cmd);
+        pb.environment().put("PYTHONUNBUFFERED", "1");
         Process process = pb.start();
 
         // ---- Output capture ----

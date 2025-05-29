@@ -58,8 +58,9 @@ public class BoundingBoxController {
             tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
 
             // 3a) CSV entry tab
-            TextField csvField = new TextField();
-            csvField.setPromptText(res.getString("boundingBox.prompt.csv"));  // e.g. "X1, Y1, X2, Y2"
+            TextField csvField = new TextField("9000, 500, 10000, 1500");
+            //csvField.setPromptText(res.getString("boundingBox.prompt.csv"));  // e.g. "X1, Y1, X2, Y2"
+
             Tab csvTab = new Tab(res.getString("boundingBox.tab.csv"), new VBox(5, csvField));
 
             // 3b) Separate-fields tab

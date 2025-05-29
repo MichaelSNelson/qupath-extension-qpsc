@@ -72,7 +72,7 @@ public class BoundingBoxWorkflow {
                     boolean invertX       = QPPreferenceDialog.getInvertedXProperty();
                     boolean invertY       = QPPreferenceDialog.getInvertedYProperty();
 
-                    // 4) Create/open the QuPath project and import any open image
+                    // 4) Create/open the QuPath project
                     QuPathGUI qupathGUI = QPEx.getQuPath();
                     Map<String,Object> pd;
                     try {
