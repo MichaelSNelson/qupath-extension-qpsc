@@ -237,6 +237,17 @@ public class MinorFunctions {
         double offsetY = 0.5 * cameraHeightPixels * acquisitionPixelSizeMicrons;
         return new double[]{ offsetX, offsetY };
     }
+
+    public static String firstLines(String text, int maxLines) {
+        String[] lines = text.split("\r?\n");
+        if (lines.length <= maxLines) return text;
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < maxLines; i++) {
+            sb.append(lines[i]).append('\n');
+        }
+        sb.append("... (truncated, see log for full details)");
+        return sb.toString();
+    }
 }
 
 

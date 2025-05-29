@@ -23,6 +23,8 @@ import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.*;
 
+import static qupath.ext.qpsc.utilities.MinorFunctions.firstLines;
+
 /**
  * Runs the full  "bounding box " acquisition workflow:
  * <ol>
@@ -144,45 +146,69 @@ public class BoundingBoxWorkflow {
                     logger.info("Starting stitching scanFuture");
                     // 8) When scan completes, schedule stitching
                     scanFuture.thenAcceptAsync(scanRes -> {
-                        logger.info("Acquisition completed with exit code: " + scanRes.exitCode());
-                        if (scanRes.exitCode() == 0) {
-                            // Kick off stitching on your stitching executor
-                            CompletableFuture.runAsync(() -> {
-                                try {
-                                    // Show a quick "starting " notification
-                                    Platform.runLater(() ->
-                                            qupath.fx.dialogs.Dialogs.showInfoNotification(
-                                                    "Stitching",
-                                                    "Stitching " + sample.sampleName() + "…"));
+                        String stderr = scanRes.stderr().toString();
+                        String stdout = scanRes.stdout().toString();
 
-                                    // **NEW**: match updated signature
-                                    String outPath = UtilityFunctions.stitchImagesAndUpdateProject(
-                                            projectsFolder,                            // root projects folder
-                                            sample.sampleName(),                       // the sample subfolder
-                                            modeWithIndex,                      // e.g. "4x_bf_1"
-                                            "bounds",                                  // annotationName
-                                            qupathGUI,                                 // QuPathGUI instance
-                                            project,                                   // your Project<BufferedImage>
-                                            String.valueOf(QPPreferenceDialog                           // fetch compression choice
-                                                    .getCompressionTypeProperty()),                               // e.g. "DEFAULT "
-                                            pixelSize,                                 // µm per pixel
-                                            /*downsample=*/ 1                          // your downsample factor
-                                    );
-
-                                    // Notify on success
-                                    Platform.runLater(() ->
-                                            qupath.fx.dialogs.Dialogs.showInfoNotification(
-                                                    "Stitching complete",
-                                                    "Output: " + outPath));
-
-                                } catch (Exception e) {
-                                    Platform.runLater(() ->
-                                            UIFunctions.notifyUserOfError(
-                                                    "Stitching failed:\n" + e.getMessage(),
-                                                    "Stitching Error"));
-                                }
-                            }, STITCH_EXECUTOR);
+                        if (scanRes.exitCode() != 0) {
+                            // Check for MicroManager-specific errors
+                            if (stderr.contains("mmcorej") || stderr.contains("MicroManager")) {
+                                UIFunctions.notifyUserOfError(
+                                        "Failed to connect to MicroManager. Please verify that:\n" +
+                                                "- All hardware is connected\n" +
+                                                "- MicroManager can connect and run\n" +
+                                                "- MicroManager is NOT currently in 'Live' mode\n" +
+                                                "- Devices are configured correctly in MicroManager\n\n" +
+                                                "Details:\n" + firstLines(stderr, 10),  // see below for truncation
+                                        "MicroManager Connection"
+                                );
+                            } else {
+                                // Generic error notification
+                                UIFunctions.notifyUserOfError(
+                                        "Acquisition failed with exit code " + scanRes.exitCode() +
+                                                ".\n\nError output:\n" + firstLines(stderr, 10),
+                                        "Acquisition"
+                                );
+                            }
+                            logger.error("Acquisition failed, stderr:\n{}", stderr);
+                            logger.error("Acquisition failed, stdout:\n{}", stdout);
+                            return;
                         }
+                        // Exit code was 0, proceed
+                        CompletableFuture.runAsync(() -> {
+                            try {
+                                // Show a quick "starting " notification
+                                Platform.runLater(() ->
+                                        qupath.fx.dialogs.Dialogs.showInfoNotification(
+                                                "Stitching",
+                                                "Stitching " + sample.sampleName() + "…"));
+
+                                // **NEW**: match updated signature
+                                String outPath = UtilityFunctions.stitchImagesAndUpdateProject(
+                                        projectsFolder,                            // root projects folder
+                                        sample.sampleName(),                       // the sample subfolder
+                                        modeWithIndex,                      // e.g. "4x_bf_1"
+                                        "bounds",                                  // annotationName
+                                        qupathGUI,                                 // QuPathGUI instance
+                                        project,                                   // your Project<BufferedImage>
+                                        String.valueOf(QPPreferenceDialog                           // fetch compression choice
+                                                .getCompressionTypeProperty()),                               // e.g. "DEFAULT "
+                                        pixelSize,                                 // µm per pixel
+                                        /*downsample=*/ 1                          // your downsample factor
+                                );
+
+                                // Notify on success
+                                Platform.runLater(() ->
+                                        qupath.fx.dialogs.Dialogs.showInfoNotification(
+                                                "Stitching complete",
+                                                "Output: " + outPath));
+
+                            } catch (Exception e) {
+                                Platform.runLater(() ->
+                                        UIFunctions.notifyUserOfError(
+                                                "Stitching failed:\n" + e.getMessage(),
+                                                "Stitching Error"));
+                            }
+                        }, STITCH_EXECUTOR);
 
                     }).exceptionally(ex -> {
                         Platform.runLater(() ->
