@@ -64,7 +64,7 @@ This extension requires qupath-extension-tiles-to-pyramid to create the pyramida
 
 ---
 
-## File Structure
+## File Structure - incomplete
 qupath-extension-qpsc/
 │
 ├── src/
@@ -77,9 +77,46 @@ qupath-extension-qpsc/
 │ ├── config_PPM.yml # Example microscope config
 │ ├── resources_LOCI.yml # Shared hardware resource data
 │ └── ...
-├── heartbeat_client.py # Python heartbeat demo script
 ├── build.gradle.kts # Gradle build script
 └── README.md
+
+Workflow Overview:
+The diagram below illustrates the sequence of operations when a user performs an “Acquire by Bounding Box” workflow in the QP Scope extension. User input and configuration guide the Java workflow, which orchestrates microscope control via Python scripts, handles asynchronous stitching, and integrates the final OME-TIFF into the QuPath project.
+### Bounding Box Acquisition Workflow
+```mermaid
+sequenceDiagram
+    participant User
+    participant Q as QuPath GUI
+    participant Ext as QP Scope Extension
+    participant WF as BoundingBoxWorkflow
+    participant Py as Python CLI (PycroManager)
+    participant Stitch as Stitcher
+    participant Proj as QuPath Project
+
+    User->>Q: Select "Acquire by Bounding Box"
+    Q->>Ext: Calls SetupScope.installExtension()
+    Ext->>Q: Adds menu item
+    Q->>Ext: Menu item selected
+    Ext->>WF: QPScopeController.startWorkflow("boundingBox")
+
+    WF->>User: Show sample setup dialog
+    User->>WF: Enter sample/project info
+    WF->>User: Show bounding box dialog
+    User->>WF: Enter bounding box
+
+    WF->>WF: Read prefs/config\n(Get FOV, overlap, etc)
+    WF->>Proj: Create/open QuPath project
+
+    WF->>WF: Write TileConfiguration.txt
+    WF->>Py: Launch acquisition CLI (Python)
+    Py-->>WF: Output progress (stdout)
+    WF->>Q: Update progress bar
+
+    WF->>Stitch: Start stitching (async)
+    Stitch->>Proj: Add OME.TIFF to project
+
+    WF->>Q: Show notifications/errors
+```
 
 ## YAML Configuration
 Microscope config: Describes imaging modes, detectors, objectives, stage limits, etc. (config_PPM.yml)
