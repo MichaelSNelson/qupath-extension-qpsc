@@ -66,58 +66,54 @@ This extension requires qupath-extension-tiles-to-pyramid to create the pyramida
 
 📁 File Structure
 <details> <summary>Click to expand the file tree</summary>
-plaintext
-Copy
-Edit
+```text
 qupath-extension-qpsc/
-│
-├── .github/                      # (GitHub workflows and CI/CD configs)
-├── .gradle/                      # (Gradle build system files, auto-generated)
-├── .idea/                        # (IntelliJ project settings, optional)
-├── build/                        # (Build artifacts, auto-generated)
-├── gradle/                       # (Gradle wrapper/config)
-│
+├── .github/
+├── .gradle/
+├── .idea/
+├── build/
+├── gradle/
 ├── src/
 │   ├── main/
 │   │   ├── java/
 │   │   │   └── qupath/
 │   │   │       └── ext/
 │   │   │           └── qpsc/
-│   │   │               ├── controller/      # Workflow orchestration logic
-│   │   │               ├── ui/              # JavaFX dialogs & UI controllers
-│   │   │               ├── model/           # Data models (microscope state, transforms, etc.)
-│   │   │               ├── preferences/     # Persistent & session preferences
-│   │   │               ├── service/         # CLI/Python process integration
-│   │   │               ├── utilities/       # YAML/JSON, tile configs, project helpers, stitching, etc.
-│   │   │               ├── QPScopeChecks.java     # Config validation entry
-│   │   │               └── SetupScope.java        # Extension entry point (QuPathExtension)
+│   │   │               ├── controller/
+│   │   │               ├── ui/
+│   │   │               ├── model/
+│   │   │               ├── preferences/
+│   │   │               ├── service/
+│   │   │               ├── utilities/
+│   │   │               ├── QPScopeChecks.java
+│   │   │               └── SetupScope.java
 │   │   └── resources/
 │   │       └── qupath/
 │   │           └── ext/
 │   │               └── qpsc/
 │   │                   └── ui/
-│   │                       ├── interface.fxml        # JavaFX UI layout
-│   │                       └── strings.properties    # Localizable UI/user strings
+│   │                       ├── interface.fxml
+│   │                       └── strings.properties
 │   └── test/
 │       └── java/
 │           └── qupath/
 │               └── ext/
 │                   └── qpsc/
-│                       ├── CoordinateTransformationTest.java  # Transform tests
-│                       ├── QPProjectFunctionsTest.java        # Project/file helper tests
-│                       └── WorkflowTests.java                 # Workflow/integration tests
-│
+│                       ├── CoordinateTransformationTest.java
+│                       ├── QPProjectFunctionsTest.java
+│                       └── WorkflowTests.java
 ├── resources/
-│   ├── config_PPM.yml               # Example microscope config (YAML)
-│   ├── resources_LOCI.yml           # Shared hardware resources/config
-│   └── ...                          # Additional configs as needed
-│
-├── heartbeat_client.py              # Python: Heartbeat/keepalive test script
-├── build.gradle.kts                 # Gradle build configuration (Kotlin DSL)
-├── settings.gradle.kts              # Gradle settings
-├── .gitignore                       # Git ignore file
-├── README.md                        # Project documentation
-└── project-structure.txt            # (Optional: detailed structure/explanation)
+│   ├── config_PPM.yml
+│   ├── resources_LOCI.yml
+│   └── ...
+├── heartbeat_client.py
+├── build.gradle.kts
+├── settings.gradle.kts
+├── .gitignore
+├── README.md
+└── project-structure.txt
+
+```
 </details>
 Legend
 controller/ – Main workflow logic for acquisition, bounding box, existing image, etc.
