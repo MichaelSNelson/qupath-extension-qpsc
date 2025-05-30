@@ -95,7 +95,7 @@ sequenceDiagram
 
     Q->>Ext: Calls SetupScope.installExtension()
     Ext->>Q: Adds menu item
-    Q->>Ext: Bounding Box menu item selected
+    User->>Ext: Bounding Box menu item selected
     Ext->>WF: QPScopeController.startWorkflow("boundingBox")
 
     WF->>User: Show sample setup dialog
