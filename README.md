@@ -66,7 +66,7 @@ This extension requires qupath-extension-tiles-to-pyramid to create the pyramida
 
 📁 File Structure
 <details> <summary>Click to expand the file tree</summary>
-```text
+```
 qupath-extension-qpsc/
 ├── .github/
 ├── .gradle/
