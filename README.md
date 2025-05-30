@@ -64,21 +64,81 @@ This extension requires qupath-extension-tiles-to-pyramid to create the pyramida
 
 ---
 
-## File Structure - incomplete
+📁 File Structure
+<details> <summary>Click to expand the file tree</summary>
+plaintext
+Copy
+Edit
 qupath-extension-qpsc/
 │
+├── .github/                      # (GitHub workflows and CI/CD configs)
+├── .gradle/                      # (Gradle build system files, auto-generated)
+├── .idea/                        # (IntelliJ project settings, optional)
+├── build/                        # (Build artifacts, auto-generated)
+├── gradle/                       # (Gradle wrapper/config)
+│
 ├── src/
-│ ├── qupath/ext/qpsc/controller/ # Workflow orchestration logic
-│ ├── qupath/ext/qpsc/ui/ # GUI dialogs & controllers
-│ ├── qupath/ext/qpsc/preferences/ # Preferences management
-│ ├── qupath/ext/qpsc/utilities/ # YAML/JSON, tile config, stitching, etc.
-│ └── ...
+│   ├── main/
+│   │   ├── java/
+│   │   │   └── qupath/
+│   │   │       └── ext/
+│   │   │           └── qpsc/
+│   │   │               ├── controller/      # Workflow orchestration logic
+│   │   │               ├── ui/              # JavaFX dialogs & UI controllers
+│   │   │               ├── model/           # Data models (microscope state, transforms, etc.)
+│   │   │               ├── preferences/     # Persistent & session preferences
+│   │   │               ├── service/         # CLI/Python process integration
+│   │   │               ├── utilities/       # YAML/JSON, tile configs, project helpers, stitching, etc.
+│   │   │               ├── QPScopeChecks.java     # Config validation entry
+│   │   │               └── SetupScope.java        # Extension entry point (QuPathExtension)
+│   │   └── resources/
+│   │       └── qupath/
+│   │           └── ext/
+│   │               └── qpsc/
+│   │                   └── ui/
+│   │                       ├── interface.fxml        # JavaFX UI layout
+│   │                       └── strings.properties    # Localizable UI/user strings
+│   └── test/
+│       └── java/
+│           └── qupath/
+│               └── ext/
+│                   └── qpsc/
+│                       ├── CoordinateTransformationTest.java  # Transform tests
+│                       ├── QPProjectFunctionsTest.java        # Project/file helper tests
+│                       └── WorkflowTests.java                 # Workflow/integration tests
+│
 ├── resources/
-│ ├── config_PPM.yml # Example microscope config
-│ ├── resources_LOCI.yml # Shared hardware resource data
-│ └── ...
-├── build.gradle.kts # Gradle build script
-└── README.md
+│   ├── config_PPM.yml               # Example microscope config (YAML)
+│   ├── resources_LOCI.yml           # Shared hardware resources/config
+│   └── ...                          # Additional configs as needed
+│
+├── heartbeat_client.py              # Python: Heartbeat/keepalive test script
+├── build.gradle.kts                 # Gradle build configuration (Kotlin DSL)
+├── settings.gradle.kts              # Gradle settings
+├── .gitignore                       # Git ignore file
+├── README.md                        # Project documentation
+└── project-structure.txt            # (Optional: detailed structure/explanation)
+</details>
+Legend
+controller/ – Main workflow logic for acquisition, bounding box, existing image, etc.
+
+ui/ – User dialogs (JavaFX), UI controllers for user input and feedback.
+
+model/ – Data models for microscope state, affine/image transforms, and events.
+
+preferences/ – User settings and persistent configuration.
+
+service/ – Abstractions for CLI/Python process integration.
+
+utilities/ – Helpers for file IO, YAML/JSON, tiling, stitching, etc.
+
+resources/ – Configuration files (YAML), FXML, localizable strings.
+
+test/ – Unit and integration tests.
+
+heartbeat_client.py – Python script for test/integration workflows.
+
+
 
 Workflow Overview:
 The diagram below illustrates the sequence of operations when a user performs an “Acquire by Bounding Box” workflow in the QP Scope extension. User input and configuration guide the Java workflow, which orchestrates microscope control via Python scripts, handles asynchronous stitching, and integrates the final OME-TIFF into the QuPath project.
