@@ -93,10 +93,9 @@ sequenceDiagram
     participant Stitch as Stitcher
     participant Proj as QuPath Project
 
-    User->>Q: Select "Acquire by Bounding Box"
     Q->>Ext: Calls SetupScope.installExtension()
     Ext->>Q: Adds menu item
-    Q->>Ext: Menu item selected
+    Q->>Ext: Bounding Box menu item selected
     Ext->>WF: QPScopeController.startWorkflow("boundingBox")
 
     WF->>User: Show sample setup dialog
