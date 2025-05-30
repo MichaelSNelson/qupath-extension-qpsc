@@ -30,91 +30,131 @@ import java.util.stream.Collectors;
 /**
  * ExistingImageWorkflow
  *
- * Handles the workflow for processing an existing macro image in QuPath,
- * including annotation validation, affine transformation setup, microscope acquisition,
- * and image stitching.
+ * Orchestrates the workflow for targeted microscope acquisition using an existing (low-res) image in QuPath.
+ *
+ * <p>Steps:
+ * <ol>
+ *   <li>User provides sample and imaging parameters.</li>
+ *   <li>Regions of interest (annotations) are detected and tiled based on camera and sample pixel size.</li>
+ *   <li>User aligns the hardware stage to image space using interactive affine transformation tools.</li>
+ *   <li>Acquisition coordinates are mapped and sent to the microscope (via Python/CLI).</li>
+ *   <li>Tiles are stitched after each acquisition region (in background threads).</li>
+ *   <li>Workflow supports acquiring/stitching multiple regions independently and in parallel.</li>
+ * </ol>
  */
 public class ExistingImageWorkflow {
-
     private static final Logger logger = LoggerFactory.getLogger(ExistingImageWorkflow.class);
 
+    /**
+     * Main entry point for the workflow. Handles all user interaction and launches
+     * the acquisition process.
+     */
     public static void run() {
-        var res = ResourceBundle.getBundle("qupath.ext.qpsc.ui.strings");
+        ResourceBundle res = ResourceBundle.getBundle("qupath.ext.qpsc.ui.strings");
         QuPathGUI qupathGUI = QuPathGUI.getInstance();
 
+        // 1. Collect sample setup and existing image info from the user via dialogs
         SampleSetupController.showDialog()
                 .thenCompose(sample ->
                         ExistingImageController.showDialog()
                                 .thenApply(existingImage -> Map.entry(sample, existingImage))
                 )
-                .thenAccept(pair -> {
-                    var sample = pair.getKey();
-                    var existingImage = pair.getValue();
-
-                    Platform.runLater(() -> executeWorkflow(sample, existingImage, qupathGUI));
-                })
+                .thenAccept(pair -> Platform.runLater(() ->
+                        executeWorkflow(pair.getKey(), pair.getValue(), qupathGUI)
+                ))
                 .exceptionally(ex -> {
                     UIFunctions.notifyUserOfError(ex.getMessage(), "Workflow Initialization Error");
                     return null;
                 });
     }
 
-
-    private static void executeWorkflow(SampleSetupController.SampleSetupResult sample, ExistingImageController.UserInput existingImage, QuPathGUI qupathGUI) {
+    /**
+     * Executes the full acquisition and stitching workflow for a given sample and existing image.
+     *
+     * @param sample        User-provided sample/project parameters
+     * @param existingImage User input regarding macro image properties
+     * @param qupathGUI     QuPath main GUI instance
+     */
+    private static void executeWorkflow(
+            SampleSetupController.SampleSetupResult sample,
+            ExistingImageController.UserInput existingImage,
+            QuPathGUI qupathGUI
+    ) {
         try {
-
-            // Retrieve necessary preferences
+            // --- 2. Retrieve preferences and initialize QuPath project ---
             String projectsFolder = sample.projectsFolder().getAbsolutePath();
             String modality = sample.modality();
             String sampleName = sample.sampleName();
             boolean invertX = QPPreferenceDialog.getInvertedXProperty();
             boolean invertY = QPPreferenceDialog.getInvertedYProperty();
-            // Project initialization or loading
+
+            // Create/open project and get temporary tile directory, imaging mode, etc.
             Map<String, Object> projectDetails = QPProjectFunctions.createAndOpenQuPathProject(
                     qupathGUI, projectsFolder, sampleName, modality, invertX, invertY);
 
+            @SuppressWarnings("unchecked")
             Project<BufferedImage> project = (Project<BufferedImage>) projectDetails.get("currentQuPathProject");
             String tempTileDirectory = (String) projectDetails.get("tempTileDirectory");
             String modeWithIndex = (String) projectDetails.get("imagingModeWithIndex");
 
+            // --- 3. Camera and pixel size configuration ---
             double pixelSizeSource = existingImage.macroPixelSize();
-            double pixelSizeFirstMode = MicroscopeConfigManager.getInstance(QPPreferenceDialog.getMicroscopeConfigFileProperty())
+            double pixelSizeFirstMode = MicroscopeConfigManager
+                    .getInstance(QPPreferenceDialog.getMicroscopeConfigFileProperty())
                     .getDouble("imagingMode", modality, "pixelSize_um");
 
-            int cameraWidth = MicroscopeConfigManager.getInstance(QPPreferenceDialog.getMicroscopeConfigFileProperty())
+            int cameraWidth = MicroscopeConfigManager
+                    .getInstance(QPPreferenceDialog.getMicroscopeConfigFileProperty())
                     .getInteger("imagingMode", modality, "detector", "width_px");
-            int cameraHeight = MicroscopeConfigManager.getInstance(QPPreferenceDialog.getMicroscopeConfigFileProperty())
+            int cameraHeight = MicroscopeConfigManager
+                    .getInstance(QPPreferenceDialog.getMicroscopeConfigFileProperty())
                     .getInteger("imagingMode", modality, "detector", "height_px");
 
+            // The field of view of the camera in units of QuPath (macro image) pixels
             double frameWidthQPpixels = cameraWidth * (pixelSizeFirstMode / pixelSizeSource);
             double frameHeightQPpixels = cameraHeight * (pixelSizeFirstMode / pixelSizeSource);
 
+            // --- 4. Find annotations (ROIs) to target for acquisition ---
             List<PathObject> annotations = qupathGUI.getViewer().getHierarchy().getAnnotationObjects().stream()
                     .filter(o -> "Tissue".equals(o.getPathClass().getName()))
                     .collect(Collectors.toList());
 
             if (annotations.isEmpty()) {
-                Alert alert = new Alert(Alert.AlertType.ERROR, "No valid 'Tissue' annotations found.");
-                alert.showAndWait();
+                // No suitable regions, abort workflow
+                Platform.runLater(() -> UIFunctions.notifyUserOfError(
+                        "No valid 'Tissue' annotations found.", "Region Selection Error"));
                 return;
             }
 
-            UtilityFunctions.performTilingAndSaveConfiguration(tempTileDirectory, modeWithIndex,
-                    frameWidthQPpixels, frameHeightQPpixels,
+            // --- 5. Generate tiling for all target annotations/regions ---
+            UtilityFunctions.performTilingAndSaveConfiguration(
+                    tempTileDirectory,
+                    modeWithIndex,
+                    frameWidthQPpixels,
+                    frameHeightQPpixels,
                     QPPreferenceDialog.getTileOverlapPercentProperty(),
-                    null, true, annotations, invertY, invertX);
+                    null, // No bounding box, use annotations directly
+                    true, // Use annotations as regions to tile
+                    annotations,
+                    invertY,
+                    invertX
+            );
 
-            CompletableFuture<AffineTransform> transform = AffineTransformationController.setupAffineTransformationAndValidationGUI(
-                    pixelSizeSource, invertY, invertX);
+            // --- 6. Interactive affine transformation: user aligns hardware and software views ---
+            CompletableFuture<AffineTransform> transformFuture =
+                    AffineTransformationController.setupAffineTransformationAndValidationGUI(
+                            pixelSizeSource, invertY, invertX);
 
-            if (transform == null) {
-                logger.info("Affine transform setup cancelled.");
+            if (transformFuture == null) {
+                logger.info("Affine transform setup cancelled by user.");
                 return;
             }
 
+            // 7. Launch acquisition and stitching asynchronously for each annotation/region
             CompletableFuture.runAsync(() -> {
                 annotations.forEach(annotation -> {
                     try {
+                        // --- 7a. Launch tile acquisition via CLI ---
                         CliExecutor.ExecResult result = CliExecutor.execComplexCommand(
                                 300, "tiles done", "acquireTiles", tempTileDirectory);
 
@@ -124,11 +164,20 @@ public class ExistingImageWorkflow {
                             return;
                         }
 
+                        // --- 7b. Stitch and update project in background ---
                         String stitchedImagePath = UtilityFunctions.stitchImagesAndUpdateProject(
-                                projectsFolder, sampleName, modeWithIndex, annotation.getName(),
-                                qupathGUI, project,
-                                String.valueOf(QPPreferenceDialog.getCompressionTypeProperty()), pixelSizeFirstMode, 1);
+                                projectsFolder,
+                                sampleName,
+                                modeWithIndex,
+                                annotation.getName(),
+                                qupathGUI,
+                                project,
+                                String.valueOf(QPPreferenceDialog.getCompressionTypeProperty()),
+                                pixelSizeFirstMode,
+                                1 // downsample
+                        );
 
+                        // --- 7c. Post-processing: record tile boundaries for future alignment or QC ---
                         Path tileConfigPath = Path.of(projectsFolder, sampleName, modeWithIndex,
                                 annotation.getName(), "TileConfiguration.txt");
 
@@ -140,6 +189,7 @@ public class ExistingImageWorkflow {
                     }
                 });
 
+                // 8. Handle cleanup after all acquisitions/stitching
                 handleTilesCleanup(tempTileDirectory);
             });
 
@@ -148,6 +198,11 @@ public class ExistingImageWorkflow {
         }
     }
 
+    /**
+     * Handles post-acquisition tile cleanup based on user preferences.
+     *
+     * @param tileDirectory Directory to clean up (delete or zip, etc.)
+     */
     private static void handleTilesCleanup(String tileDirectory) {
         String tileHandling = QPPreferenceDialog.getTileHandlingMethodProperty();
         if ("Delete".equals(tileHandling)) {
@@ -157,4 +212,5 @@ public class ExistingImageWorkflow {
             UtilityFunctions.deleteTilesAndFolder(tileDirectory);
         }
     }
+
 }
