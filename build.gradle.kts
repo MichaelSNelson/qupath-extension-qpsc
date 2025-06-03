@@ -38,7 +38,8 @@ dependencies {
     //shadow(libs.slf4j)
     shadow(libs.snakeyaml)
     shadow(libs.gson)
-    implementation("qupath.ext.basicstitching:basic-stitching:0.2.0")
+
+    implementation("io.github.michaelsnelson:qupath-extension-tiles-to-pyramid:0.1.0")
     implementation("io.github.qupath:qupath-extension-bioformats:0.6.0-rc4")
     // If you aren't using Groovy, this can be removed
     shadow(libs.bundles.groovy)
