@@ -3,7 +3,9 @@ package qupath.ext.qpsc.utilities;
 import javafx.application.Platform;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import qupath.ext.basicstitching.stitching.StitchingImplementations;
+import qupath.ext.basicstitching.config.StitchingConfig;
+
+import qupath.ext.basicstitching.workflow.StitchingWorkflow;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.ui.UIFunctions;
 import qupath.lib.gui.QuPathGUI;
@@ -81,14 +83,19 @@ public class UtilityFunctions {
         logger.info("Stitching tiles in '{}' → output in '{}'", tileFolder, stitchedFolder);
 
         // 2) Run the core stitching routine
-        String outPath = StitchingImplementations.stitchCore(
-                "Coordinates in TileConfiguration.txt file",
-                tileFolder,
-                stitchedFolder,
-                compression,
-                pixelSizeMicrons,
-                downsample,
-                annotationName);
+        // The annotationName here is used as the "matching string" filter (like before).
+        StitchingConfig config = new StitchingConfig(
+                "Coordinates in TileConfiguration.txt file", // stitchingType
+                tileFolder,          // folderPath (tile input root)
+                stitchedFolder,      // outputPath (where OME-TIFF is saved)
+                compression,         // compressionType
+                pixelSizeMicrons,    // pixel size (microns)
+                downsample,          // downsample factor
+                annotationName,      // matching string for subfolder/file filtering
+                1.0                  // zSpacingMicrons (can be set as needed)
+        );
+        String outPath = StitchingWorkflow.run(config);
+
 
         // 3) Rename according to sample/mode/annotation
         File orig = new File(outPath);
