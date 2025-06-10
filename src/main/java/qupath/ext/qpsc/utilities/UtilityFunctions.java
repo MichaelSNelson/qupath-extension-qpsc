@@ -301,12 +301,29 @@ public class UtilityFunctions {
             double y1 = boundingBoxCoordinates.get(1);
             double x2 = boundingBoxCoordinates.get(2);
             double y2 = boundingBoxCoordinates.get(3);
+            // Determine bounding box min/max for each axis
+            double minX = Math.min(x1, x2);
+            double maxX = Math.max(x1, x2);
+            double minY = Math.min(y1, y2);
+            double maxY = Math.max(y1, y2);
 
-            // The grid covers the area defined by (x1, y1) and (x2, y2)
-            double startX = Math.min(x1, x2) - frameWidth / 2.0;
-            double startY = Math.min(y1, y2) - frameHeight / 2.0;
-            double width  = Math.abs(x2 - x1) + frameWidth;
-            double height = Math.abs(y2 - y1) + frameHeight;
+            // If axis is inverted, swap start/end
+            if (invertXAxis) {
+                double temp = minX;
+                minX = maxX;
+                maxX = temp;
+            }
+            if (invertYAxis) {
+                double temp = minY;
+                minY = maxY;
+                maxY = temp;
+            }
+
+            // Calculate tiling grid origin and size
+            double startX = minX - frameWidth / 2.0;
+            double startY = minY - frameHeight / 2.0;
+            double width  = Math.abs(maxX - minX) + frameWidth;
+            double height = Math.abs(maxY - minY) + frameHeight;
 
             // Create a rectangular ROI covering the tiling area
             ROI roi = ROIs.createRectangleROI(
@@ -320,46 +337,95 @@ public class UtilityFunctions {
             createTileConfiguration(
                     startX, startY, width, height,
                     frameWidth, frameHeight, overlapPercent,
-                    configPath, roi, imagingModalityWithIndex, createTiles);
+                    configPath, roi, imagingModalityWithIndex, createTiles, invertXAxis, invertYAxis);
 
             logger.info(res.getString("tiling.perform.success"), configPath);
 
         } else {
             // --- Alternative: tiling from annotations ---
-            // Remove existing detection objects for this modality
-            String modality = imagingModalityWithIndex.replaceAll("(_\\d+)$", "");
-            QP.getDetectionObjects().stream()
-                    .filter(o -> o.getPathClass().toString().toLowerCase().contains(modality))
-                    .forEach(o -> QP.removeObjects(Collections.singleton(o)));
+            performTilingFromAnnotations(
+                    modalityIndexFolder,
+                    imagingModalityWithIndex,
+                    frameWidth,
+                    frameHeight,
+                    overlapPercent,
+                    annotations,
+                    createTiles,
+                    invertXAxis,
+                    invertYAxis,
+                    /*buffer=*/true  // or false, as needed
+            );
+        }
+    }
+    /**
+     * Handles annotation-based tiling:
+     *  - For each annotation: creates its own folder and TileConfiguration.txt
+     *  - Generates a grid of tiles that covers the annotation bounds (plus buffer if desired)
+     *  - Only writes out tiles whose centroids are inside the annotation shape
+     *  - Handles axis inversion and snaking
+     */
+    public static void performTilingFromAnnotations(
+            String modalityIndexFolder,
+            String imagingModalityWithIndex,
+            double frameWidth,
+            double frameHeight,
+            double overlapPercent,
+            Collection<PathObject> annotations,
+            boolean createTiles,
+            boolean invertXAxis,
+            boolean invertYAxis,
+            boolean buffer // if you want a half-frame buffer around annotation
+    ) {
+        Logger logger = LoggerFactory.getLogger("Tiling");
 
-            // Name and lock each annotation
-            annotations.forEach(annotation -> {
-                annotation.setName(String.format("%d_%d",
-                        (int) annotation.getROI().getCentroidX(),
-                        (int) annotation.getROI().getCentroidY()));
-                annotation.setLocked(true);
-            });
+        // Remove index suffix from modality string for PathClass matching
+        String modality = imagingModalityWithIndex.replaceAll("(_\\d+)$", "");
 
-            // For each annotation, create and add a detection tile that covers it, padded by frame size
-            for (PathObject annotation : annotations) {
-                ROI aroi = annotation.getROI();
-                double bX = aroi.getBoundsX();
-                double bY = aroi.getBoundsY();
-                double bW = aroi.getBoundsWidth();
-                double bH = aroi.getBoundsHeight();
-                String name = annotation.getName();
+        // Remove any old tiles for this modality
+        QP.getDetectionObjects().stream()
+                .filter(o -> o.getPathClass().toString().toLowerCase().contains(modality))
+                .forEach(o -> QP.removeObjects(Collections.singleton(o)));
 
-                PathObject tile = PathObjects.createDetectionObject(
-                        ROIs.createRectangleROI(
-                                bX - frameWidth / 2, bY - frameHeight / 2,
-                                bW + frameWidth, bH + frameHeight, ImagePlane.getDefaultPlane()
-                        ),
-                        QP.getPathClass(modality)
-                );
-                tile.setName(name);
-                QP.getCurrentHierarchy().addObject(tile);
+        // Name and lock all annotations
+        for (PathObject annotation : annotations) {
+            annotation.setName(String.format("%d_%d",
+                    (int) annotation.getROI().getCentroidX(),
+                    (int) annotation.getROI().getCentroidY()));
+            annotation.setLocked(true);
+        }
+        QP.fireHierarchyUpdate();
+
+        // For each annotation, tile its region and write TileConfiguration.txt
+        for (PathObject annotation : annotations) {
+            ROI annotationROI = annotation.getROI();
+            double bBoxX = annotationROI.getBoundsX();
+            double bBoxY = annotationROI.getBoundsY();
+            double bBoxW = annotationROI.getBoundsWidth();
+            double bBoxH = annotationROI.getBoundsHeight();
+            String annotationName = annotation.getName();
+
+            // Optional: add buffer to bounds to ensure coverage
+            if (buffer) {
+                bBoxX -= frameWidth / 2.0;
+                bBoxY -= frameHeight / 2.0;
+                bBoxW += frameWidth;
+                bBoxH += frameHeight;
             }
-            QP.fireHierarchyUpdate();
+
+            // Each annotation gets its own folder and tile config
+            String tileFolder = QP.buildFilePath(modalityIndexFolder, annotationName);
+            QP.mkdirs(tileFolder);
+
+            String tileConfigPath = QP.buildFilePath(tileFolder, "TileConfiguration.txt");
+
+            // Call robust tiling function for this region
+            createTileConfiguration(
+                    bBoxX, bBoxY, bBoxW, bBoxH,
+                    frameWidth, frameHeight, overlapPercent,
+                    tileConfigPath, annotationROI, imagingModalityWithIndex, createTiles, invertXAxis, invertYAxis
+            );
+
+            logger.info("Tiled annotation {} into folder {}", annotationName, tileFolder);
         }
     }
 
@@ -373,17 +439,19 @@ public class UtilityFunctions {
      * <p>
      * Ensures the parent directory for the tile config file exists before attempting to write.
      *
-     * @param bBoxX             Bounding box top-left X coordinate (in stage units, e.g. microns)
-     * @param bBoxY             Bounding box top-left Y coordinate
-     * @param bBoxW             Bounding box width (stage units)
-     * @param bBoxH             Bounding box height (stage units)
-     * @param frameWidth        Width of one image tile (microns)
-     * @param frameHeight       Height of one image tile (microns)
-     * @param overlapPercent    Overlap between adjacent tiles, as a percent of tile size (0-100)
-     * @param tilePath          Full file path to write the TileConfiguration.txt (including filename)
-     * @param annotationROI     Optional: restrict to a specific annotation (may be null for full box)
-     * @param imagingModality   Name of modality (used to set the PathClass for QuPath detections)
-     * @param createTiles       If true, detection objects will be created and added to the QuPath project
+     * @param bBoxX           Bounding box top-left X coordinate (in stage units, e.g. microns)
+     * @param bBoxY           Bounding box top-left Y coordinate
+     * @param bBoxW           Bounding box width (stage units)
+     * @param bBoxH           Bounding box height (stage units)
+     * @param frameWidth      Width of one image tile (microns)
+     * @param frameHeight     Height of one image tile (microns)
+     * @param overlapPercent  Overlap between adjacent tiles, as a percent of tile size (0-100)
+     * @param tilePath        Full file path to write the TileConfiguration.txt (including filename)
+     * @param annotationROI   Optional: restrict to a specific annotation (may be null for full box)
+     * @param imagingModality Name of modality (used to set the PathClass for QuPath detections)
+     * @param createTiles     If true, detection objects will be created and added to the QuPath project
+     * @param invertXAxis     Whether to invert the X axis when generating tiles
+     * @param invertYAxis     Whether to invert the Y axis when generating tiles
      */
     public static void createTileConfiguration(
             double bBoxX,
@@ -396,58 +464,114 @@ public class UtilityFunctions {
             String tilePath,
             ROI annotationROI,
             String imagingModality,
-            boolean createTiles) {
+            boolean createTiles,
+            boolean invertXAxis,
+            boolean invertYAxis) {
 
-        logger.info(res.getString("tileConfig.create.start"), tilePath);
+        Logger logger = LoggerFactory.getLogger("Tiling");
 
-        // Compute the stage step size between tile centers (considering overlap)
+        logger.info("Creating tile configuration:");
+        logger.info("  Tile path: {}", tilePath);
+        logger.info("  Bounding box: X={} Y={} W={} H={}", bBoxX, bBoxY, bBoxW, bBoxH);
+        logger.info("  Frame size: W={} H={}", frameWidth, frameHeight);
+        logger.info("  Overlap: {}%", overlapPercent);
+        logger.info("  InvertX: {}, InvertY: {}", invertXAxis, invertYAxis);
+
+        // Step sizes (distance between tile centers)
         double xStep = frameWidth  - overlapPercent / 100.0 * frameWidth;
         double yStep = frameHeight - overlapPercent / 100.0 * frameHeight;
 
-        // Lines to write to the TileConfiguration.txt
-        List<String> lines = new ArrayList<>();
-        lines.add("dim = 2");
+        // Calculate grid start and end coordinates, depending on inversion
+        double xStart = bBoxX;
+        double xEnd   = bBoxX + bBoxW;
+        double yStart = bBoxY;
+        double yEnd   = bBoxY + bBoxH;
 
-        int index = 0, row = 0;
-        double y = bBoxY, x = bBoxX;
-        List<PathObject> newTiles = new ArrayList<>();
-
-        // --- Loop through stage positions and generate tile positions ---
-        while (y < bBoxY + bBoxH) {
-            while (x <= bBoxX + bBoxW && x >= bBoxX - bBoxW * overlapPercent / 100.0) {
-                ROI tileROI = ROIs.createRectangleROI(x, y, frameWidth, frameHeight, ImagePlane.getDefaultPlane());
-                // Only add tile if inside annotation, or if no annotation specified
-                if (annotationROI == null || annotationROI.getGeometry().intersects(tileROI.getGeometry())) {
-                    PathObject tile = PathObjects.createDetectionObject(tileROI, QP.getPathClass(imagingModality));
-                    tile.setName(String.valueOf(index));
-                    tile.getMeasurements().put("TileNumber", index);
-                    newTiles.add(tile);
-                    lines.add(String.format("%d.tif; ; (%.3f, %.3f)", index, tileROI.getCentroidX(), tileROI.getCentroidY()));
-                }
-                // Serpentine tiling (row-wise, zig-zag)
-                x = (row % 2 == 0) ? x + xStep : x - xStep;
-                index++;
-            }
-            row++;
-            y += yStep;
-            x = (row % 2 == 0) ? bBoxX : (bBoxX + bBoxW);
+        if (invertXAxis) {
+            double tmp = xStart;
+            xStart = xEnd;
+            xEnd = tmp;
+            xStep = -xStep;
+        }
+        if (invertYAxis) {
+            double tmp = yStart;
+            yStart = yEnd;
+            yEnd = tmp;
+            yStep = -yStep;
         }
 
-        // --- Ensure parent directories exist before writing the file ---
+        logger.info("  xStart: {}, xEnd: {}, xStep: {}", xStart, xEnd, xStep);
+        logger.info("  yStart: {}, yEnd: {}, yStep: {}", yStart, yEnd, yStep);
+
+        // Prepare output
+        List<String> lines = new ArrayList<>();
+        lines.add("dim = 2");
+        List<PathObject> newTiles = new ArrayList<>();
+        int tileIndex = 0;
+
+        // Calculate number of rows and columns to cover the region fully (guaranteed coverage)
+        int nRows = (int)Math.ceil(Math.abs((yEnd - yStart)) / Math.abs(yStep));
+        int nCols = (int)Math.ceil(Math.abs((xEnd - xStart)) / Math.abs(xStep));
+
+        logger.info("  Calculated nRows: {}, nCols: {}", nRows, nCols);
+
+        // Generate grid with serpentine snaking (each row alternates direction)
+        for (int row = 0; row <= nRows; row++) {
+            // Y coordinate for this row
+            double y = yStart + row * yStep;
+
+            // If overshot (e.g., last row past end), break
+            if ((!invertYAxis && y > yEnd) || (invertYAxis && y < yEnd)) break;
+
+            // Row snaking direction: even rows L->R (or R->L if inverted), odd rows reverse
+            boolean snakeReverse = (row % 2 == 1);
+
+            // Determine column indices for this row
+            for (int col = 0; col <= nCols; col++) {
+                int actualCol = snakeReverse ? (nCols - col) : col;
+                double x = xStart + actualCol * xStep;
+
+                if ((!invertXAxis && x > xEnd) || (invertXAxis && x < xEnd)) continue; // skip out of bounds
+
+                // Create ROI for this tile
+                ROI tileROI = ROIs.createRectangleROI(
+                        x, y, frameWidth, frameHeight, ImagePlane.getDefaultPlane());
+
+                // If restricting to annotation, skip tiles not overlapping
+                if (annotationROI != null && !annotationROI.getGeometry().intersects(tileROI.getGeometry()))
+                    continue;
+
+                // Create PathObject for QuPath (if requested)
+                if (createTiles) {
+                    PathObject tile = PathObjects.createDetectionObject(tileROI, QP.getPathClass(imagingModality));
+                    tile.setName(String.valueOf(tileIndex));
+                    tile.getMeasurements().put("TileNumber", tileIndex);
+                    newTiles.add(tile);
+                }
+
+                // Write entry for TileConfiguration.txt
+                lines.add(String.format("%d.tif; ; (%.3f, %.3f)", tileIndex, tileROI.getCentroidX(), tileROI.getCentroidY()));
+
+                tileIndex++;
+            }
+        }
+
+        // --- Ensure parent directory exists, then write TileConfiguration.txt ---
         try {
             Files.createDirectories(Paths.get(tilePath).getParent());
             try (BufferedWriter writer = Files.newBufferedWriter(Paths.get(tilePath), StandardCharsets.UTF_8)) {
                 for (String ln : lines) writer.write(ln + "\n");
             }
-            logger.info(res.getString("tileConfig.write.success"), tilePath);
+            logger.info("Wrote tile configuration: {}", tilePath);
         } catch (IOException e) {
-            logger.error(res.getString("tileConfig.write.fail"), e);
+            logger.error("Failed to write tile configuration", e);
         }
 
         // Optionally add tile detection objects to the QuPath project
-        if (createTiles) {
+        if (createTiles && !newTiles.isEmpty()) {
             QP.getCurrentHierarchy().addObjects(newTiles);
             QP.fireHierarchyUpdate();
+            logger.info("Added {} detection tiles to QuPath project", newTiles.size());
         }
     }
 
