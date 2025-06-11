@@ -295,16 +295,6 @@ public class MicroscopeController {
         this.currentTransform = tx;
     }
 
-
-    /** Dummy existing-image workflow – replace with your real steps later. */
-    public void startExistingImageWorkflow() {
-        logger.info("▶ Existing-image workflow started (stub)");
-        javafx.application.Platform.runLater(() ->
-                qupath.fx.dialogs.Dialogs.showInfoNotification(
-                        "QP Scope • Existing image",
-                        "Here is where the Existing-image workflow will run."));
-    }
-
     public boolean isWithinBoundsXY(double x, double y) {
         String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
         var xlimits = MicroscopeConfigManager.getInstance(configPath).getSection("stage", "xlimit");

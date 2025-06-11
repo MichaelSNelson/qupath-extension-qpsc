@@ -67,7 +67,7 @@ public class QPScopeController {
     public void startWorkflow(String mode) throws IOException {
         switch (mode) {
             case "boundingBox"  -> BoundingBoxWorkflow.run();
-            case "existingImage"-> MicroscopeController.getInstance().startExistingImageWorkflow();
+            case "existingImage"-> ExistingImageWorkflow.run();
             case "basicStageInterface"-> StageMovementController.showTestStageMovementDialog();
             case "test" ->  TestWorkflow.runTestWorkflow();
             default             -> logger.warning("Unknown workflow mode " + mode);
