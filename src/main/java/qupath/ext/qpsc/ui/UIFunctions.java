@@ -349,4 +349,58 @@ public class UIFunctions {
     }
 
 
+    /**
+     * Prompts the user to select exactly one tile (detection object) in QuPath.
+     * Blocks until a selection is made or cancelled.
+     * Returns the selected PathObject or null if cancelled.
+     */
+    public static PathObject promptTileSelectionDialog(String message) {
+        PathObject selectedTile = null;
+
+        while (true) {
+            // Prompt user to make the selection in QuPath (not in dialog)
+            Alert info = new Alert(Alert.AlertType.INFORMATION);
+            info.setTitle("Select Tile");
+            info.setHeaderText(message);
+            info.setContentText("Select exactly ONE tile (Detection) in QuPath, then press OK.\n" +
+                    "Press Cancel to abort.");
+            ButtonType okType = new ButtonType("OK", ButtonBar.ButtonData.OK_DONE);
+            ButtonType cancelType = new ButtonType("Cancel", ButtonBar.ButtonData.CANCEL_CLOSE);
+            info.getButtonTypes().setAll(okType, cancelType);
+            var result = info.showAndWait();
+
+            if (result.isEmpty() || result.get() == cancelType) {
+                return null;
+            }
+
+            // Check selection
+            Collection<PathObject> selected =  QP.getSelectedObjects();
+            var tile = selected.stream().filter(PathObject::isTile).toList();
+
+            if (tile.size() != 1) {
+                Alert warn = new Alert(Alert.AlertType.WARNING, "Please select exactly one tile!", ButtonType.OK);
+                warn.showAndWait();
+                continue; // Loop and prompt again
+            }
+            selectedTile = tile.get(0);
+            break;
+        }
+        return selectedTile;
+    }
+
+    /**
+     * Shows a Yes/No dialog to the user.
+     * Returns true if "Yes"/"OK" is pressed, false otherwise.
+     */
+    public static boolean promptYesNoDialog(String title, String message) {
+        Alert dialog = new Alert(Alert.AlertType.CONFIRMATION);
+        dialog.setTitle(title);
+        dialog.setHeaderText(message);
+        dialog.getButtonTypes().setAll(
+                new ButtonType("Yes", ButtonBar.ButtonData.YES),
+                new ButtonType("No", ButtonBar.ButtonData.NO)
+        );
+        var result = dialog.showAndWait();
+        return result.isPresent() && result.get().getButtonData() == ButtonBar.ButtonData.YES;
+    }
 }

@@ -71,6 +71,8 @@ public class ExistingImageController {
 
                         //TODO currently not implemented
                         boolean pixelsNonIsotropic = nonIsotropicCheckBox.isSelected();
+
+
                         PersistentPreferences.setMacroImagePixelSizeInMicrons(String.valueOf(pixelSize));
                         // Script path could be stored in preferences/config
                         String scriptPath = PersistentPreferences.getAnalysisScriptForAutomation();
@@ -93,27 +95,31 @@ public class ExistingImageController {
     }
 
     /**
-     * Dialog to request accurate pixel size if the current one is missing or invalid.
-     * @return pixel size (double) as entered by the user
+     * Prompt the user for macro image pixel size if not available from metadata.
      */
-    public static double requestPixelSizeDialog() {
-        final double[] result = {Double.NaN};
+    public static CompletableFuture<Double> requestPixelSizeDialog(double defaultValue) {
+        CompletableFuture<Double> future = new CompletableFuture<>();
         Platform.runLater(() -> {
-            TextInputDialog dlg = new TextInputDialog();
-            dlg.setTitle("Pixel Size Required");
-            dlg.setHeaderText("Pixel size metadata missing or invalid.");
-            dlg.setContentText("Please enter the correct pixel size (µm):");
-            dlg.showAndWait().ifPresent(text -> {
-                try {
-                    result[0] = Double.parseDouble(text.trim());
-                } catch (Exception e) {
-                    Dialogs.showErrorNotification("Pixel Size Error", "Invalid pixel size entered.");
-                }
-            });
+            TextInputDialog dlg = new TextInputDialog(defaultValue > 0 ? String.valueOf(defaultValue) : "");
+            dlg.setTitle("Enter Macro Image Pixel Size");
+            dlg.setHeaderText("Image metadata did not provide a valid pixel size (µm).");
+            dlg.setContentText("Pixel size (µm):");
+
+            dlg.showAndWait().ifPresentOrElse(
+                    value -> {
+                        try {
+                            double px = Double.parseDouble(value);
+                            future.complete(px);
+                        } catch (Exception e) {
+                            future.completeExceptionally(new IllegalArgumentException("Invalid pixel size: " + value));
+                        }
+                    },
+                    () -> future.completeExceptionally(new CancellationException("User cancelled pixel size entry"))
+            );
         });
-        // This is non-blocking. You may want to use a future/callback or refactor for proper async use.
-        return result[0];
+        return future;
     }
+
 
     /**
      * Prompts the user to verify or create annotations if tissue detection script is missing or fails.

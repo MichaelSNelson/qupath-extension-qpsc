@@ -579,7 +579,7 @@ public class UtilityFunctions {
     }
 
 
-    // 8) Move stage to selected tile
+
     public static void moveStageToSelectedTile(PathObject sel) throws IOException, InterruptedException {
 
         RectangleROI roi = (RectangleROI) sel.getROI();
