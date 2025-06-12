@@ -97,13 +97,23 @@ public class ExistingImageWorkflow {
             String tempTileDirectory = (String) projectDetails.get("tempTileDirectory");
             String modeWithIndex = (String) projectDetails.get("imagingModeWithIndex");
 
-            // --- 2. Verify pixel size and request from user if missing/invalid ---
-            double macroPixelSize = existingImage.macroPixelSize();
-            logger.info("Initial macro pixel size: {} µm", macroPixelSize);
+            // --- 2. Retrieve pixel size from the currently open image, only prompt if missing ---
+            double macroPixelSize = Double.NaN;
+            var imageData = qupathGUI.getImageData();
+            if (imageData != null && imageData.getServer() != null) {
+                try {
+                    macroPixelSize = imageData.getServer().getPixelCalibration().getAveragedPixelSizeMicrons();
+                    logger.info("Found macro pixel size in metadata: {} µm", macroPixelSize);
+                } catch (Exception e) {
+                    logger.warn("Could not retrieve pixel size from image metadata: {}", e.getMessage());
+                    macroPixelSize = Double.NaN;
+                }
+            }
             if (Double.isNaN(macroPixelSize) || macroPixelSize <= 0 || macroPixelSize > 10) {
                 macroPixelSize = ExistingImageController.requestPixelSizeDialog();
                 logger.info("User-provided macro pixel size: {} µm", macroPixelSize);
             }
+
 
             // --- 3. Run tissue detection script or prompt for annotation creation ---
             String tissueDetectScript = existingImage.groovyScriptPath();
