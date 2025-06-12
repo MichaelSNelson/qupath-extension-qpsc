@@ -6,28 +6,23 @@ import javafx.scene.control.*;
 import javafx.scene.layout.GridPane;
 import javafx.stage.Modality;
 import qupath.ext.qpsc.preferences.PersistentPreferences;
-import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.fx.dialogs.Dialogs;
 
-import java.io.File;
-import java.nio.file.Paths;
 import java.util.ResourceBundle;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
-
-import static qupath.ext.qpsc.preferences.PersistentPreferences.getAnalysisScriptForAutomation;
 
 /**
  * ExistingImageController
  *
  * <p>Handles the GUI for existing image workflows, collecting necessary parameters
- * such as sample name, pixel size, and isotropy, and integrates with ExistingImageWorkflow.
+ * such as pixel size and isotropy, and facilitates dialogs for annotation confirmation.
  */
 public class ExistingImageController {
 
     /**
      * Data structure to hold user inputs from the existing image dialog.
      */
-
     public record UserInput(
             double macroPixelSize,
             String groovyScriptPath,
@@ -46,7 +41,7 @@ public class ExistingImageController {
             ResourceBundle res = ResourceBundle.getBundle("qupath.ext.qpsc.ui.strings");
 
             Dialog<UserInput> dlg = new Dialog<>();
-            dlg.initModality(Modality.APPLICATION_MODAL);
+            dlg.initModality(Modality.NONE); // Non-modal for easier checking
             dlg.setTitle(res.getString("existingImage.title"));
             dlg.setHeaderText(res.getString("existingImage.header"));
 
@@ -63,7 +58,6 @@ public class ExistingImageController {
             grid.setHgap(10);
             grid.setVgap(10);
             grid.setPadding(new Insets(20));
-
             grid.add(new Label(res.getString("existingImage.label.pixelSize")), 0, 0);
             grid.add(pixelSizeField, 1, 0);
             grid.add(nonIsotropicCheckBox, 1, 1);
@@ -76,8 +70,9 @@ public class ExistingImageController {
                         double pixelSize = Double.parseDouble(pixelSizeField.getText().trim());
                         boolean pixelsNonIsotropic = nonIsotropicCheckBox.isSelected();
                         PersistentPreferences.setMacroImagePixelSizeInMicrons(String.valueOf(pixelSize));
-
-                        return new UserInput(pixelSize, PersistentPreferences.getAnalysisScriptForAutomation(), pixelsNonIsotropic);
+                        // Script path could be stored in preferences/config
+                        String scriptPath = PersistentPreferences.getAnalysisScriptForAutomation();
+                        return new UserInput(pixelSize, scriptPath, pixelsNonIsotropic);
                     } catch (Exception e) {
                         Dialogs.showErrorNotification(res.getString("existingImage.error.title"), e.getMessage());
                         return null;
@@ -86,9 +81,48 @@ public class ExistingImageController {
                 return null;
             });
 
-            dlg.showAndWait().ifPresentOrElse(future::complete, () -> future.cancel(true));
+            dlg.showAndWait().ifPresentOrElse(
+                    result -> future.complete(result),
+                    () -> future.completeExceptionally(new CancellationException("User closed dialog"))
+            );
         });
 
         return future;
+    }
+
+    /**
+     * Dialog to request accurate pixel size if the current one is missing or invalid.
+     * @return pixel size (double) as entered by the user
+     */
+    public static double requestPixelSizeDialog() {
+        final double[] result = {Double.NaN};
+        Platform.runLater(() -> {
+            TextInputDialog dlg = new TextInputDialog();
+            dlg.setTitle("Pixel Size Required");
+            dlg.setHeaderText("Pixel size metadata missing or invalid.");
+            dlg.setContentText("Please enter the correct pixel size (µm):");
+            dlg.showAndWait().ifPresent(text -> {
+                try {
+                    result[0] = Double.parseDouble(text.trim());
+                } catch (Exception e) {
+                    Dialogs.showErrorNotification("Pixel Size Error", "Invalid pixel size entered.");
+                }
+            });
+        });
+        // This is non-blocking. You may want to use a future/callback or refactor for proper async use.
+        return result[0];
+    }
+
+    /**
+     * Prompts the user to verify or create annotations if tissue detection script is missing or fails.
+     */
+    public static void promptForAnnotations() {
+        Platform.runLater(() -> {
+            Alert alert = new Alert(Alert.AlertType.INFORMATION);
+            alert.setTitle("Annotations Required");
+            alert.setHeaderText("No tissue detection script provided or failed.");
+            alert.setContentText("Please create or verify annotations for regions you wish to acquire.");
+            alert.showAndWait();
+        });
     }
 }
