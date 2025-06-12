@@ -68,6 +68,8 @@ public class ExistingImageController {
                 if (btn == okType) {
                     try {
                         double pixelSize = Double.parseDouble(pixelSizeField.getText().trim());
+
+                        //TODO currently not implemented
                         boolean pixelsNonIsotropic = nonIsotropicCheckBox.isSelected();
                         PersistentPreferences.setMacroImagePixelSizeInMicrons(String.valueOf(pixelSize));
                         // Script path could be stored in preferences/config

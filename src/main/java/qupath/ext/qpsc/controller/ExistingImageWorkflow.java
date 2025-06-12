@@ -78,6 +78,7 @@ public class ExistingImageWorkflow {
         logger.info("Executing workflow for sample: {} | Modality: {}", sample.sampleName(), sample.modality());
 
         try {
+            logger.info("Within try statement");
             // --- 1. Prepare project and import the image, handling X/Y flipping ---
             boolean flipX = QPPreferenceDialog.getFlipMacroXProperty();
             boolean flipY = QPPreferenceDialog.getFlipMacroYProperty();
@@ -97,9 +98,11 @@ public class ExistingImageWorkflow {
             String tempTileDirectory = (String) projectDetails.get("tempTileDirectory");
             String modeWithIndex = (String) projectDetails.get("imagingModeWithIndex");
 
+
             // --- 2. Retrieve pixel size from the currently open image, only prompt if missing ---
             double macroPixelSize = Double.NaN;
             var imageData = qupathGUI.getImageData();
+            logger.info("After opening: imageData is null? {}", imageData == null);
             if (imageData != null && imageData.getServer() != null) {
                 try {
                     macroPixelSize = imageData.getServer().getPixelCalibration().getAveragedPixelSizeMicrons();
@@ -109,6 +112,7 @@ public class ExistingImageWorkflow {
                     macroPixelSize = Double.NaN;
                 }
             }
+            logger.info("Macro pixel size: {}", macroPixelSize);
             if (Double.isNaN(macroPixelSize) || macroPixelSize <= 0 || macroPixelSize > 10) {
                 macroPixelSize = ExistingImageController.requestPixelSizeDialog();
                 logger.info("User-provided macro pixel size: {} µm", macroPixelSize);
