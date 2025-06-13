@@ -53,14 +53,14 @@ public class AffineTransformationController {
 
                 QuPathGUI gui = QuPathGUI.getInstance();
 
-                // 1. Create initial scaling transform (only scale and flip, no translation yet)
+                // 1. Create initial scaling transform
                 AffineTransform scalingTransform =
                         TransformationFunctions.setupAffineTransformation(macroPixelSizeMicrons, invertedX, invertedY);
                 logger.info("Initial scaling transform: {}", scalingTransform);
 
                 // 2. Prompt user to select a reference tile for initial alignment
                 PathObject refTile = UIFunctions.promptTileSelectionDialog(
-                        "Select a REFERENCE tile (usually a tile on the boundary of your region),\n" +
+                        "Select a REFERENCE tile (preferably a tile on the boundary of your region),\n" +
                                 "then press OK. This will be used for initial stage/image alignment."
                 );
                 if (refTile == null) {
@@ -71,65 +71,55 @@ public class AffineTransformationController {
                 double[] qpRefCoords = {refTile.getROI().getCentroidX(), refTile.getROI().getCentroidY()};
                 logger.info("User selected tile '{}' at QuPath coords: {}", refTile.getName(), Arrays.toString(qpRefCoords));
 
-                // 3. Move stage to the *predicted* position using the current (scaling) transform
+                // 3. Move stage to the predicted position using the scaling transform (NO offset)
                 double[] stageGuess = TransformationFunctions.qpToMicroscopeCoordinates(qpRefCoords, scalingTransform);
                 MicroscopeController.getInstance().moveStageXY(stageGuess[0], stageGuess[1]);
                 logger.info("Moved stage to initial guess: {}", Arrays.toString(stageGuess));
 
-                // 4. Prompt user to confirm or adjust the stage, then get the actual stage coordinates
-                boolean positionOk = UIFunctions.stageToQuPathAlignmentGUI2(); // "Is this position accurate?"
+                // 4. Prompt user to confirm stage position, then fetch the actual measured stage position
+                boolean positionOk = UIFunctions.stageToQuPathAlignmentGUI2();
                 if (!positionOk) {
                     logger.info("User cancelled at initial stage alignment.");
                     future.complete(null);
                     return;
                 }
-                // Hardware call: get current measured stage coordinates
                 double[] measuredStageCoords = MicroscopeController.getInstance().getStagePositionXY();
                 logger.info("Measured stage coordinates: {}", Arrays.toString(measuredStageCoords));
 
-                // 5. Compute offset (e.g., to account for difference between image ROI and FOV center)
-                double[] offset = addTranslationToScaledAffine(); // Implement as needed
-                logger.info("Using offset: {}", Arrays.toString(offset));
-
-                // 6. Refine transform: align image tile and measured stage coordinates
-                AffineTransform transform = addTranslationToScaledAffine(
-                        scalingTransform, qpRefCoords, measuredStageCoords, offset
+                // 5. Refine transform: align image and measured stage coordinates (NO offset for now)
+                AffineTransform transform = TransformationFunctions.addTranslationToScaledAffine(
+                        scalingTransform, qpRefCoords, measuredStageCoords, null
                 );
                 logger.info("Affine transform after initial alignment: {}", transform);
 
-                // 7. Offer to refine alignment using additional tile(s)
-                //    For secondary refinement, repeat with "top-center" or "left-center" tile, if user desires
-                while (UIFunctions.promptYesNoDialog("Refine Alignment?",
-                        "Would you like to use another tile for further alignment?")) {
+                // 6. Secondary refinement: use two geometric extremes for more robust alignment
+                //    (top center and left center tiles, automatically determined)
+                Collection<PathObject> allTiles = gui.getViewer().getHierarchy().getDetectionObjects();
+                PathObject topCenterTile = TransformationFunctions.getTopCenterTile(allTiles);
+                PathObject leftCenterTile = TransformationFunctions.getLeftCenterTile(allTiles);
 
-                    // Suggest a good refinement tile (e.g., top center, left center)
-                    PathObject nextTile = TransformationFunctions.getTopCenterTile(QP.getDetectionObjects()); // implement or select manually
-                    if (nextTile == null) {
-                        nextTile = UIFunctions.promptTileSelectionDialog(
-                                "Select an additional tile for refinement, then press OK."
-                        );
-                        if (nextTile == null) {
-                            logger.info("User cancelled additional refinement tile selection.");
-                            break;
-                        }
+                for (PathObject tile : Arrays.asList(topCenterTile, leftCenterTile)) {
+                    if (tile == null) continue;
+                    logger.info("Secondary alignment: moving to refinement tile '{}'", tile.getName());
+
+                    double[] tileCoords = {tile.getROI().getCentroidX(), tile.getROI().getCentroidY()};
+                    double[] stageCoords = TransformationFunctions.qpToMicroscopeCoordinates(tileCoords, transform);
+
+                    MicroscopeController.getInstance().moveStageXY(stageCoords[0], stageCoords[1]);
+                    boolean ok = UIFunctions.stageToQuPathAlignmentGUI2();
+                    if (!ok) {
+                        logger.info("User cancelled during secondary alignment at tile '{}'.", tile.getName());
+                        future.complete(null);
+                        return;
                     }
-                    double[] qpCoords2 = {nextTile.getROI().getCentroidX(), nextTile.getROI().getCentroidY()};
-                    MicroscopeController.getInstance().moveStageXY(
-                            TransformationFunctions.qpToMicroscopeCoordinates(qpCoords2, transform)
+                    double[] measuredCoords = MicroscopeController.getInstance().getStagePositionXY();
+                    transform = TransformationFunctions.addTranslationToScaledAffine(
+                            transform, tileCoords, measuredCoords, null
                     );
-                    boolean refineOk = UIFunctions.stageToQuPathAlignmentGUI2();
-                    if (!refineOk) {
-                        logger.info("User cancelled during secondary alignment.");
-                        break;
-                    }
-                    double[] measuredCoords2 = MicroscopeController.getInstance().getStagePositionXY();
-                    transform = addTranslationToScaledAffine(
-                            transform, qpCoords2, measuredCoords2, offset
-                    );
-                    logger.info("Affine transform refined after tile '{}': {}", nextTile.getName(), transform);
+                    logger.info("Refined transform after tile '{}': {}", tile.getName(), transform);
                 }
 
-                // 8. Done: return the transform
+                // 7. Done: return the final affine transform
                 future.complete(transform);
 
             } catch (Exception e) {
@@ -139,15 +129,7 @@ public class AffineTransformationController {
             }
         });
 
-
-    /**
-     * Compute the XY offset between QuPath ROI center and stage FOV, if needed.
-     * This may depend on frame/camera parameters.
-     * @return [offsetX, offsetY]
-     */
-    private static double[] computeStageOffset() {
-        // TODO: implement based on your frame width, pixel size, camera setup, etc.
-        // Example placeholder: return new double[]{-0.5 * frameWidth * pixelSize, 0.5 * frameHeight * pixelSize};
-        return new double[]{0, 0};
+        return future;
     }
+
 }
