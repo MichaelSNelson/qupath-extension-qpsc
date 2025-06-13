@@ -54,25 +54,40 @@ public class TransformationFunctions {
     public static List<String> transformTileConfiguration(
             String parentDirPath,
             AffineTransform transform) throws IOException {
+
         File parent = new File(parentDirPath);
         List<String> modified = new ArrayList<>();
-        if (!parent.isDirectory()) return modified;
-        File[] subdirs = parent.listFiles(File::isDirectory);
-        if (subdirs == null) return modified;
-        for (File sub : subdirs) {
-            File inFile = new File(sub, "TileConfiguration_QP.txt");
+
+        // For bounding box workflow, check "bounds" folder
+        File boundsDir = new File(parent, "bounds");
+        if (boundsDir.exists()) {
+            File inFile = new File(boundsDir, "TileConfiguration.txt");
             if (inFile.exists()) {
-                processTileConfigurationFile(inFile, transform, offset);
-                modified.add(sub.getName());
+                processTileConfigurationFile(inFile, transform);
+                modified.add("bounds");
             }
         }
+
+        // For annotation workflow, check each subdirectory
+        File[] subdirs = parent.listFiles(File::isDirectory);
+        if (subdirs != null) {
+            for (File sub : subdirs) {
+                if (sub.getName().equals("bounds")) continue;  // Skip if already processed
+
+                File inFile = new File(sub, "TileConfiguration.txt");
+                if (inFile.exists()) {
+                    processTileConfigurationFile(inFile, transform);
+                    modified.add(sub.getName());
+                }
+            }
+        }
+
         return modified;
     }
 
     private static void processTileConfigurationFile(
             File inFile,
-            AffineTransform transform,
-            double [] offset) throws IOException {
+            AffineTransform transform) throws IOException {
         List<String> lines = Files.readAllLines(inFile.toPath());
         List<String> out = new ArrayList<>(lines.size());
         Pattern p = Pattern.compile("\\d+\\.tif; ; \\(.*?\\),\\s*(.*?)\\)");
@@ -82,7 +97,6 @@ public class TransformationFunctions {
                 double x = Double.parseDouble(m.group(1));
                 double y = Double.parseDouble(m.group(2));
                 double[] coords = qpToMicroscopeCoordinates(new double[]{x, y}, transform);
-                coords = applyOffset(coords, offset, true);
                 out.add(line.replaceFirst("\\(.*?\\)", String.format("(%.3f, %.3f)", coords[0], coords[1])));
             } else {
                 out.add(line);
