@@ -69,7 +69,7 @@ public class ExistingImageController {
                     try {
                         double pixelSize = Double.parseDouble(pixelSizeField.getText().trim());
 
-                        //TODO currently not implemented
+                        //TODO nonisotropic pixel handling currently not implemented
                         boolean pixelsNonIsotropic = nonIsotropicCheckBox.isSelected();
 
 
