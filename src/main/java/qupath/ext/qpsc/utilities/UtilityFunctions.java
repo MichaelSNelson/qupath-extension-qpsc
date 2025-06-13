@@ -260,6 +260,8 @@ public class UtilityFunctions {
         return String.join(System.lineSeparator(), out);
     }
 
+    //TODO these may be removed
+
     /**
      * Computes a tile grid (for stage scanning) from a bounding box or annotation,
      * generates a TileConfiguration.txt file, and (optionally) creates QuPath detection tiles.

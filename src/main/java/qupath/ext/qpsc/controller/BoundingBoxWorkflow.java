@@ -5,11 +5,9 @@ import javafx.scene.control.Alert;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.service.CliExecutor;
 import qupath.ext.qpsc.ui.UIFunctions;
-import qupath.ext.qpsc.utilities.MicroscopeConfigManager;
-import qupath.ext.qpsc.utilities.UtilityFunctions;
+import qupath.ext.qpsc.utilities.*;
 import qupath.ext.qpsc.ui.BoundingBoxController;
 import qupath.ext.qpsc.ui.SampleSetupController;
-import qupath.ext.qpsc.utilities.QPProjectFunctions;
 import qupath.lib.gui.QuPathGUI;
 import qupath.lib.gui.scripting.QPEx;
 import qupath.lib.projects.Project;
@@ -106,16 +104,26 @@ public class BoundingBoxWorkflow {
                     double frameWidth  = pixelSize * cameraWidth;
                     double frameHeight = pixelSize * cameraHeight;
 
-                    // 6) Write tile grid
-                    UtilityFunctions.performTilingAndSaveConfiguration(
-                            tempTileDir,
-                            modeWithIndex,
-                            frameWidth, frameHeight,
-                            overlapPercent,
-                            List.of(bb.x1(), bb.y1(), bb.x2(), bb.y2()),
-                            false,
-                            Collections.emptyList(),
-                            invertY, invertX);
+                // 6) Create tile configuration using new API
+                    TilingRequest request = new TilingRequest.Builder()
+                            .outputFolder(tempTileDir)
+                            .modalityName(modeWithIndex)
+                            .frameSize(frameWidth, frameHeight)
+                            .overlapPercent(overlapPercent)
+                            .boundingBox(bb.x1(), bb.y1(), bb.x2(), bb.y2())
+                            .invertAxes(invertX, invertY)
+                            .createDetections(false)  // No QuPath objects needed for bounding box
+                            .build();
+
+                    try {
+                        TilingUtilities.createTiles(request);
+                    } catch (IOException e) {
+                        UIFunctions.notifyUserOfError(
+                                "Failed to create tile configuration: " + e.getMessage(),
+                                "Tiling Error"
+                        );
+                        return;  // Exit the workflow
+                    }
 
                     // 7) Prepare CLI arguments for acquisition
                     String configFileLocation = QPPreferenceDialog.getMicroscopeConfigFileProperty();

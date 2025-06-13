@@ -19,6 +19,7 @@ import qupath.ext.qpsc.utilities.*;
 import qupath.lib.gui.QuPathGUI;
 import qupath.lib.objects.PathObject;
 import qupath.lib.projects.Project;
+import qupath.lib.scripting.QP;
 
 import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
@@ -138,8 +139,49 @@ public class ExistingImageWorkflow {
             } catch (InterruptedException | ExecutionException e) {
                 throw new RuntimeException(e);
             }
-            // 5. Perform tiling and generate TileConfiguration.txt for each annotation
-            performTilingForAnnotations(tempTileDirectory, modeWithIndex, macroPixelSize, sample.modality(), annotations);
+            // 5) Create tiles for all annotations
+
+            MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(QPPreferenceDialog.getMicroscopeConfigFileProperty());
+            double pixelSize   = mgr.getDouble("imagingMode", sample.modality(), "pixelSize_um");
+            //String detectorID  = mgr.getString("imagingMode", sample.modality(), "detector");
+
+            // --- Get detector properties (width/height) from resources_LOCI ---
+            int cameraWidth  = mgr.getInteger("imagingMode", sample.modality(), "detector", "width_px");
+            int cameraHeight = mgr.getInteger("imagingMode", sample.modality(), "detector", "height_px");
+        
+            double frameWidth  = pixelSize * cameraWidth;
+            double frameHeight = pixelSize * cameraHeight;
+
+
+            try {
+                // First remove any existing tiles for this modality
+                String modalityBase = sample.modality().replaceAll("(_\\d+)$", "");
+                QP.getDetectionObjects().stream()
+                        .filter(o -> o.getPathClass() != null &&
+                                o.getPathClass().toString().toLowerCase().contains(modalityBase))
+                        .forEach(o -> QP.removeObject(o, true));
+
+                // Build tiling request for annotations
+                TilingRequest request = new TilingRequest.Builder()
+                        .outputFolder(tempTileDirectory)
+                        .modalityName(modeWithIndex)
+                        .frameSize(frameWidth, frameHeight)
+                        .overlapPercent(overlapPercent)
+                        .annotations(annotations)
+                        .invertAxes(invertX, invertY)
+                        .createDetections(true)  // Create QuPath objects for visualization
+                        .addBuffer(true)         // Add half-frame buffer around annotations
+                        .build();
+
+                TilingUtilities.createTiles(request);
+
+            } catch (IOException e) {
+                Platform.runLater(() -> UIFunctions.notifyUserOfError(
+                        "Failed to create tile configurations: " + e.getMessage(),
+                        "Tiling Error"
+                ));
+                return;
+            }
 
             // 6. Affine alignment GUI and acquisition (each annotation/region in sequence or parallel)
             CompletableFuture<AffineTransform> transformFuture =
