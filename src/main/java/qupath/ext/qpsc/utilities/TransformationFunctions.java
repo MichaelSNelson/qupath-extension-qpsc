@@ -53,8 +53,7 @@ public class TransformationFunctions {
      */
     public static List<String> transformTileConfiguration(
             String parentDirPath,
-            AffineTransform transform,
-            double [] offset) throws IOException {
+            AffineTransform transform) throws IOException {
         File parent = new File(parentDirPath);
         List<String> modified = new ArrayList<>();
         if (!parent.isDirectory()) return modified;

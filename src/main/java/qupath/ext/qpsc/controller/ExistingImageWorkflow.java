@@ -10,6 +10,7 @@ import javafx.application.Platform;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
+import qupath.ext.qpsc.service.CliExecutor;
 import qupath.ext.qpsc.ui.AffineTransformationController;
 import qupath.ext.qpsc.utilities.QPProjectFunctions;
 import qupath.ext.qpsc.ui.ExistingImageController;
@@ -57,6 +58,7 @@ import java.util.stream.Collectors;
 
 public class ExistingImageWorkflow {
     private static final Logger logger = LoggerFactory.getLogger(ExistingImageWorkflow.class);
+    private static final ResourceBundle res = ResourceBundle.getBundle("qupath.ext.qpsc.ui.strings");
 
     /**
      * Entrypoint: launches the full workflow with all necessary user dialogs and background steps.
@@ -148,7 +150,7 @@ public class ExistingImageWorkflow {
             // --- Get detector properties (width/height) from resources_LOCI ---
             int cameraWidth  = mgr.getInteger("imagingMode", sample.modality(), "detector", "width_px");
             int cameraHeight = mgr.getInteger("imagingMode", sample.modality(), "detector", "height_px");
-        
+
             double frameWidth  = pixelSize * cameraWidth;
             double frameHeight = pixelSize * cameraHeight;
 
@@ -203,44 +205,44 @@ public class ExistingImageWorkflow {
             }
 
             // For each annotation: perform alignment, then acquisition, then stitching (asynchronous)
-            annotations.forEach(annotation -> {
-                CompletableFuture.runAsync(() -> {
+                for (PathObject annotation : annotations) {
+                    String annotationName = annotation.getName();
+                    Path annotationTileDir = Path.of(tempTileDirectory, annotationName);
+
+                    // Transform the tile configuration to stage coordinates
                     try {
-                        // 6. Launch tile acquisition via CLI (you'll need to add args as needed)
-                        var result = qupath.ext.qpsc.service.CliExecutor.execComplexCommand(
-                                300, "tiles done", "acquireTiles", tempTileDirectory);
-                        if (result.exitCode() != 0 || result.timedOut()) {
-                            Platform.runLater(() -> UIFunctions.notifyUserOfError(
-                                    "Acquisition error: " + result.stderr(), "Acquisition Error"));
-                            logger.error("Acquisition error: {}", result.stderr());
-                            return;
-                        }
-                        logger.info("Acquisition finished for annotation: {}", annotation.getName());
-
-                        // 6c. Stitch tiles and update project
-                        String stitchedImagePath = UtilityFunctions.stitchImagesAndUpdateProject(
-                                sample.projectsFolder().getAbsolutePath(),
-                                sample.sampleName(),
-                                modeWithIndex,
-                                annotation.getName(),
-                                qupathGUI,
-                                project,
-                                String.valueOf(QPPreferenceDialog.getCompressionTypeProperty()),
-                                macroPixelSize,
-                                1
+                        TransformationFunctions.transformTileConfiguration(
+                                annotationTileDir.toString(),  // Just this annotation's folder
+                                transform
                         );
-                        logger.info("Stitching complete for annotation {} at {}", annotation.getName(), stitchedImagePath);
-
-                        // 6d. Post-processing: record tile boundaries
-                        // ... see previous examples ...
-
-                    } catch (Exception e) {
-                        Platform.runLater(() -> UIFunctions.notifyUserOfError(e.getMessage(), "Workflow Error"));
-                        logger.error("Workflow error for annotation {}", annotation.getName(), e);
+                    } catch (IOException e) {
+                        logger.error("Failed to transform tiles for annotation {}", annotationName, e);
+                        continue;  // Skip this annotation
                     }
-                });
-            });
-        });
+
+                    // Launch acquisition for this annotation
+                    CompletableFuture<Void> acquisitionFuture = CompletableFuture.supplyAsync(() -> {
+                        try {
+                            var result = CliExecutor.execComplexCommand(
+                                    300,
+                                    "tiles done",
+                                    res.getString("command.acquisitionWorkflow"),
+                                    configFileLocation,
+                                    projectsFolder.getAbsolutePath(),
+                                    sample.sampleName(),
+                                    modeWithIndex,
+                                    annotationName  // Pass annotation name, not "bounds"
+                            );
+
+                            if (result.exitCode() != 0) {
+                                throw new RuntimeException("Acquisition failed: " + result.stderr());
+                            }
+                            return null;
+                        } catch (Exception e) {
+                            throw new CompletionException(e);
+                        }
+                    });
+    });
     }
 
     /**
@@ -317,63 +319,6 @@ public class ExistingImageWorkflow {
         logger.info("Found {} tissue annotation(s) in image.", annotations.size());
         return annotations;
     }
-
-    /**
-     * For each annotation, create a tile grid and TileConfiguration.txt.
-     * Each annotation should get its own subfolder within the temp tile directory, named after the annotation.
-     */
-    private static void performTilingForAnnotations(
-            String tempTileDirectory,
-            String modeWithIndex,
-            double macroPixelSize,
-            String modality,
-            List<PathObject> annotations
-    ) {
-        for (PathObject annotation : annotations) {
-            String annotationName = annotation.getName();
-            Path annotationTileDir = Path.of(tempTileDirectory, annotationName);
-
-            try {
-                Files.createDirectories(annotationTileDir);
-                logger.info("Created annotation tile directory: {}", annotationTileDir);
-
-                // Fetch modality, pixel size, and camera dimensions from config
-                MicroscopeConfigManager configMgr = MicroscopeConfigManager.getInstance(QPPreferenceDialog.getMicroscopeConfigFileProperty());
-
-
-                double pixelSize = configMgr.getDouble("imagingMode", modality, "pixelSize_um");
-                int cameraWidth  = configMgr.getInteger("imagingMode", modality, "detector", "width_px");
-                int cameraHeight = configMgr.getInteger("imagingMode", modality, "detector", "height_px");
-                double overlap   = QPPreferenceDialog.getTileOverlapPercentProperty();
-
-                double frameWidth  = pixelSize * cameraWidth;
-                double frameHeight = pixelSize * cameraHeight;
-
-                logger.info("Preparing tiling for annotation '{}': frame size = {}x{} µm, overlap = {}%", annotationName, frameWidth, frameHeight, overlap);
-
-                // Only this annotation is tiled, so pass a singleton list for annotations
-                UtilityFunctions.performTilingAndSaveConfiguration(
-                        annotationTileDir.toString(),   // Directory for this annotation's tiles/config
-                        modality,                       // Imaging modality (without index, if that's desired)
-                        frameWidth,
-                        frameHeight,
-                        overlap,
-                        null,                           // No bounding box; use annotations directly
-                        true,                           // Create detection objects in QuPath
-                        List.of(annotation),            // Tiling just this annotation
-                        QPPreferenceDialog.getInvertedYProperty(),
-                        QPPreferenceDialog.getInvertedXProperty()
-                );
-
-                logger.info("Finished tiling and config for annotation '{}'", annotationName);
-
-            } catch (IOException ioex) {
-                logger.error("Failed to prepare tiling for annotation '{}': {}", annotationName, ioex.getMessage());
-                UIFunctions.notifyUserOfError(
-                        "Could not create directory or perform tiling for annotation: " + annotationName, "Directory or Tiling Error"
-                );
-            }
-        }
 
 
     }
