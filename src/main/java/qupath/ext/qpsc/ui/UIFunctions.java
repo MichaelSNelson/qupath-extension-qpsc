@@ -7,6 +7,7 @@ import javafx.beans.binding.Bindings;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.event.ActionEvent;
+import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
@@ -22,6 +23,8 @@ import javafx.stage.Modality;
 import javafx.stage.Stage;
 import javafx.stage.Window;
 import javafx.util.Duration;
+import javafx.scene.paint.Color;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qupath.ext.qpsc.controller.MicroscopeController;
@@ -48,6 +51,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 /**
  * UIFunctions
@@ -351,41 +355,98 @@ public class UIFunctions {
 
     /**
      * Prompts the user to select exactly one tile (detection object) in QuPath.
-     * Blocks until a selection is made or cancelled.
-     * Returns the selected PathObject or null if cancelled.
+     * Shows a non-modal dialog that allows the user to interact with QuPath while open.
+     *
+     * @param message The instruction message to display to the user
+     * @return CompletableFuture that completes with the selected PathObject or null if cancelled
      */
-    public static PathObject promptTileSelectionDialog(String message) {
-        PathObject selectedTile = null;
+    public static CompletableFuture<PathObject> promptTileSelectionDialogAsync(String message) {
+        CompletableFuture<PathObject> future = new CompletableFuture<>();
 
-        while (true) {
-            // Prompt user to make the selection in QuPath (not in dialog)
-            Alert info = new Alert(Alert.AlertType.INFORMATION);
-            info.setTitle("Select Tile");
-            info.setHeaderText(message);
-            info.setContentText("Select exactly ONE tile (Detection) in QuPath, then press OK.\n" +
-                    "Press Cancel to abort.");
-            ButtonType okType = new ButtonType("OK", ButtonBar.ButtonData.OK_DONE);
-            ButtonType cancelType = new ButtonType("Cancel", ButtonBar.ButtonData.CANCEL_CLOSE);
-            info.getButtonTypes().setAll(okType, cancelType);
-            var result = info.showAndWait();
+        Platform.runLater(() -> {
+            // Create a non-modal stage instead of a modal dialog
+            Stage stage = new Stage();
+            stage.initModality(Modality.NONE);
+            stage.setTitle("Select Tile");
+            stage.setAlwaysOnTop(true);
 
-            if (result.isEmpty() || result.get() == cancelType) {
-                return null;
-            }
+            VBox layout = new VBox(10);
+            layout.setPadding(new Insets(20));
 
-            // Check selection
-            Collection<PathObject> selected =  QP.getSelectedObjects();
-            var tile = selected.stream().filter(PathObject::isTile).toList();
+            Label instructionLabel = new Label(message);
+            instructionLabel.setWrapText(true);
+            instructionLabel.setPrefWidth(400);
 
-            if (tile.size() != 1) {
-                Alert warn = new Alert(Alert.AlertType.WARNING, "Please select exactly one tile!", ButtonType.OK);
-                warn.showAndWait();
-                continue; // Loop and prompt again
-            }
-            selectedTile = tile.get(0);
-            break;
-        }
-        return selectedTile;
+            Label statusLabel = new Label("No tile selected");
+            statusLabel.setStyle("-fx-font-weight: bold");
+
+            Button confirmButton = new Button("Confirm Selection");
+            confirmButton.setDisable(true);
+
+            Button cancelButton = new Button("Cancel");
+
+            HBox buttonBox = new HBox(10, confirmButton, cancelButton);
+            buttonBox.setAlignment(Pos.CENTER);
+
+            layout.getChildren().addAll(instructionLabel, statusLabel, buttonBox);
+
+            // Check selection periodically
+            Timeline selectionChecker = new Timeline(new KeyFrame(
+                    Duration.millis(500),
+                    e -> {
+                        Collection<PathObject> selected = QP.getSelectedObjects();
+                        List<PathObject> tiles = selected.stream()
+                                .filter(PathObject::isTile)
+                                .collect(Collectors.toList());
+
+                        if (tiles.size() == 1) {
+                            statusLabel.setText("Selected: " + tiles.get(0).getName());
+                            statusLabel.setTextFill(Color.GREEN);
+                            confirmButton.setDisable(false);
+                        } else if (tiles.isEmpty()) {
+                            statusLabel.setText("No tile selected");
+                            statusLabel.setTextFill(Color.BLACK);
+                            confirmButton.setDisable(true);
+                        } else {
+                            statusLabel.setText("Multiple tiles selected - please select only one");
+                            statusLabel.setTextFill(Color.RED);
+                            confirmButton.setDisable(true);
+                        }
+                    }
+            ));
+            selectionChecker.setCycleCount(Timeline.INDEFINITE);
+            selectionChecker.play();
+
+            // Button actions
+            confirmButton.setOnAction(e -> {
+                Collection<PathObject> selected = QP.getSelectedObjects();
+                List<PathObject> tiles = selected.stream()
+                        .filter(PathObject::isTile)
+                        .collect(Collectors.toList());
+
+                if (tiles.size() == 1) {
+                    selectionChecker.stop();
+                    stage.close();
+                    future.complete(tiles.get(0));
+                }
+            });
+
+            cancelButton.setOnAction(e -> {
+                selectionChecker.stop();
+                stage.close();
+                future.complete(null);
+            });
+
+            stage.setOnCloseRequest(e -> {
+                selectionChecker.stop();
+                future.complete(null);
+            });
+
+            stage.setScene(new Scene(layout));
+            stage.show();
+        });
+
+        return future;
     }
 
     /**
