@@ -220,12 +220,6 @@ public class TilingUtilities {
         for (int row = 0; row <= nRows; row++) {
             double y = startY + row * yStep;
 
-            // Skip row if beyond bounds
-            if ((!request.isInvertY() && y > startY + height) ||
-                    (request.isInvertY() && y < startY + height)) {
-                break;
-            }
-
             // Serpentine pattern: reverse direction on odd rows
             boolean reverseDirection = (row % 2 == 1);
 
@@ -234,11 +228,6 @@ public class TilingUtilities {
                 int actualCol = reverseDirection ? (nCols - col) : col;
                 double x = startX + actualCol * xStep;
 
-                // Skip column if beyond bounds
-                if ((!request.isInvertX() && x > startX + width) ||
-                        (request.isInvertX() && x < startX + width)) {
-                    continue;
-                }
 
                 // Create tile ROI
                 ROI tileROI = ROIs.createRectangleROI(
