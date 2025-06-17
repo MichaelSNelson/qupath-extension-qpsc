@@ -148,6 +148,7 @@ public class MinorFunctions {
      * Writes the two extreme coordinate pairs (minX,minY / maxX,maxY) into
      * a text file named "<image>_StageCoordinates.txt".
      */
+    //TODO re-include this in the exported metadata, or validate that the python side does this
     public static void writeTileExtremesToFile(
             String imagePath, List<List<Double>> extremes) {
         String out = imagePath.replaceAll("\\.[^\\.]+$", "") + "_StageCoordinates.txt";
