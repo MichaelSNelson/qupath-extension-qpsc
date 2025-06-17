@@ -198,13 +198,9 @@ public class TilingUtilities {
         double xStep = request.getFrameWidth() * (1 - overlapFraction);
         double yStep = request.getFrameHeight() * (1 - overlapFraction);
 
-        // Apply axis inversions to step sizes
-        if (request.isInvertX()) xStep = -xStep;
-        if (request.isInvertY()) yStep = -yStep;
-
         // Calculate number of tiles needed
-        int nCols = (int) Math.ceil(width / Math.abs(xStep));
-        int nRows = (int) Math.ceil(height / Math.abs(yStep));
+        int nCols = (int) Math.ceil(width / xStep);
+        int nRows = (int) Math.ceil(height / yStep);
 
         logger.info("Tile grid: {}x{} tiles, step size: ({}, {})",
                 nCols, nRows, xStep, yStep);
@@ -217,7 +213,12 @@ public class TilingUtilities {
         int skippedTiles = 0;
 
         // Generate tile grid with serpentine pattern
+        logger.debug("Creating tile grid from ({}, {}) with size {}x{}", startX, startY, width, height);
+        logger.debug("Frame size: {}x{}, Grid size: {}x{} tiles",
+                request.getFrameWidth(), request.getFrameHeight(), nCols + 1, nRows + 1);
+
         for (int row = 0; row <= nRows; row++) {
+            // Calculate Y position
             double y = startY + row * yStep;
 
             // Serpentine pattern: reverse direction on odd rows
@@ -228,7 +229,6 @@ public class TilingUtilities {
                 int actualCol = reverseDirection ? (nCols - col) : col;
                 double x = startX + actualCol * xStep;
 
-
                 // Create tile ROI
                 ROI tileROI = ROIs.createRectangleROI(
                         x, y,
@@ -236,6 +236,12 @@ public class TilingUtilities {
                         request.getFrameHeight(),
                         ImagePlane.getDefaultPlane()
                 );
+
+                // Log tile position for debugging
+                if (tileIndex < 5 || (row == nRows && col == nCols)) {
+                    logger.debug("Tile {}: position=({}, {}), center=({}, {})",
+                            tileIndex, x, y, tileROI.getCentroidX(), tileROI.getCentroidY());
+                }
 
                 // Filter by annotation ROI if provided
                 if (filterROI != null &&
