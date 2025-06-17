@@ -103,7 +103,8 @@ public class MinorFunctions {
     public static Map<String,String> calculateScriptPaths(String groovyScriptPath) {
         Path dir = Paths.get(groovyScriptPath).getParent()
                 .resolveSibling("groovyScripts");
-        String jsonPath   = dir.resolve("TissueCAMM.json").toString().replace("\\","/");
+        String jsonPath   = dir.resolve("tissue.json").toString().replace("\\","/");
+        //TODO remove this?
         String exportPath = dir.resolve("save4xMacroTiling.groovy").toString().replace("\\","/");
 
         Map<String,String> map = new HashMap<>();
