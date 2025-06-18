@@ -3,6 +3,7 @@ package qupath.ext.qpsc.controller;
 import javafx.application.Platform;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import qupath.ext.qpsc.model.RotationManager;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.service.CliExecutor;
 import qupath.ext.qpsc.ui.AffineTransformationController;
@@ -176,9 +177,28 @@ public class ExistingImageWorkflow {
                                             return;
                                         }
 
-                                        // 9. Process each annotation
-                                        processAnnotations(annotations, transform, sample, project,
-                                                tempTileDirectory, modeWithIndex, pixelSize, qupathGUI);
+                                        // 9. Get rotation angles based on modality
+                                        RotationManager rotationManager = new RotationManager(sample.modality());
+                                        rotationManager.getRotationAngles(sample.modality())
+                                                .thenAccept(rotationAngles -> {
+                                                    if (rotationAngles == null || rotationAngles.isEmpty()) {
+                                                        logger.info("No rotation angles selected/required");
+                                                        // Process without rotation
+                                                        processAnnotations(annotations, transform, sample, project,
+                                                                tempTileDirectory, modeWithIndex, pixelSize,
+                                                                qupathGUI, null, "");
+                                                    } else {
+                                                        logger.info("Processing with rotation angles: {}", rotationAngles);
+                                                        // Process each angle as a separate acquisition
+                                                        processAnnotationsWithRotation(annotations, transform, sample,
+                                                                project, tempTileDirectory, modeWithIndex, pixelSize,
+                                                                qupathGUI, rotationAngles, rotationManager);
+                                                    }
+                                                })
+                                                .exceptionally(ex -> {
+                                                    logger.error("Rotation angle selection failed", ex);
+                                                    return null;
+                                                });
                                     });
                         });
                     })
@@ -370,5 +390,162 @@ public class ExistingImageWorkflow {
         }
         logger.info("Found {} tissue annotation(s) in image.", annotations.size());
         return annotations;
+    }
+
+    /**
+     * Process annotations with multiple rotation angles.
+     * Each angle creates a separate acquisition with appropriate file naming.
+     */
+    private static void processAnnotationsWithRotation(
+            List<PathObject> annotations,
+            AffineTransform transform,
+            SampleSetupController.SampleSetupResult sample,
+            Project<BufferedImage> project,
+            String tempTileDirectory,
+            String modeWithIndex,
+            double pixelSize,
+            QuPathGUI qupathGUI,
+            List<Double> rotationAngles,
+            RotationManager rotationManager) {
+
+        String configFileLocation = QPPreferenceDialog.getMicroscopeConfigFileProperty();
+        String projectsFolder = sample.projectsFolder().getAbsolutePath();
+
+        // For each rotation angle, process all annotations
+        for (Double angle : rotationAngles) {
+            String angleSuffix = rotationManager.getAngleSuffix(sample.modality(), angle);
+            logger.info("Processing rotation angle: {} degrees (suffix: {})", angle, angleSuffix);
+
+            try {
+                // Set the rotation angle
+                MicroscopeController.getInstance().moveStageR(angle);
+                logger.info("Moved rotation stage to {} degrees", angle);
+
+                // Wait a moment for stage to settle
+                Thread.sleep(1000);
+
+            } catch (Exception e) {
+                logger.error("Failed to set rotation angle", e);
+                Platform.runLater(() -> UIFunctions.notifyUserOfError(
+                        "Failed to set rotation to " + angle + " degrees: " + e.getMessage(),
+                        "Rotation Error"));
+                continue;
+            }
+
+            // Process all annotations at this angle
+            processAnnotations(annotations, transform, sample, project,
+                    tempTileDirectory, modeWithIndex + angleSuffix,
+                    pixelSize, qupathGUI, angle, angleSuffix);
+        }
+    }
+
+    /**
+     * Modified processAnnotations to handle rotation angle in file naming
+     */
+    private static void processAnnotations(
+            List<PathObject> annotations,
+            AffineTransform transform,
+            SampleSetupController.SampleSetupResult sample,
+            Project<BufferedImage> project,
+            String tempTileDirectory,
+            String modeWithIndex,
+            double pixelSize,
+            QuPathGUI qupathGUI,
+            Double rotationAngle,
+            String angleSuffix) {
+
+        String configFileLocation = QPPreferenceDialog.getMicroscopeConfigFileProperty();
+        String projectsFolder = sample.projectsFolder().getAbsolutePath();
+
+        // Transform all tile configurations first
+        try {
+            TransformationFunctions.transformTileConfiguration(tempTileDirectory, transform);
+            logger.info("Transformed tile configurations for all annotations");
+        } catch (IOException e) {
+            logger.error("Failed to transform tile configurations", e);
+            Platform.runLater(() -> UIFunctions.notifyUserOfError(
+                    "Failed to transform tiles: " + e.getMessage(),
+                    "Transform Error"));
+            return;
+        }
+
+        // Launch acquisition for each annotation
+        List<CompletableFuture<Void>> acquisitionFutures = new ArrayList<>();
+
+        for (PathObject annotation : annotations) {
+            String annotationName = annotation.getName();
+            logger.info("Starting acquisition for annotation: {} at angle: {}",
+                    annotationName, rotationAngle != null ? rotationAngle : "N/A");
+
+            CompletableFuture<Void> acquisitionFuture = CompletableFuture.supplyAsync(() -> {
+                try {
+                    // Build acquisition command with rotation info if needed
+                    List<String> command = new ArrayList<>();
+                    command.add(res.getString("command.acquisitionWorkflow"));
+                    command.add(configFileLocation);
+                    command.add(projectsFolder);
+                    command.add(sample.sampleName());
+                    command.add(modeWithIndex);
+                    command.add(annotationName + angleSuffix);
+
+                    var result = CliExecutor.execComplexCommand(
+                            300,
+                            "tiles done",
+                            command.toArray(new String[0])
+                    );
+
+                    if (result.exitCode() != 0) {
+                        throw new RuntimeException("Acquisition failed for " + annotationName +
+                                " at angle " + rotationAngle + ": " + result.stderr());
+                    }
+                    logger.info("Acquisition completed for annotation: {} at angle: {}",
+                            annotationName, rotationAngle);
+                    return null;
+                } catch (Exception e) {
+                    throw new CompletionException(e);
+                }
+            });
+
+            // Queue stitching after acquisition completes
+            acquisitionFuture.thenRunAsync(() -> {
+                try {
+                    logger.info("Queuing stitching for annotation: {} with suffix: {}",
+                            annotationName, angleSuffix);
+                    String outPath = UtilityFunctions.stitchImagesAndUpdateProject(
+                            projectsFolder,
+                            sample.sampleName(),
+                            modeWithIndex,
+                            annotationName + angleSuffix,
+                            qupathGUI,
+                            project,
+                            String.valueOf(QPPreferenceDialog.getCompressionTypeProperty()),
+                            pixelSize,
+                            1  // downsample
+                    );
+                    logger.info("Stitching completed for annotation: {}, output: {}",
+                            annotationName + angleSuffix, outPath);
+                } catch (Exception e) {
+                    logger.error("Stitching failed for annotation: " + annotationName +
+                            " at angle " + rotationAngle, e);
+                    Platform.runLater(() -> UIFunctions.notifyUserOfError(
+                            "Stitching failed for " + annotationName + angleSuffix +
+                                    ": " + e.getMessage(),
+                            "Stitching Error"));
+                }
+            }, STITCH_EXECUTOR);
+
+            acquisitionFutures.add(acquisitionFuture);
+        }
+
+        // When all acquisitions complete, handle cleanup
+        CompletableFuture.allOf(acquisitionFutures.toArray(new CompletableFuture[0]))
+                .thenRun(() -> {
+                    logger.info("All acquisitions completed for angle: {}", rotationAngle);
+                    // Cleanup is handled after all angles are processed
+                })
+                .exceptionally(ex -> {
+                    logger.error("Error in acquisition workflow", ex);
+                    return null;
+                });
     }
 }
