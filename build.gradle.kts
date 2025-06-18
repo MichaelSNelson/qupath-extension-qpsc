@@ -60,6 +60,9 @@ dependencies {
     testImplementation("org.mockito:mockito-core:5.2.0")
     testImplementation("org.mockito:mockito-junit-jupiter:5.2.0")
 }
+
+//TODO remove before release
+//For troubleshooting deprecation warnings,
 tasks.withType<JavaCompile> {
     options.compilerArgs.add("-Xlint:deprecation")
 }

@@ -407,7 +407,7 @@ public class UIFunctions {
                             PathObject tile = tiles.get(0);
                             String tileName = tile.getName() != null ? tile.getName() :
                                     "Tile " + (int)tile.getMeasurements().get("TileNumber").doubleValue();
-                            statusLabel.setText("Selected: " + tileName);
+                            statusLabel.setText("Selected Tile Name: " + tileName);
                             statusLabel.setTextFill(javafx.scene.paint.Color.GREEN);
                             confirmButton.setDisable(false);
                         } else if (tiles.isEmpty()) {
