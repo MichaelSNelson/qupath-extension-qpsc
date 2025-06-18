@@ -143,7 +143,7 @@ public class ExistingImageWorkflow {
                                 QP.getDetectionObjects().stream()
                                         .filter(o -> o.getPathClass() != null &&
                                                 o.getPathClass().toString().toLowerCase().contains(modalityBase))
-                                        .forEach(o -> QP.removeObject(o, true));
+                                        .forEach(QP::removeObject);
 
                                 // Build tiling request
                                 TilingRequest request = new TilingRequest.Builder()
