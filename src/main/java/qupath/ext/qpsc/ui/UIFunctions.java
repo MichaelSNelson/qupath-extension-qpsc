@@ -386,7 +386,7 @@ public class UIFunctions {
             Button cancelButton = new Button("Cancel");
 
             HBox buttonBox = new HBox(10, confirmButton, cancelButton);
-            buttonBox.setAlignment(Pos.CENTER);
+            buttonBox.setAlignment(javafx.geometry.Pos.CENTER);
 
             layout.getChildren().addAll(instructionLabel, statusLabel, buttonBox);
 
@@ -395,21 +395,28 @@ public class UIFunctions {
                     Duration.millis(500),
                     e -> {
                         Collection<PathObject> selected = QP.getSelectedObjects();
+
+                        // Filter for detection objects that have a "TileNumber" measurement
+                        // This identifies objects created by our tiling system
                         List<PathObject> tiles = selected.stream()
-                                .filter(PathObject::isTile)
+                                .filter(PathObject::isDetection)
+                                .filter(obj -> obj.getMeasurements().containsKey("TileNumber"))
                                 .collect(Collectors.toList());
 
                         if (tiles.size() == 1) {
-                            statusLabel.setText("Selected: " + tiles.get(0).getName());
-                            statusLabel.setTextFill(Color.GREEN);
+                            PathObject tile = tiles.get(0);
+                            String tileName = tile.getName() != null ? tile.getName() :
+                                    "Tile " + (int)tile.getMeasurements().get("TileNumber").doubleValue();
+                            statusLabel.setText("Selected Tile Name: " + tileName);
+                            statusLabel.setTextFill(javafx.scene.paint.Color.GREEN);
                             confirmButton.setDisable(false);
                         } else if (tiles.isEmpty()) {
                             statusLabel.setText("No tile selected");
-                            statusLabel.setTextFill(Color.BLACK);
+                            statusLabel.setTextFill(javafx.scene.paint.Color.BLACK);
                             confirmButton.setDisable(true);
                         } else {
                             statusLabel.setText("Multiple tiles selected - please select only one");
-                            statusLabel.setTextFill(Color.RED);
+                            statusLabel.setTextFill(javafx.scene.paint.Color.RED);
                             confirmButton.setDisable(true);
                         }
                     }
@@ -418,10 +425,11 @@ public class UIFunctions {
             selectionChecker.play();
 
             // Button actions
-            confirmButton.setOnAction(e -> {
+            confirmButton.setOnAction(event -> {
                 Collection<PathObject> selected = QP.getSelectedObjects();
                 List<PathObject> tiles = selected.stream()
-                        .filter(PathObject::isTile)
+                        .filter(PathObject::isDetection)
+                        .filter(obj -> obj.getMeasurements().containsKey("TileNumber"))
                         .collect(Collectors.toList());
 
                 if (tiles.size() == 1) {
@@ -431,13 +439,13 @@ public class UIFunctions {
                 }
             });
 
-            cancelButton.setOnAction(e -> {
+            cancelButton.setOnAction(event -> {
                 selectionChecker.stop();
                 stage.close();
                 future.complete(null);
             });
 
-            stage.setOnCloseRequest(e -> {
+            stage.setOnCloseRequest(event -> {
                 selectionChecker.stop();
                 future.complete(null);
             });
@@ -448,7 +456,6 @@ public class UIFunctions {
 
         return future;
     }
-
     /**
      * Shows a Yes/No dialog to the user.
      * Returns true if "Yes"/"OK" is pressed, false otherwise.

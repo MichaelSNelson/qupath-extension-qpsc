@@ -138,7 +138,9 @@ public class TilingUtilities {
             ROI roi = annotation.getROI();
             String annotationName = annotation.getName();
 
-            logger.info("Processing annotation: {}", annotationName);
+            logger.info("Processing annotation: {} at bounds ({}, {}, {}, {})",
+                    annotationName, roi.getBoundsX(), roi.getBoundsY(),
+                    roi.getBoundsWidth(), roi.getBoundsHeight());
 
             // Calculate bounds with optional buffer
             double x = roi.getBoundsX();
@@ -151,8 +153,11 @@ public class TilingUtilities {
                 y -= request.getFrameHeight() / 2.0;
                 w += request.getFrameWidth();
                 h += request.getFrameHeight();
-                logger.debug("Added buffer to annotation bounds");
+                logger.debug("Added buffer - new bounds: ({}, {}, {}, {})", x, y, w, h);
             }
+
+            // IMPORTANT: Don't apply axis inversion here - it's handled in createTileGrid
+            // The inversion affects the order of tile generation, not the bounds
 
             // Create annotation-specific directory
             Path annotationDir = Paths.get(request.getOutputFolder(), annotationName);
@@ -160,11 +165,13 @@ public class TilingUtilities {
 
             String configPath = annotationDir.resolve("TileConfiguration.txt").toString();
 
-            // Generate tiles filtered by annotation bounds
-            createTileGrid(x, y, w, h, request, configPath, roi);
+            // Generate tiles
+            // IMPORTANT: Don't filter by ROI when we've added a buffer
+            // The expanded bounds already define our tiling area
+            ROI filterROI = request.isAddBuffer() ? null : roi;
+            createTileGrid(x, y, w, h, request, configPath, filterROI);
         }
     }
-
     /**
      * Core tiling algorithm that generates a grid of tiles and writes the configuration.
      * <p>
@@ -186,6 +193,10 @@ public class TilingUtilities {
      * @param filterROI optional ROI to filter tiles (only tiles intersecting this ROI are kept)
      * @throws IOException if unable to write the configuration file
      */
+    /**
+     * Core tiling algorithm that generates a grid of tiles and writes the configuration.
+     * Simplified to remove axis inversion handling which should be done at transform time.
+     */
     private static void createTileGrid(
             double startX, double startY,
             double width, double height,
@@ -198,12 +209,19 @@ public class TilingUtilities {
         double xStep = request.getFrameWidth() * (1 - overlapFraction);
         double yStep = request.getFrameHeight() * (1 - overlapFraction);
 
-        // Calculate number of tiles needed
+        // Calculate number of tiles needed - ensure we cover the entire area
         int nCols = (int) Math.ceil(width / xStep);
         int nRows = (int) Math.ceil(height / yStep);
 
-        logger.info("Tile grid: {}x{} tiles, step size: ({}, {})",
-                nCols, nRows, xStep, yStep);
+        // If the division is exact, we still need one more tile to cover the far edge
+        if (width % xStep == 0) nCols++;
+        if (height % yStep == 0) nRows++;
+
+        logger.info("Tile grid configuration:");
+        logger.info("  Area: ({}, {}) to ({}, {})", startX, startY, startX + width, startY + height);
+        logger.info("  Frame size: {} x {}", request.getFrameWidth(), request.getFrameHeight());
+        logger.info("  Step size: {} x {} ({}% overlap)", xStep, yStep, request.getOverlapPercent());
+        logger.info("  Grid: {} columns x {} rows", nCols, nRows);
 
         // Prepare output structures
         List<String> configLines = new ArrayList<>();
@@ -212,21 +230,17 @@ public class TilingUtilities {
         int tileIndex = 0;
         int skippedTiles = 0;
 
-        // Generate tile grid with serpentine pattern
-        logger.debug("Creating tile grid from ({}, {}) with size {}x{}", startX, startY, width, height);
-        logger.debug("Frame size: {}x{}, Grid size: {}x{} tiles",
-                request.getFrameWidth(), request.getFrameHeight(), nCols + 1, nRows + 1);
-
-        for (int row = 0; row <= nRows; row++) {
-            // Calculate Y position
+        // Generate tiles in a simple raster pattern
+        // The axis inversion (if any) will be handled by the transformation later
+        for (int row = 0; row < nRows; row++) {
             double y = startY + row * yStep;
 
-            // Serpentine pattern: reverse direction on odd rows
+            // Serpentine pattern for efficient stage movement
             boolean reverseDirection = (row % 2 == 1);
 
-            for (int col = 0; col <= nCols; col++) {
+            for (int col = 0; col < nCols; col++) {
                 // Apply serpentine pattern
-                int actualCol = reverseDirection ? (nCols - col) : col;
+                int actualCol = reverseDirection ? (nCols - 1 - col) : col;
                 double x = startX + actualCol * xStep;
 
                 // Create tile ROI
@@ -237,15 +251,15 @@ public class TilingUtilities {
                         ImagePlane.getDefaultPlane()
                 );
 
-                // Log tile position for debugging
-                if (tileIndex < 5 || (row == nRows && col == nCols)) {
-                    logger.debug("Tile {}: position=({}, {}), center=({}, {})",
-                            tileIndex, x, y, tileROI.getCentroidX(), tileROI.getCentroidY());
+                // Check if we should include this tile
+                boolean includeTile = true;
+                if (filterROI != null) {
+                    // Check if tile center is within the filter ROI or if they intersect
+                    includeTile = filterROI.contains(tileROI.getCentroidX(), tileROI.getCentroidY()) ||
+                            filterROI.getGeometry().intersects(tileROI.getGeometry());
                 }
 
-                // Filter by annotation ROI if provided
-                if (filterROI != null &&
-                        !filterROI.getGeometry().intersects(tileROI.getGeometry())) {
+                if (!includeTile) {
                     skippedTiles++;
                     continue;
                 }
@@ -265,6 +279,8 @@ public class TilingUtilities {
                     );
                     tile.setName(String.valueOf(tileIndex));
                     tile.getMeasurements().put("TileNumber", tileIndex);
+                    tile.getMeasurements().put("Row", row);
+                    tile.getMeasurements().put("Column", actualCol);
                     detectionTiles.add(tile);
                 }
 
@@ -272,8 +288,7 @@ public class TilingUtilities {
             }
         }
 
-        logger.info("Generated {} tiles (skipped {} outside ROI)",
-                tileIndex, skippedTiles);
+        logger.info("Generated {} tiles, skipped {} tiles outside ROI", tileIndex, skippedTiles);
 
         // Write configuration file
         Path configFilePath = Paths.get(configPath);
@@ -285,7 +300,7 @@ public class TilingUtilities {
         if (!detectionTiles.isEmpty()) {
             QP.getCurrentHierarchy().addObjects(detectionTiles);
             QP.fireHierarchyUpdate();
-            logger.info("Added {} detection tiles to QuPath project", detectionTiles.size());
+            logger.info("Added {} detection tiles to QuPath", detectionTiles.size());
         }
     }
 }

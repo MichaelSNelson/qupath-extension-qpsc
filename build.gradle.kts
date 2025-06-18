@@ -15,6 +15,8 @@ qupathExtension {
     description = "A QuPath extension to allow interaction with a microscope through PycroManager and MicroManager."
     automaticModule = "io.github.michaelsnelson.extension.qpsc"
 }
+
+
 allprojects {
     repositories {
         mavenLocal() // Checks your local Maven repository first.
@@ -59,6 +61,11 @@ dependencies {
     testImplementation("org.mockito:mockito-junit-jupiter:5.2.0")
 }
 
+//TODO remove before release
+//For troubleshooting deprecation warnings,
+tasks.withType<JavaCompile> {
+    options.compilerArgs.add("-Xlint:deprecation")
+}
 tasks.test {
     useJUnitPlatform()
     jvmArgs = listOf(
