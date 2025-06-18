@@ -19,7 +19,7 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 
 public class SampleSetupController {
-    /** Holds the user’s last entries from the "sample setup " dialog. */
+    /** Holds the user's last entries from the "sample setup" dialog. */
     private static SampleSetupResult lastSampleSetup;
 
     /** Expose the most recently completed SampleSetupResult, or null if none yet. */
@@ -33,8 +33,8 @@ public class SampleSetupController {
      *  - Projects folder (directory chooser, default from prefs)
      *  - Modality (combo box, keys from microscope YAML imagingMode section)
      *
-     * @return a CompletableFuture that completes with the user’s entries,
-     *         or is cancelled if the user hits "Cancel. "
+     * @return a CompletableFuture that completes with the user's entries,
+     *         or is cancelled if the user hits "Cancel."
      */
     public static CompletableFuture<SampleSetupResult> showDialog() {
         CompletableFuture<SampleSetupResult> future = new CompletableFuture<>();
@@ -62,7 +62,10 @@ public class SampleSetupController {
                 Window win = dlg.getDialogPane().getScene().getWindow();
                 DirectoryChooser chooser = new DirectoryChooser();
                 chooser.setTitle(res.getString("sampleSetup.title.directorychooser"));
-                chooser.setInitialDirectory(new File(folderField.getText()));
+                File currentFolder = new File(folderField.getText());
+                if (currentFolder.exists() && currentFolder.isDirectory()) {
+                    chooser.setInitialDirectory(currentFolder);
+                }
                 File chosen = chooser.showDialog(win);
                 if (chosen != null) folderField.setText(chosen.getAbsolutePath());
             });
@@ -75,7 +78,15 @@ public class SampleSetupController {
             ComboBox<String> modalityBox = new ComboBox<>(
                     FXCollections.observableArrayList(modalities)
             );
-            modalityBox.setValue(modalities.iterator().next());
+            if (!modalities.isEmpty()) {
+                modalityBox.setValue(modalities.iterator().next());
+            }
+
+            // --- Error label for validation messages ---
+            Label errorLabel = new Label();
+            errorLabel.setStyle("-fx-text-fill: red; -fx-font-size: 12px;");
+            errorLabel.setWrapText(true);
+            errorLabel.setVisible(false);
 
             // --- Layout ---
             GridPane grid = new GridPane();
@@ -88,28 +99,68 @@ public class SampleSetupController {
             grid.add(folderBox,                                            1, 1);
             grid.add(new Label(res.getString("sampleSetup.label.modality")), 0, 2);
             grid.add(modalityBox,                                          1, 2);
+            grid.add(errorLabel,                                           0, 3, 2, 1);
 
             dlg.getDialogPane().setContent(grid);
+
+            // Prevent dialog from closing on OK if validation fails
+            Button okButton = (Button) dlg.getDialogPane().lookupButton(okType);
+            okButton.addEventFilter(javafx.event.ActionEvent.ACTION, event -> {
+                // Validate inputs
+                String name   = sampleNameField.getText().trim();
+                File   folder = new File(folderField.getText().trim());
+                String mod    = modalityBox.getValue();
+
+                // Build validation error message
+                StringBuilder errors = new StringBuilder();
+                if (name.isEmpty()) {
+                    errors.append("• Sample name cannot be empty\n");
+                }
+                if (!folder.exists() || !folder.isDirectory()) {
+                    errors.append("• Projects folder must be a valid directory\n");
+                }
+                if (mod == null || mod.isEmpty()) {
+                    errors.append("• Please select a modality\n");
+                }
+
+                if (errors.length() > 0) {
+                    // Show error and consume event to prevent dialog closing
+                    errorLabel.setText(errors.toString().trim());
+                    errorLabel.setVisible(true);
+                    event.consume();
+
+                    // Focus the first problematic field
+                    if (name.isEmpty()) {
+                        sampleNameField.requestFocus();
+                    } else if (!folder.exists() || !folder.isDirectory()) {
+                        folderField.requestFocus();
+                    } else {
+                        modalityBox.requestFocus();
+                    }
+                } else {
+                    // Valid input - hide error label
+                    errorLabel.setVisible(false);
+                }
+            });
 
             dlg.setResultConverter(button -> {
                 if (button == okType) {
                     String name   = sampleNameField.getText().trim();
                     File   folder = new File(folderField.getText().trim());
                     String mod    = modalityBox.getValue();
-                    if (name.isEmpty() || !folder.isDirectory() || mod == null) {
-                        new Alert(Alert.AlertType.ERROR,
-                                res.getString("sampleSetup.error.invalidInput"))
-                                .showAndWait();
-                        return null; // keep it open
-                    }
+
+                    // This should already be validated by the event filter
                     return new SampleSetupResult(name, folder, mod);
                 }
                 return null;
             });
 
+            // Set initial focus
+            Platform.runLater(() -> sampleNameField.requestFocus());
+
             Optional<SampleSetupResult> resOpt = dlg.showAndWait();
             if (resOpt.isPresent()) {
-                lastSampleSetup = resOpt.get();       // <— store it for later
+                lastSampleSetup = resOpt.get();
                 future.complete(lastSampleSetup);
             } else {
                 future.cancel(true);
@@ -119,7 +170,6 @@ public class SampleSetupController {
         return future;
     }
 
-    /** Holds the user’s choices from the "sample setup " dialog. */
+    /** Holds the user's choices from the "sample setup" dialog. */
     public record SampleSetupResult(String sampleName, File projectsFolder, String modality) { }
 }
-

@@ -1,0 +1,2 @@
+- name: Validate Gradle wrapper
+  uses: gradle/wrapper-validation-action@v3  # Update from v2 to v3
