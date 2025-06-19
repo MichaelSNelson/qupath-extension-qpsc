@@ -23,7 +23,7 @@ import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.stream.Collectors;
-
+//TODO need to add image to project so that it gets flipped before running user interface stuff
 /**
  * ExistingImageWorkflow
  * <p>

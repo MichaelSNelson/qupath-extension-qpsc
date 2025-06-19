@@ -101,8 +101,7 @@ public class MinorFunctions {
 
     /** Returns a Map of two script-related paths based on the Groovy script’s folder. */
     public static Map<String,String> calculateScriptPaths(String groovyScriptPath) {
-        Path dir = Paths.get(groovyScriptPath).getParent()
-                .resolveSibling("groovyScripts");
+        Path dir = Paths.get(groovyScriptPath);
         String jsonPath   = dir.resolve("tissue.json").toString().replace("\\","/");
         //TODO remove this?
         String exportPath = dir.resolve("save4xMacroTiling.groovy").toString().replace("\\","/");
