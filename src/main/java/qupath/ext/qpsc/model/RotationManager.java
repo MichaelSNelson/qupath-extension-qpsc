@@ -7,6 +7,7 @@ import qupath.ext.qpsc.utilities.MicroscopeConfigManager;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -32,20 +33,36 @@ public class RotationManager {
                 QPPreferenceDialog.getMicroscopeConfigFileProperty()
         );
 
-        Double plusAngle = mgr.getDouble("imagingMode", modality, "ppm_plus");
-        Double minusAngle = mgr.getDouble("imagingMode", modality, "ppm_minus");
+        // Check for new structured format first
+        Map<String, Object> ppmPlus = mgr.getSection("imagingMode", modality, "ppm_plus");
+        Map<String, Object> ppmMinus = mgr.getSection("imagingMode", modality, "ppm_minus");
+
+        Double plusAngle = null;
+        Double minusAngle = null;
+
+        if (ppmPlus != null && ppmPlus.containsKey("degrees")) {
+            plusAngle = ((Number) ppmPlus.get("degrees")).doubleValue();
+        } else {
+            // Fall back to old format
+            plusAngle = mgr.getDouble("imagingMode", modality, "ppm_plus");
+        }
+
+        if (ppmMinus != null && ppmMinus.containsKey("degrees")) {
+            minusAngle = ((Number) ppmMinus.get("degrees")).doubleValue();
+        } else {
+            // Fall back to old format
+            minusAngle = mgr.getDouble("imagingMode", modality, "ppm_minus");
+        }
 
         // Add strategies in priority order
         if (plusAngle != null && minusAngle != null) {
             strategies.add(new PPMRotationStrategy(plusAngle, minusAngle));
+            logger.info("PPM angles configured: {} to {} degrees", minusAngle, plusAngle);
         }
         strategies.add(new BrightfieldRotationStrategy());
         strategies.add(new NoRotationStrategy());
 
         logger.info("Initialized rotation strategies for modality: {}", modality);
-        if (plusAngle != null) {
-            logger.info("PPM angles configured: {} to {}", minusAngle, plusAngle);
-        }
     }
 
     /**
