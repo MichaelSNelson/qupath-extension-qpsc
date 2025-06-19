@@ -188,7 +188,7 @@ public class ExistingImageWorkflow {
                                                         // Process without rotation
                                                         processAnnotations(annotations, transform, sample, project,
                                                                 tempTileDirectory, modeWithIndex, pixelSize,
-                                                                qupathGUI, null, "");
+                                                                qupathGUI);
                                                     } else {
                                                         logger.info("Processing with rotation angles: {} for modality: {}",
                                                                 rotationAngles, sample.modality());
