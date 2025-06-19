@@ -2,6 +2,7 @@ package qupath.ext.qpsc.controller;
 
 import javafx.application.Platform;
 import javafx.scene.control.Alert;
+import qupath.ext.qpsc.model.RotationManager;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.service.CliExecutor;
 import qupath.ext.qpsc.ui.UIFunctions;
@@ -124,6 +125,32 @@ public class BoundingBoxWorkflow {
                         );
                         return;  // Exit the workflow
                     }
+                    // 7a) Check rotation requirements for the modality
+                    logger.info("Checking rotation requirements for modality: {}", sample.modality());
+                    RotationManager rotationManager = new RotationManager(sample.modality());
+
+                    rotationManager.getRotationAngles(sample.modality())
+                            .thenAccept(rotationAngles -> {
+                                logger.info("Rotation angles for {}: {}", sample.modality(), rotationAngles);
+
+                                if (rotationAngles != null && !rotationAngles.isEmpty()) {
+                                    // For BF modes, this should be [90.0]
+                                    // For PPM modes, this could be multiple angles
+                                    for (Double angle : rotationAngles) {
+                                        try {
+                                            logger.info("Setting rotation stage to {} degrees", angle);
+                                            MicroscopeController.getInstance().moveStageR(angle);
+                                            Thread.sleep(1000); // Wait for stage to settle
+                                            logger.info("Rotation stage movement completed");
+                                        } catch (Exception e) {
+                                            logger.error("Failed to set rotation angle to {} degrees", angle, e);
+                                            UIFunctions.notifyUserOfError(
+                                                    "Failed to set rotation: " + e.getMessage(),
+                                                    "Rotation Error"
+                                            );
+                                        }
+                                    }
+                                }
 
                     // 7) Prepare CLI arguments for acquisition
                     String configFileLocation = QPPreferenceDialog.getMicroscopeConfigFileProperty();
@@ -246,5 +273,6 @@ public class BoundingBoxWorkflow {
                     logger.info("Bounding-box workflow aborted: {}", ex.getMessage());
                     return null;
                 });
+
     }
 }

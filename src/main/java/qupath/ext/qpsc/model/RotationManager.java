@@ -54,14 +54,28 @@ public class RotationManager {
      * @return CompletableFuture with list of angles
      */
     public CompletableFuture<List<Double>> getRotationAngles(String modalityName) {
+        logger.info("Getting rotation angles for modality: {}", modalityName);
+
         for (RotationStrategy strategy : strategies) {
+            logger.debug("Checking strategy {} for modality {}",
+                    strategy.getClass().getSimpleName(), modalityName);
+
             if (strategy.appliesTo(modalityName)) {
                 logger.info("Using {} for modality {}",
                         strategy.getClass().getSimpleName(), modalityName);
-                return strategy.getRotationAngles();
+
+                CompletableFuture<List<Double>> anglesFuture = strategy.getRotationAngles();
+
+                // Add logging to see what angles are returned
+                return anglesFuture.thenApply(angles -> {
+                    logger.info("Strategy {} returned angles: {}",
+                            strategy.getClass().getSimpleName(), angles);
+                    return angles;
+                });
             }
         }
         // Should never reach here due to NoRotationStrategy catch-all
+        logger.warn("No rotation strategy found for modality: {}", modalityName);
         return CompletableFuture.completedFuture(List.of());
     }
 
