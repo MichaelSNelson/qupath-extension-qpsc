@@ -1,12 +1,7 @@
 name: Java CI with Gradle
 
 on:
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
-  workflow_dispatch:
-  workflow_call:
+  workflow_dispatch:  # Only manual trigger, removes automatic triggers
 
 permissions:
   contents: read
@@ -14,27 +9,6 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-
+    if: false  # This ensures it never runs even if manually triggered
     steps:
-
-    - uses: actions/checkout@v4
-
-    - name: Set up JDK 21 # TODO: check Java version
-      uses: actions/setup-java@v4
-      with:
-        java-version: '21'
-        distribution: 'temurin'
-
-    - name: Validate Gradle wrapper
-      uses: gradle/wrapper-validation-action@v2
-
-    - name: Build with Gradle
-      uses: gradle/gradle-build-action@v3
-      with:
-        arguments: build
-
-    - uses: actions/upload-artifact@v4
-      with:
-        path: build/libs/*.jar
-        name: build
-        retention-days: 7
+      - run: echo "Workflow disabled for internal testing"

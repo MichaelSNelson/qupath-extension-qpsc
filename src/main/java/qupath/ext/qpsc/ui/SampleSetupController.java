@@ -20,7 +20,7 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 
 public class SampleSetupController {
-    /** Holds the user’s last entries from the "sample setup " dialog. */
+    /** Holds the user's last entries from the "sample setup" dialog. */
     private static SampleSetupResult lastSampleSetup;
 
     /** Expose the most recently completed SampleSetupResult, or null if none yet. */
@@ -34,8 +34,8 @@ public class SampleSetupController {
      *  - Projects folder (directory chooser, default from prefs)
      *  - Modality (combo box, keys from microscope YAML imagingMode section)
      *
-     * @return a CompletableFuture that completes with the user’s entries,
-     *         or is cancelled if the user hits "Cancel. "
+     * @return a CompletableFuture that completes with the user's entries,
+     *         or is cancelled if the user hits "Cancel."
      */
     /**
      * Show a dialog to collect sample/project information.
@@ -153,7 +153,6 @@ public class SampleSetupController {
             row++;
 
             grid.add(errorLabel, 0, row, 2, 1);
-
             dlg.getDialogPane().setContent(grid);
 
             // Prevent dialog from closing on OK if validation fails
@@ -166,10 +165,12 @@ public class SampleSetupController {
 
                 // Build validation error message
                 StringBuilder errors = new StringBuilder();
+
                 if (!hasOpenProject && name.isEmpty()) {
                     errors.append("• Sample name cannot be empty\n");
                 }
                 if (!hasOpenProject && (!folder.exists() || !folder.isDirectory())) {
+
                     errors.append("• Projects folder must be a valid directory\n");
                 }
                 if (mod == null || mod.isEmpty()) {
@@ -183,9 +184,11 @@ public class SampleSetupController {
                     event.consume();
 
                     // Focus the first problematic field
+
                     if (!hasOpenProject && name.isEmpty()) {
                         sampleNameField.requestFocus();
                     } else if (!hasOpenProject && (!folder.exists() || !folder.isDirectory())) {
+
                         folderField.requestFocus();
                     } else {
                         modalityBox.requestFocus();
@@ -228,7 +231,6 @@ public class SampleSetupController {
         return future;
     }
 
-    /** Holds the user’s choices from the "sample setup " dialog. */
+    /** Holds the user's choices from the "sample setup" dialog. */
     public record SampleSetupResult(String sampleName, File projectsFolder, String modality) { }
 }
-

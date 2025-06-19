@@ -109,6 +109,7 @@ public class TransformationFunctions {
     /**
      * Reads min & max X,Y from a TileConfiguration file.
      */
+    //TODO decide if this is the responsibility of QuPath or Python
     public static List<List<Double>> findImageBoundaries(File tileConfigFile) throws IOException {
         double minX = Double.POSITIVE_INFINITY, minY = Double.POSITIVE_INFINITY;
         double maxX = Double.NEGATIVE_INFINITY, maxY = Double.NEGATIVE_INFINITY;

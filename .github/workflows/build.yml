@@ -1,0 +1,13 @@
+name: Build
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    if: false  # This disables the workflow
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Workflow disabled for internal testing"

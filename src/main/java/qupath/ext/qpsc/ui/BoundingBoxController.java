@@ -8,7 +8,6 @@ import javafx.scene.layout.VBox;
 import javafx.stage.Modality;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import qupath.ext.qpsc.controller.BoundingBoxWorkflow;
 
 import java.util.Optional;
 import java.util.ResourceBundle;
@@ -24,7 +23,7 @@ public class BoundingBoxController {
     /**
      * Show a dialog asking the user to define a rectangular bounding box
      * (either by entering four comma-separated values or via four separate fields),
-     * plus an "In focus? " checkbox. Returns a CompletableFuture that completes
+     * plus an "In focus?" checkbox. Returns a CompletableFuture that completes
      * with the BoundingBoxResult when the user clicks OK, or is cancelled if
      * the user hits Cancel or closes the dialog.
      *
@@ -59,8 +58,6 @@ public class BoundingBoxController {
 
             // 3a) CSV entry tab
             TextField csvField = new TextField("9000, 500, 10000, 1500");
-            //csvField.setPromptText(res.getString("boundingBox.prompt.csv"));  // e.g. "X1, Y1, X2, Y2"
-
             Tab csvTab = new Tab(res.getString("boundingBox.tab.csv"), new VBox(5, csvField));
 
             // 3b) Separate-fields tab
@@ -87,24 +84,27 @@ public class BoundingBoxController {
             // 4) In-focus checkbox
             CheckBox inFocusCheckbox = new CheckBox(res.getString("boundingBox.label.inFocus"));
 
-            // 5) Assemble content
-            VBox content = new VBox(10, tabs, inFocusCheckbox);
+            // 5) Error label for validation
+            Label errorLabel = new Label();
+            errorLabel.setStyle("-fx-text-fill: red; -fx-font-size: 12px;");
+            errorLabel.setWrapText(true);
+            errorLabel.setVisible(false);
+
+            // 6) Assemble content
+            VBox content = new VBox(10, tabs, inFocusCheckbox, errorLabel);
             content.setPadding(new Insets(20));
             dlg.getDialogPane().setContent(content);
 
-            // 6) Convert the user’s button choice into a BoundingBoxResult
-            dlg.setResultConverter(button -> {
-                if (button != okType) {
-                    // User cancelled or closed the dialog
-                    return null;
-                }
+            // 7) Prevent dialog from closing on OK if validation fails
+            Button okButton = (Button) dlg.getDialogPane().lookupButton(okType);
+            okButton.addEventFilter(javafx.event.ActionEvent.ACTION, event -> {
                 double x1, y1, x2, y2;
                 try {
                     if (tabs.getSelectionModel().getSelectedItem() == csvTab) {
                         // Parse CSV entry
                         String[] parts = csvField.getText().split(",");
                         if (parts.length != 4) {
-                            throw new IllegalArgumentException(res.getString("boundingBox.error.invalidInput"));
+                            throw new IllegalArgumentException("Please enter exactly 4 comma-separated values");
                         }
                         x1 = Double.parseDouble(parts[0].trim());
                         y1 = Double.parseDouble(parts[1].trim());
@@ -112,23 +112,64 @@ public class BoundingBoxController {
                         y2 = Double.parseDouble(parts[3].trim());
                     } else {
                         // Parse the four separate fields
+                        if (x1Field.getText().trim().isEmpty() ||
+                                y1Field.getText().trim().isEmpty() ||
+                                x2Field.getText().trim().isEmpty() ||
+                                y2Field.getText().trim().isEmpty()) {
+                            throw new IllegalArgumentException("All coordinate fields must be filled");
+                        }
                         x1 = Double.parseDouble(x1Field.getText());
                         y1 = Double.parseDouble(y1Field.getText());
                         x2 = Double.parseDouble(x2Field.getText());
                         y2 = Double.parseDouble(y2Field.getText());
                     }
-                } catch (Exception e) {
-                    // Show an error and keep the dialog open
-                    logger.info(e.getMessage());
-                    new Alert(Alert.AlertType.ERROR,
-                            res.getString("boundingBox.error.invalidInput") + "\n" + e.getMessage()
-                    ).showAndWait();
-                    return null;
+
+                    // Validate that we have a proper bounding box
+                    if (x1 == x2 || y1 == y2) {
+                        throw new IllegalArgumentException("Bounding box must have non-zero width and height");
+                    }
+
+                    // Valid - hide error
+                    errorLabel.setVisible(false);
+
+                } catch (NumberFormatException e) {
+                    errorLabel.setText("Invalid number format. Please enter valid numeric coordinates.");
+                    errorLabel.setVisible(true);
+                    event.consume();
+                } catch (IllegalArgumentException e) {
+                    errorLabel.setText(e.getMessage());
+                    errorLabel.setVisible(true);
+                    event.consume();
                 }
-                return new BoundingBoxResult(x1, y1, x2, y2, inFocusCheckbox.isSelected());
             });
 
-            // 7) Show and handle result
+            // 8) Convert the user's button choice into a BoundingBoxResult
+            dlg.setResultConverter(button -> {
+                if (button != okType) {
+                    return null;
+                }
+                double x1, y1, x2, y2;
+                try {
+                    if (tabs.getSelectionModel().getSelectedItem() == csvTab) {
+                        String[] parts = csvField.getText().split(",");
+                        x1 = Double.parseDouble(parts[0].trim());
+                        y1 = Double.parseDouble(parts[1].trim());
+                        x2 = Double.parseDouble(parts[2].trim());
+                        y2 = Double.parseDouble(parts[3].trim());
+                    } else {
+                        x1 = Double.parseDouble(x1Field.getText());
+                        y1 = Double.parseDouble(y1Field.getText());
+                        x2 = Double.parseDouble(x2Field.getText());
+                        y2 = Double.parseDouble(y2Field.getText());
+                    }
+                    return new BoundingBoxResult(x1, y1, x2, y2, inFocusCheckbox.isSelected());
+                } catch (Exception e) {
+                    // Should not happen due to event filter validation
+                    return null;
+                }
+            });
+
+            // 9) Show and handle result
             Optional<BoundingBoxResult> result = dlg.showAndWait();
             if (result.isPresent()) {
                 future.complete(result.get());
@@ -139,6 +180,4 @@ public class BoundingBoxController {
 
         return future;
     }
-
 }
-
