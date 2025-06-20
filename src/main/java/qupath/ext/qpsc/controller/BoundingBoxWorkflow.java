@@ -21,6 +21,7 @@ import java.io.UncheckedIOException;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.stream.Collectors;
 
 import static qupath.ext.qpsc.utilities.MinorFunctions.firstLines;
 
@@ -130,7 +131,7 @@ public class BoundingBoxWorkflow {
                      * This replaces the section from "// 7) Prepare CLI arguments" onwards
                      */
 
-                    // 7) Get rotation angles based on modality
+// 7) Get rotation angles based on modality
                     logger.info("Checking rotation requirements for modality: {}", sample.modality());
                     RotationManager rotationManager = new RotationManager(sample.modality());
 
@@ -138,104 +139,108 @@ public class BoundingBoxWorkflow {
                             .thenAccept(rotationAngles -> {
                                 logger.info("Rotation angles for {}: {}", sample.modality(), rotationAngles);
 
-                                // Process acquisition for each rotation angle (or once if no rotation)
-                                List<Double> anglesToProcess = (rotationAngles != null && !rotationAngles.isEmpty())
-                                        ? rotationAngles : List.of(Double.NaN);  // NaN indicates no rotation
+                                // Prepare acquisition arguments
+                                String configFileLocation = QPPreferenceDialog.getMicroscopeConfigFileProperty();
+                                String boundsMode = "bounds";
 
-                                List<CompletableFuture<Void>> allAcquisitions = new ArrayList<>();
+                                List<String> cliArgs = new ArrayList<>(List.of(
+                                        res.getString("command.acquisitionWorkflow"),
+                                        configFileLocation,
+                                        projectsFolder,
+                                        sample.sampleName(),
+                                        modeWithIndex,
+                                        boundsMode
+                                ));
 
-                                for (Double angle : anglesToProcess) {
-                                    // Create final copies for use in lambdas
-                                    final Double finalAngle = angle;
-                                    final String finalAngleSuffix = !Double.isNaN(angle)
-                                            ? rotationManager.getAngleSuffix(sample.modality(), angle)
-                                            : "";
+                                // Add angles parameter if rotation is needed
+                                if (rotationAngles != null && !rotationAngles.isEmpty()) {
+                                    cliArgs.add("--angles");
+                                    cliArgs.addAll(rotationAngles.stream()
+                                            .map(String::valueOf)
+                                            .toList());
+                                }
 
-                                    CompletableFuture<Void> angleAcquisition = CompletableFuture.runAsync(() -> {
-                                        // Handle rotation if needed
-                                        if (!Double.isNaN(finalAngle)) {
-                                            try {
-                                                logger.info("Setting rotation stage to {} degrees", finalAngle);
-                                                MicroscopeController.getInstance().moveStageR(finalAngle);
-                                                Thread.sleep(1000); // Wait for stage to settle
-                                                logger.info("Rotation stage movement completed");
-                                            } catch (Exception e) {
-                                                logger.error("Failed to set rotation angle to {} degrees", finalAngle, e);
-                                                Platform.runLater(() -> UIFunctions.notifyUserOfError(
-                                                        "Failed to set rotation: " + e.getMessage(),
-                                                        "Rotation Error"
-                                                ));
-                                                return; // Skip this angle
-                                            }
-                                        }
+                                logger.info("Starting acquisition with args: {}", cliArgs);
 
-                                        // Prepare acquisition arguments
-                                        String configFileLocation = QPPreferenceDialog.getMicroscopeConfigFileProperty();
-                                        String boundsMode = "bounds";
-                                        String finalModeWithIndex = modeWithIndex + finalAngleSuffix;
-
-                                        List<String> cliArgs = List.of(
-                                                res.getString("command.acquisitionWorkflow"),
-                                                configFileLocation,
-                                                projectsFolder,
-                                                sample.sampleName(),
-                                                finalModeWithIndex,
-                                                boundsMode
+                                // Run acquisition ONCE with all angles
+                                CompletableFuture.runAsync(() -> {
+                                    try {
+                                        CliExecutor.ExecResult scanRes = CliExecutor.execComplexCommand(
+                                                60 * (rotationAngles != null ? rotationAngles.size() : 1), // Adjust timeout for multiple angles
+                                                res.getString("acquisition.cli.progressRegex"),
+                                                cliArgs.toArray(new String[0])
                                         );
 
-                                        logger.info("Starting acquisition with args: {}", cliArgs);
+                                        if (scanRes.exitCode() != 0) {
+                                            String stderr = scanRes.stderr().toString();
+                                            Platform.runLater(() -> UIFunctions.notifyUserOfError(
+                                                    "Acquisition failed with exit code " + scanRes.exitCode() +
+                                                            ".\n\nError output:\n" + firstLines(stderr, 10),
+                                                    "Acquisition"
+                                            ));
+                                            logger.error("Acquisition failed, stderr:\n{}", stderr);
+                                            return;
+                                        }
 
-                                        // Run acquisition
-                                        try {
-                                            CliExecutor.ExecResult scanRes = CliExecutor.execComplexCommand(
-                                                    60, // timeout
-                                                    res.getString("acquisition.cli.progressRegex"),
-                                                    cliArgs.toArray(new String[0])
-                                            );
+                                        // Schedule stitching for each angle
+                                        List<CompletableFuture<Void>> stitchingFutures = new ArrayList<>();
 
-                                            if (scanRes.exitCode() != 0) {
-                                                String stderr = scanRes.stderr().toString();
-                                                // Check for MicroManager-specific errors
-                                                if (stderr.contains("mmcorej") || stderr.contains("MicroManager")) {
-                                                    Platform.runLater(() -> UIFunctions.notifyUserOfError(
-                                                            "Failed to connect to MicroManager. Please verify that:\n" +
-                                                                    "- All hardware is connected\n" +
-                                                                    "- MicroManager can connect and run\n" +
-                                                                    "- MicroManager is NOT currently in 'Live' mode\n" +
-                                                                    "- Devices are configured correctly in MicroManager\n\n" +
-                                                                    "Details:\n" + firstLines(stderr, 10),
-                                                            "MicroManager Connection"
-                                                    ));
-                                                } else {
-                                                    Platform.runLater(() -> UIFunctions.notifyUserOfError(
-                                                            "Acquisition failed with exit code " + scanRes.exitCode() +
-                                                                    ".\n\nError output:\n" + firstLines(stderr, 10),
-                                                            "Acquisition"
-                                                    ));
-                                                }
-                                                logger.error("Acquisition failed, stderr:\n{}", stderr);
-                                                return;
+                                        if (rotationAngles != null && !rotationAngles.isEmpty()) {
+                                            // Multiple angles - stitch each separately
+                                            for (Double angle : rotationAngles) {
+                                                String angleSuffix = rotationManager.getAngleSuffix(sample.modality(), angle);
+                                                CompletableFuture<Void> stitchFuture = CompletableFuture.runAsync(() -> {
+                                                    try {
+                                                        Platform.runLater(() ->
+                                                                qupath.fx.dialogs.Dialogs.showInfoNotification(
+                                                                        "Stitching",
+                                                                        "Stitching " + sample.sampleName() + " at angle " + angle + "…"));
+
+                                                        String outPath = UtilityFunctions.stitchImagesAndUpdateProject(
+                                                                projectsFolder,
+                                                                sample.sampleName(),
+                                                                modeWithIndex + angleSuffix,
+                                                                "bounds",
+                                                                qupathGUI,
+                                                                project,
+                                                                String.valueOf(QPPreferenceDialog.getCompressionTypeProperty()),
+                                                                pixelSize,
+                                                                1  // downsample
+                                                        );
+
+                                                        Platform.runLater(() ->
+                                                                qupath.fx.dialogs.Dialogs.showInfoNotification(
+                                                                        "Stitching complete",
+                                                                        "Output: " + outPath));
+
+                                                    } catch (Exception e) {
+                                                        Platform.runLater(() ->
+                                                                UIFunctions.notifyUserOfError(
+                                                                        "Stitching failed for angle " + angle + ":\n" + e.getMessage(),
+                                                                        "Stitching Error"));
+                                                    }
+                                                }, STITCH_EXECUTOR);
+                                                stitchingFutures.add(stitchFuture);
                                             }
-
-                                            // Success - schedule stitching
-                                            CompletableFuture.runAsync(() -> {
+                                        } else {
+                                            // No rotation - single stitch
+                                            CompletableFuture<Void> stitchFuture = CompletableFuture.runAsync(() -> {
                                                 try {
                                                     Platform.runLater(() ->
                                                             qupath.fx.dialogs.Dialogs.showInfoNotification(
                                                                     "Stitching",
-                                                                    "Stitching " + sample.sampleName() +
-                                                                            (finalAngleSuffix.isEmpty() ? "" : " at angle " + finalAngle) + "…"));
+                                                                    "Stitching " + sample.sampleName() + "…"));
 
                                                     String outPath = UtilityFunctions.stitchImagesAndUpdateProject(
                                                             projectsFolder,
                                                             sample.sampleName(),
-                                                            finalModeWithIndex,
+                                                            modeWithIndex,
                                                             "bounds",
                                                             qupathGUI,
                                                             project,
                                                             String.valueOf(QPPreferenceDialog.getCompressionTypeProperty()),
                                                             pixelSize,
-                                                            1  // downsample
+                                                            1
                                                     );
 
                                                     Platform.runLater(() ->
@@ -250,30 +255,29 @@ public class BoundingBoxWorkflow {
                                                                     "Stitching Error"));
                                                 }
                                             }, STITCH_EXECUTOR);
-
-                                        } catch (Exception e) {
-                                            logger.error("Acquisition failed", e);
-                                            Platform.runLater(() ->
-                                                    UIFunctions.notifyUserOfError(
-                                                            "Failed to launch acquisition:\n" + e.getMessage(),
-                                                            res.getString("acquisition.error.title")));
+                                            stitchingFutures.add(stitchFuture);
                                         }
-                                    });
 
-                                    allAcquisitions.add(angleAcquisition);
-                                }
+                                        // After all stitching completes, handle cleanup
+                                        CompletableFuture.allOf(stitchingFutures.toArray(new CompletableFuture[0]))
+                                                .thenRun(() -> {
+                                                    String handling = QPPreferenceDialog.getTileHandlingMethodProperty();
+                                                    if ("Delete".equals(handling)) {
+                                                        UtilityFunctions.deleteTilesAndFolder(tempTileDir);
+                                                    } else if ("Zip".equals(handling)) {
+                                                        UtilityFunctions.zipTilesAndMove(tempTileDir);
+                                                        UtilityFunctions.deleteTilesAndFolder(tempTileDir);
+                                                    }
+                                                });
 
-                                // After all angles are processed, handle cleanup
-                                CompletableFuture.allOf(allAcquisitions.toArray(new CompletableFuture[0]))
-                                        .thenRun(() -> {
-                                            String handling = QPPreferenceDialog.getTileHandlingMethodProperty();
-                                            if ("Delete".equals(handling)) {
-                                                UtilityFunctions.deleteTilesAndFolder(tempTileDir);
-                                            } else if ("Zip".equals(handling)) {
-                                                UtilityFunctions.zipTilesAndMove(tempTileDir);
-                                                UtilityFunctions.deleteTilesAndFolder(tempTileDir);
-                                            }
-                                        });
+                                    } catch (Exception e) {
+                                        logger.error("Acquisition failed", e);
+                                        Platform.runLater(() ->
+                                                UIFunctions.notifyUserOfError(
+                                                        "Failed to launch acquisition:\n" + e.getMessage(),
+                                                        res.getString("acquisition.error.title")));
+                                    }
+                                });
 
                             })
                             .exceptionally(ex -> {

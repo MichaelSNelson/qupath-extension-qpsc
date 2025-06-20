@@ -166,10 +166,8 @@ public class TilingUtilities {
             String configPath = annotationDir.resolve("TileConfiguration.txt").toString();
 
             // Generate tiles
-            // IMPORTANT: Don't filter by ROI when we've added a buffer
-            // The expanded bounds already define our tiling area
-            ROI filterROI = request.isAddBuffer() ? null : roi;
-            createTileGrid(x, y, w, h, request, configPath, filterROI);
+
+            createTileGrid(x, y, w, h, request, configPath, roi);
         }
     }
     /**

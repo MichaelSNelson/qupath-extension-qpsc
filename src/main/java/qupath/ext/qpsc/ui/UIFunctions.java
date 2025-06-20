@@ -230,57 +230,121 @@ public class UIFunctions {
 
     /**
      * Dialog for selecting a single tile and matching live view for stage alignment.
+     * Non-modal to allow interaction with QuPath.
      */
     public static boolean stageToQuPathAlignmentGUI1() {
-        QuPathGUI gui = QuPathGUI.getInstance();
-        Dialog<Boolean> dlg = new Dialog<>();
-        dlg.initModality(Modality.NONE);
-        dlg.setTitle("Identify Location");
-        dlg.setHeaderText(
-                "Select exactly one tile and match the Live View in uManager.\n" +
-                        "This will calibrate QuPath to stage coordinates.");
+        CompletableFuture<Boolean> future = new CompletableFuture<>();
 
-        // --- set up buttons ---
-        ButtonType okType    = ButtonType.OK;
-        ButtonType cancelType= ButtonType.CANCEL;
-        ButtonType moveType  = new ButtonType("Move to tile", ButtonBar.ButtonData.APPLY);
-        dlg.getDialogPane().getButtonTypes().addAll(okType, cancelType, moveType);
+        Platform.runLater(() -> {
+            Stage stage = new Stage();
+            stage.initModality(Modality.NONE);  // Non-modal
+            stage.setTitle("Identify Location");
+            stage.setAlwaysOnTop(true);
 
-        // Grab the JavaFX Button node for "Move to tile"
-        Button moveBtn = (Button) dlg.getDialogPane().lookupButton(moveType);
+            VBox layout = new VBox(15);
+            layout.setPadding(new Insets(20));
+            layout.setPrefWidth(450);
 
-        moveBtn.addEventFilter(ActionEvent.ACTION, ev -> {
-            ev.consume();  // prevent dialog from closing
+            Label instructionLabel = new Label(
+                    "Select exactly one tile and match the Live View in MicroManager.\n" +
+                            "This will calibrate QuPath to stage coordinates.\n\n" +
+                            "You can zoom and pan in QuPath while this dialog is open."
+            );
+            instructionLabel.setWrapText(true);
 
-            // Grab the current selection
-            Collection<PathObject> sel = QP.getSelectedObjects();
-            long tileCount = sel.stream().filter(PathObject::isTile).count();
+            Label statusLabel = new Label("Waiting for tile selection...");
+            statusLabel.setStyle("-fx-font-weight: bold;");
 
-            if (tileCount != 1) {
-                // Warn and stay open
-                UIFunctions.notifyUserOfError(
-                        "Please select exactly one tile before moving the stage.",
-                        "Stage Move");
-            } else {
-                // Good: perform the move then close
+            Button moveToTileBtn = new Button("Move to Selected Tile");
+            moveToTileBtn.setDisable(true);
+            moveToTileBtn.setPrefWidth(200);
+
+            Button confirmBtn = new Button("Confirm Position");
+            confirmBtn.setStyle("-fx-base: #4CAF50;");
+            confirmBtn.setPrefWidth(200);
+
+            Button cancelBtn = new Button("Cancel");
+            cancelBtn.setPrefWidth(200);
+
+            HBox buttonBox = new HBox(10, moveToTileBtn, confirmBtn, cancelBtn);
+            buttonBox.setAlignment(Pos.CENTER);
+
+            layout.getChildren().addAll(instructionLabel, statusLabel, buttonBox);
+
+            // Check selection periodically
+            Timeline selectionChecker = new Timeline(new KeyFrame(
+                    Duration.millis(500),
+                    e -> {
+                        Collection<PathObject> sel = QP.getSelectedObjects();
+                        long tileCount = sel.stream().filter(PathObject::isTile).count();
+
+                        if (tileCount == 1) {
+                            PathObject tile = sel.stream()
+                                    .filter(PathObject::isTile)
+                                    .findFirst().get();
+                            statusLabel.setText("Selected: " + tile.getName());
+                            statusLabel.setTextFill(Color.GREEN);
+                            moveToTileBtn.setDisable(false);
+                        } else if (tileCount == 0) {
+                            statusLabel.setText("No tile selected");
+                            statusLabel.setTextFill(Color.BLACK);
+                            moveToTileBtn.setDisable(true);
+                        } else {
+                            statusLabel.setText("Multiple tiles selected - please select only one");
+                            statusLabel.setTextFill(Color.RED);
+                            moveToTileBtn.setDisable(true);
+                        }
+                    }
+            ));
+            selectionChecker.setCycleCount(Timeline.INDEFINITE);
+            selectionChecker.play();
+
+            moveToTileBtn.setOnAction(e -> {
+                Collection<PathObject> sel = QP.getSelectedObjects();
                 PathObject tile = sel.stream()
                         .filter(PathObject::isTile)
-                        .findFirst().get();
-                try {
-                    MicroscopeController.getInstance().moveStageToSelectedTile(tile);
-                } catch (IOException | InterruptedException e) {
-                    throw new RuntimeException(e);
+                        .findFirst().orElse(null);
+
+                if (tile != null) {
+                    try {
+                        MicroscopeController.getInstance().moveStageToSelectedTile(tile);
+                        statusLabel.setText("Stage moved to: " + tile.getName());
+                    } catch (Exception ex) {
+                        UIFunctions.notifyUserOfError(
+                                "Failed to move stage: " + ex.getMessage(),
+                                "Stage Move Error"
+                        );
+                    }
                 }
-                dlg.setResult(Boolean.TRUE);
-                dlg.close();
-            }
+            });
+
+            confirmBtn.setOnAction(e -> {
+                selectionChecker.stop();
+                stage.close();
+                future.complete(true);
+            });
+
+            cancelBtn.setOnAction(e -> {
+                selectionChecker.stop();
+                stage.close();
+                future.complete(false);
+            });
+
+            stage.setOnCloseRequest(e -> {
+                selectionChecker.stop();
+                future.complete(false);
+            });
+
+            stage.setScene(new Scene(layout));
+            stage.show();
         });
 
-        // 4) Convert the OK button to simply close & return true
-        dlg.setResultConverter(btn -> btn == okType);
-
-        // 5) Show and return whether OK was hit (or move was successful)
-        return dlg.showAndWait().orElse(false);
+        try {
+            return future.get();  // Block and wait for result
+        } catch (Exception e) {
+            logger.error("Error waiting for alignment confirmation", e);
+            return false;
+        }
     }
 
     /**
@@ -288,7 +352,7 @@ public class UIFunctions {
      */
     public static boolean stageToQuPathAlignmentGUI2() {
         Dialog<Boolean> dlg = new Dialog<>();
-        dlg.initModality(Modality.APPLICATION_MODAL);
+        dlg.initModality(Modality.NONE);
         dlg.setTitle("Position Confirmation");
         dlg.setHeaderText(
                 "Is the current position accurate?\nCompare with the uManager live view.");

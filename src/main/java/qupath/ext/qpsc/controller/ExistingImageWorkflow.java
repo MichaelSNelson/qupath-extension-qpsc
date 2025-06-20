@@ -257,6 +257,21 @@ public class ExistingImageWorkflow {
                             return;
                         }
 
+                        // Refresh annotations to get the current state after user modifications
+                        List<PathObject> currentAnnotations = qupathGUI.getViewer().getHierarchy().getAnnotationObjects().stream()
+                                .filter(o -> o.getPathClass() != null && "Tissue".equals(o.getPathClass().getName()))
+                                .collect(Collectors.toList());
+
+                        if (currentAnnotations.isEmpty()) {
+                            logger.warn("No valid annotations found after user confirmation. Aborting workflow.");
+                            Platform.runLater(() -> UIFunctions.notifyUserOfError(
+                                    "No valid tissue annotations found. Please create at least one annotation with 'Tissue' classification.",
+                                    "No Annotations"));
+                            return;
+                        }
+
+                        logger.info("Using {} annotation(s) after user confirmation", currentAnnotations.size());
+
                         // 6. Get camera parameters from config
                         MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(
                                 QPPreferenceDialog.getMicroscopeConfigFileProperty());
@@ -278,22 +293,23 @@ public class ExistingImageWorkflow {
                             QP.getDetectionObjects().stream()
                                     .filter(o -> o.getPathClass() != null &&
                                             o.getPathClass().toString().toLowerCase().contains(modalityBase))
-                                    .forEach(o -> QP.removeObject(o, true));
-
-                            // Build tiling request
+                                    .forEach(QP::removeObject);
+                            QP.fireHierarchyUpdate();
+                            logger.info("Existing tiles should be removed at this point");
+                            // Build tiling request with CURRENT annotations
                             TilingRequest request = new TilingRequest.Builder()
                                     .outputFolder(tempTileDirectory)
                                     .modalityName(modeWithIndex)
                                     .frameSize(frameWidthQP, frameHeightQP)
                                     .overlapPercent(overlapPercent)
-                                    .annotations(annotations)
+                                    .annotations(currentAnnotations)  // <- USE CURRENT ANNOTATIONS
                                     .invertAxes(invertedX, invertedY)
                                     .createDetections(true)
                                     .addBuffer(true)
                                     .build();
 
                             TilingUtilities.createTiles(request);
-                            logger.info("Created tiles for {} annotations", annotations.size());
+                            logger.info("Created tiles for {} annotations", currentAnnotations.size());
 
                         } catch (IOException e) {
                             Platform.runLater(() -> UIFunctions.notifyUserOfError(
@@ -301,7 +317,6 @@ public class ExistingImageWorkflow {
                                     "Tiling Error"));
                             return;
                         }
-
                         // 8. Affine alignment
                         AffineTransformationController.setupAffineTransformationAndValidationGUI(
                                         macroPixelSize, invertedX, invertedY)
@@ -353,118 +368,142 @@ public class ExistingImageWorkflow {
             List<Double> rotationAngles,
             RotationManager rotationManager) {
 
-        if (rotationAngles == null || rotationAngles.isEmpty()) {
-            // No rotation - call simple version
-            processAnnotations(annotations, transform, sample, project,
-                    tempTileDirectory, modeWithIndex, pixelSize, qupathGUI);
-            return;
-        }
-
-        // Process each rotation angle
         String configFileLocation = QPPreferenceDialog.getMicroscopeConfigFileProperty();
         String projectsFolder = sample.projectsFolder().getAbsolutePath();
 
-        for (Double angle : rotationAngles) {
-            String angleSuffix = rotationManager.getAngleSuffix(sample.modality(), angle);
-            logger.info("Processing rotation angle: {} degrees (suffix: {})", angle, angleSuffix);
+        // Transform all tile configurations first
+        try {
+            TransformationFunctions.transformTileConfiguration(tempTileDirectory, transform);
+            logger.info("Transformed tile configurations for all annotations");
+        } catch (IOException e) {
+            logger.error("Failed to transform tile configurations", e);
+            Platform.runLater(() -> UIFunctions.notifyUserOfError(
+                    "Failed to transform tiles: " + e.getMessage(),
+                    "Transform Error"));
+            return;
+        }
 
-            try {
-                // Set the rotation angle
-                MicroscopeController.getInstance().moveStageR(angle);
-                logger.info("Moved rotation stage to {} degrees", angle);
+        // Launch acquisition for each annotation (with all angles handled internally)
+        List<CompletableFuture<Void>> acquisitionFutures = new ArrayList<>();
 
-                // Wait a moment for stage to settle
-                Thread.sleep(1000);
+        for (PathObject annotation : annotations) {
+            String annotationName = annotation.getName();
+            logger.info("Starting acquisition for annotation: {} with angles: {}",
+                    annotationName, rotationAngles);
 
-            } catch (Exception e) {
-                logger.error("Failed to set rotation angle", e);
-                Platform.runLater(() -> UIFunctions.notifyUserOfError(
-                        "Failed to set rotation to " + angle + " degrees: " + e.getMessage(),
-                        "Rotation Error"));
-                continue;
-            }
+            CompletableFuture<Void> acquisitionFuture = CompletableFuture.supplyAsync(() -> {
+                try {
+                    List<String> cliArgs = new ArrayList<>(List.of(
+                            res.getString("command.acquisitionWorkflow"),
+                            configFileLocation,
+                            projectsFolder,
+                            sample.sampleName(),
+                            modeWithIndex,
+                            annotationName
+                    ));
 
-            // Transform all tile configurations first (once per angle)
-            try {
-                TransformationFunctions.transformTileConfiguration(tempTileDirectory, transform);
-                logger.info("Transformed tile configurations for angle: {}", angle);
-            } catch (IOException e) {
-                logger.error("Failed to transform tile configurations", e);
-                Platform.runLater(() -> UIFunctions.notifyUserOfError(
-                        "Failed to transform tiles: " + e.getMessage(),
-                        "Transform Error"));
-                continue;
-            }
-
-            // Launch acquisition for each annotation at this angle
-            List<CompletableFuture<Void>> acquisitionFutures = new ArrayList<>();
-
-            for (PathObject annotation : annotations) {
-                String annotationName = annotation.getName();
-                String fullAnnotationName = annotationName + angleSuffix;
-                logger.info("Starting acquisition for annotation: {} at angle: {}",
-                        annotationName, angle);
-
-                CompletableFuture<Void> acquisitionFuture = CompletableFuture.supplyAsync(() -> {
-                    try {
-                        // Build command with angle-specific annotation name
-                        var result = CliExecutor.execComplexCommand(
-                                300,
-                                "tiles done",
-                                res.getString("command.acquisitionWorkflow"),
-                                configFileLocation,
-                                projectsFolder,
-                                sample.sampleName(),
-                                modeWithIndex + angleSuffix,  // Include angle in mode
-                                annotationName  // Original annotation name for folder
-                        );
-
-                        if (result.exitCode() != 0) {
-                            throw new RuntimeException("Acquisition failed for " + fullAnnotationName +
-                                    ": " + result.stderr());
-                        }
-                        logger.info("Acquisition completed for annotation: {} at angle: {}",
-                                annotationName, angle);
-                        return null;
-                    } catch (Exception e) {
-                        throw new CompletionException(e);
+                    // Add angles parameter if rotation is needed
+                    if (rotationAngles != null && !rotationAngles.isEmpty()) {
+                        cliArgs.add("--angles");
+                        cliArgs.addAll(rotationAngles.stream()
+                                .map(String::valueOf)
+                                .collect(Collectors.toList()));
                     }
-                });
 
-                // Queue stitching after acquisition completes
-                acquisitionFuture.thenRunAsync(() -> {
+                    var result = CliExecutor.execComplexCommand(
+                            300 * (rotationAngles != null ? rotationAngles.size() : 1), // Adjust timeout
+                            "tiles done",
+                            cliArgs.toArray(new String[0])
+                    );
+
+                    if (result.exitCode() != 0) {
+                        throw new RuntimeException("Acquisition failed for " + annotationName +
+                                ": " + result.stderr());
+                    }
+                    logger.info("Acquisition completed for annotation: {}", annotationName);
+                    return null;
+                } catch (Exception e) {
+                    throw new CompletionException(e);
+                }
+            });
+
+            // Queue stitching after acquisition completes
+            acquisitionFuture.thenRunAsync(() -> {
+                if (rotationAngles != null && !rotationAngles.isEmpty()) {
+                    // Stitch each angle separately
+                    for (Double angle : rotationAngles) {
+                        String angleSuffix = rotationManager.getAngleSuffix(sample.modality(), angle);
+                        try {
+                            logger.info("Queuing stitching for annotation: {} at angle: {}",
+                                    annotationName, angle);
+                            String outPath = UtilityFunctions.stitchImagesAndUpdateProject(
+                                    projectsFolder,
+                                    sample.sampleName(),
+                                    modeWithIndex + angleSuffix,
+                                    annotationName,
+                                    qupathGUI,
+                                    project,
+                                    String.valueOf(QPPreferenceDialog.getCompressionTypeProperty()),
+                                    pixelSize,
+                                    1  // downsample
+                            );
+                            logger.info("Stitching completed for annotation: {} at angle: {}, output: {}",
+                                    annotationName, angle, outPath);
+                        } catch (Exception e) {
+                            logger.error("Stitching failed for annotation: {} at angle: {}",
+                                    annotationName, angle, e);
+                            Platform.runLater(() -> UIFunctions.notifyUserOfError(
+                                    "Stitching failed for " + annotationName + " at angle " + angle +
+                                            ": " + e.getMessage(),
+                                    "Stitching Error"));
+                        }
+                    }
+                } else {
+                    // No rotation - single stitch
                     try {
-                        logger.info("Queuing stitching for annotation: {}", fullAnnotationName);
+                        logger.info("Queuing stitching for annotation: {}", annotationName);
                         String outPath = UtilityFunctions.stitchImagesAndUpdateProject(
                                 projectsFolder,
                                 sample.sampleName(),
-                                modeWithIndex + angleSuffix,
+                                modeWithIndex,
                                 annotationName,
                                 qupathGUI,
                                 project,
                                 String.valueOf(QPPreferenceDialog.getCompressionTypeProperty()),
                                 pixelSize,
-                                1  // downsample
+                                1
                         );
                         logger.info("Stitching completed for annotation: {}, output: {}",
-                                fullAnnotationName, outPath);
+                                annotationName, outPath);
                     } catch (Exception e) {
-                        logger.error("Stitching failed for annotation: " + fullAnnotationName, e);
+                        logger.error("Stitching failed for annotation: " + annotationName, e);
                         Platform.runLater(() -> UIFunctions.notifyUserOfError(
-                                "Stitching failed for " + fullAnnotationName + ": " + e.getMessage(),
+                                "Stitching failed for " + annotationName + ": " + e.getMessage(),
                                 "Stitching Error"));
                     }
-                }, STITCH_EXECUTOR);
+                }
+            }, STITCH_EXECUTOR);
 
-                acquisitionFutures.add(acquisitionFuture);
-            }
-
-            // Wait for all acquisitions at this angle to complete
-            CompletableFuture.allOf(acquisitionFutures.toArray(new CompletableFuture[0]))
-                    .join(); // Block here to ensure angles are processed sequentially
+            acquisitionFutures.add(acquisitionFuture);
         }
-    }
 
+        // When all acquisitions complete, handle cleanup
+        CompletableFuture.allOf(acquisitionFutures.toArray(new CompletableFuture[0]))
+                .thenRun(() -> {
+                    logger.info("All acquisitions completed");
+                    String handling = QPPreferenceDialog.getTileHandlingMethodProperty();
+                    if ("Delete".equals(handling)) {
+                        UtilityFunctions.deleteTilesAndFolder(tempTileDirectory);
+                    } else if ("Zip".equals(handling)) {
+                        UtilityFunctions.zipTilesAndMove(tempTileDirectory);
+                        UtilityFunctions.deleteTilesAndFolder(tempTileDirectory);
+                    }
+                })
+                .exceptionally(ex -> {
+                    logger.error("Error in acquisition workflow", ex);
+                    return null;
+                });
+    }
     /**
      * Process all annotations: transform tiles, acquire, and queue stitching.
      * Original version without rotation support.
