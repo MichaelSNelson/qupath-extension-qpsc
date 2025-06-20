@@ -18,12 +18,12 @@ import qupath.lib.scripting.QP;
 
 import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
+import java.io.File;
 import java.io.IOException;
-import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.stream.Collectors;
-//TODO need to add image to project so that it gets flipped before running user interface stuff
+
 /**
  * ExistingImageWorkflow
  * <p>
@@ -66,6 +66,7 @@ public class ExistingImageWorkflow {
             Map<String, Object> projectDetails;
             try {
                 if (qupathGUI.getProject() == null) {
+                    // Create new project and import the current image
                     projectDetails = QPProjectFunctions.createAndOpenQuPathProject(
                             qupathGUI,
                             sample.projectsFolder().getAbsolutePath(),
@@ -74,148 +75,214 @@ public class ExistingImageWorkflow {
                             invertedX,
                             invertedY
                     );
+
+                    // The image should now be imported and opened in the project
+                    // Verify that the image was successfully imported
+                    if (qupathGUI.getImageData() == null) {
+                        Platform.runLater(() -> UIFunctions.notifyUserOfError(
+                                "Failed to import image into project. Please ensure an image is open.",
+                                "Import Error"));
+                        return;
+                    }
                 } else {
-                    // Project is already open
+                    // Project already exists - need to add current image if not already in project
+                    var currentImageData = qupathGUI.getImageData();
+                    if (currentImageData == null) {
+                        Platform.runLater(() -> UIFunctions.notifyUserOfError(
+                                "No image is currently open. Please open an image first.",
+                                "No Image"));
+                        return;
+                    }
+
+                    // Check if image needs to be added to project
+                    var projectEntry = qupathGUI.getProject().getEntry(currentImageData);
+                    if (projectEntry == null) {
+                        // Image not in project - add it with flips
+                        logger.info("Adding current image to existing project with flips");
+                        String imagePath = MinorFunctions.extractFilePath(currentImageData.getServerPath());
+                        if (imagePath != null) {
+                            QPProjectFunctions.addImageToProject(
+                                    new File(imagePath),
+                                    qupathGUI.getProject(),
+                                    invertedX,
+                                    invertedY
+                            );
+
+                            // Refresh and reopen the image to apply flips
+                            qupathGUI.refreshProject();
+
+                            // Find and open the newly added entry
+                            var entries = qupathGUI.getProject().getImageList();
+                            var newEntry = entries.stream()
+                                    .filter(e -> e.getImageName().equals(new File(imagePath).getName()))
+                                    .findFirst()
+                                    .orElse(null);
+
+                            if (newEntry != null) {
+                                qupathGUI.openImageEntry(newEntry);
+                                // Wait a moment for the image to fully load
+                                Thread.sleep(500);
+                            }
+                        }
+                    }
+
+                    // Get project information for existing project
                     projectDetails = QPProjectFunctions.getCurrentProjectInformation(
                             sample.projectsFolder().getAbsolutePath(),
                             sample.sampleName(),
                             sample.modality()
                     );
                 }
-            } catch (IOException e) {
+            } catch (Exception e) {
                 Platform.runLater(() -> UIFunctions.notifyUserOfError(
                         "Failed to create/open project: " + e.getMessage(),
                         "Project Error"));
                 return;
             }
 
-            @SuppressWarnings("unchecked")
-            Project<BufferedImage> project = (Project<BufferedImage>) projectDetails.get("currentQuPathProject");
-            String tempTileDirectory = (String) projectDetails.get("tempTileDirectory");
-            String modeWithIndex = (String) projectDetails.get("imagingModeWithIndex");
+            // Verify we have a properly loaded image before continuing
+            Platform.runLater(() -> {
+                if (qupathGUI.getImageData() == null) {
+                    UIFunctions.notifyUserOfError(
+                            "No image data available after project setup. Workflow cannot continue.",
+                            "Image Error");
+                    return;
+                }
 
-            // 3. Get macro image pixel size
-            getMacroPixelSizeOrPrompt(qupathGUI)
-                    .thenAccept(macroPixelSize -> {
-                        if (macroPixelSize == null || macroPixelSize <= 0) {
-                            logger.warn("Invalid pixel size. Aborting workflow.");
-                            return;
-                        }
-                        logger.info("Final macro pixel size: {} µm", macroPixelSize);
-
-                        // 4. Detect/confirm annotations
-                        List<PathObject> annotations = collectOrCreateAnnotations(qupathGUI, macroPixelSize);
-                        if (annotations == null || annotations.isEmpty()) {
-                            logger.warn("No valid annotations found or created. Aborting workflow.");
-                            return;
-                        }
-
-                        // 5. Show annotation check dialog
-                        CompletableFuture<Boolean> annotationCheckFuture = new CompletableFuture<>();
-                        UIFunctions.checkValidAnnotationsGUI(
-                                List.of("Tissue"),
-                                annotationCheckFuture::complete
-                        );
-
-                        annotationCheckFuture.thenAccept(proceed -> {
-                            if (!proceed) {
-                                logger.info("User cancelled at annotation verification step.");
-                                return;
-                            }
-
-                            // 6. Get camera parameters from config
-                            MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(
-                                    QPPreferenceDialog.getMicroscopeConfigFileProperty());
-                            double pixelSize = mgr.getDouble("imagingMode", sample.modality(), "pixelSize_um");
-                            int cameraWidth = mgr.getInteger("imagingMode", sample.modality(), "detector", "width_px");
-                            int cameraHeight = mgr.getInteger("imagingMode", sample.modality(), "detector", "height_px");
-
-                            double frameWidthMicrons = pixelSize * cameraWidth;
-                            double frameHeightMicrons = pixelSize * cameraHeight;
-
-                            // Convert to QuPath pixels for tiling
-                            double frameWidthQP = frameWidthMicrons / macroPixelSize;
-                            double frameHeightQP = frameHeightMicrons / macroPixelSize;
-                            double overlapPercent = QPPreferenceDialog.getTileOverlapPercentProperty();
-
-                            try {
-                                // 7. Remove existing tiles and create new ones
-                                String modalityBase = sample.modality().replaceAll("(_\\d+)$", "");
-                                QP.getDetectionObjects().stream()
-                                        .filter(o -> o.getPathClass() != null &&
-                                                o.getPathClass().toString().toLowerCase().contains(modalityBase))
-                                        .forEach(o -> QP.removeObject(o, true));
-
-                                // Build tiling request
-                                TilingRequest request = new TilingRequest.Builder()
-                                        .outputFolder(tempTileDirectory)
-                                        .modalityName(modeWithIndex)
-                                        .frameSize(frameWidthQP, frameHeightQP)
-                                        .overlapPercent(overlapPercent)
-                                        .annotations(annotations)
-                                        .invertAxes(invertedX, invertedY)
-                                        .createDetections(true)
-                                        .addBuffer(true)
-                                        .build();
-
-                                TilingUtilities.createTiles(request);
-                                logger.info("Created tiles for {} annotations", annotations.size());
-
-                            } catch (IOException e) {
-                                Platform.runLater(() -> UIFunctions.notifyUserOfError(
-                                        "Failed to create tile configurations: " + e.getMessage(),
-                                        "Tiling Error"));
-                                return;
-                            }
-
-                            // 8. Affine alignment
-                            AffineTransformationController.setupAffineTransformationAndValidationGUI(
-                                            macroPixelSize, invertedX, invertedY)
-                                    .thenAccept(transform -> {
-                                        if (transform == null) {
-                                            logger.info("User cancelled affine transform step.");
-                                            return;
-                                        }
-
-                                        // 9. Get rotation angles based on modality
-                                        logger.info("Checking rotation requirements for modality: {}", sample.modality());
-                                        RotationManager rotationManager = new RotationManager(sample.modality());
-                                        rotationManager.getRotationAngles(sample.modality())
-                                                .thenAccept(rotationAngles -> {
-                                                    logger.info("Rotation angles returned: {}", rotationAngles);
-                                                    if (rotationAngles == null || rotationAngles.isEmpty()) {
-                                                        logger.info("No rotation angles selected/required for modality: {}", sample.modality());
-                                                        // Process without rotation
-                                                        processAnnotations(annotations, transform, sample, project,
-                                                                tempTileDirectory, modeWithIndex, pixelSize,
-                                                                qupathGUI);
-                                                    } else {
-                                                        logger.info("Processing with rotation angles: {} for modality: {}",
-                                                                rotationAngles, sample.modality());
-                                                        // Process each angle as a separate acquisition
-                                                        processAnnotations(annotations, transform, sample,
-                                                                project, tempTileDirectory, modeWithIndex, pixelSize,
-                                                                qupathGUI, rotationAngles, rotationManager);
-                                                    }
-                                                })
-                                                .exceptionally(ex -> {
-                                                    logger.error("Rotation angle selection failed", ex);
-                                                    return null;
-                                                });
-                                    });
-                        });
-                    })
-                    .exceptionally(ex -> {
-                        Platform.runLater(() -> UIFunctions.notifyUserOfError(
-                                "Workflow error: " + ex.getMessage(), "Workflow Error"));
-                        logger.error("Workflow failed", ex);
-                        return null;
-                    });
+                // Continue with the rest of the workflow
+                continueWorkflowAfterProjectSetup(qupathGUI, projectDetails, sample, invertedX, invertedY);
+            });
         }).exceptionally(ex -> {
             logger.info("Sample setup failed: {}", ex.getMessage());
             return null;
         });
     }
+
+    /**
+     * Continues the workflow after project setup and image import is complete.
+     * This method should be called on the JavaFX thread.
+     */
+    private static void continueWorkflowAfterProjectSetup(
+            QuPathGUI qupathGUI,
+            Map<String, Object> projectDetails,
+            SampleSetupController.SampleSetupResult sample,
+            boolean invertedX,
+            boolean invertedY) {
+
+        @SuppressWarnings("unchecked")
+        Project<BufferedImage> project = (Project<BufferedImage>) projectDetails.get("currentQuPathProject");
+        String tempTileDirectory = (String) projectDetails.get("tempTileDirectory");
+        String modeWithIndex = (String) projectDetails.get("imagingModeWithIndex");
+
+        // 3. Get macro image pixel size
+        getMacroPixelSizeOrPrompt(qupathGUI)
+                .thenAccept(macroPixelSize -> {
+                    if (macroPixelSize == null || macroPixelSize <= 0) {
+                        logger.warn("Invalid pixel size. Aborting workflow.");
+                        return;
+                    }
+                    logger.info("Final macro pixel size: {} µm", macroPixelSize);
+
+                    // 4. Detect/confirm annotations
+                    List<PathObject> annotations = collectOrCreateAnnotations(qupathGUI, macroPixelSize);
+                    if (annotations == null || annotations.isEmpty()) {
+                        logger.warn("No valid annotations found or created. Aborting workflow.");
+                        return;
+                    }
+
+                    // 5. Show annotation check dialog
+                    CompletableFuture<Boolean> annotationCheckFuture = new CompletableFuture<>();
+                    UIFunctions.checkValidAnnotationsGUI(
+                            List.of("Tissue"),
+                            annotationCheckFuture::complete
+                    );
+
+                    annotationCheckFuture.thenAccept(proceed -> {
+                        if (!proceed) {
+                            logger.info("User cancelled at annotation verification step.");
+                            return;
+                        }
+
+                        // 6. Get camera parameters from config
+                        MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(
+                                QPPreferenceDialog.getMicroscopeConfigFileProperty());
+                        double pixelSize = mgr.getDouble("imagingMode", sample.modality(), "pixelSize_um");
+                        int cameraWidth = mgr.getInteger("imagingMode", sample.modality(), "detector", "width_px");
+                        int cameraHeight = mgr.getInteger("imagingMode", sample.modality(), "detector", "height_px");
+
+                        double frameWidthMicrons = pixelSize * cameraWidth;
+                        double frameHeightMicrons = pixelSize * cameraHeight;
+
+                        // Convert to QuPath pixels for tiling
+                        double frameWidthQP = frameWidthMicrons / macroPixelSize;
+                        double frameHeightQP = frameHeightMicrons / macroPixelSize;
+                        double overlapPercent = QPPreferenceDialog.getTileOverlapPercentProperty();
+
+                        try {
+                            // 7. Remove existing tiles and create new ones
+                            String modalityBase = sample.modality().replaceAll("(_\\d+)$", "");
+                            QP.getDetectionObjects().stream()
+                                    .filter(o -> o.getPathClass() != null &&
+                                            o.getPathClass().toString().toLowerCase().contains(modalityBase))
+                                    .forEach(o -> QP.removeObject(o, true));
+
+                            // Build tiling request
+                            TilingRequest request = new TilingRequest.Builder()
+                                    .outputFolder(tempTileDirectory)
+                                    .modalityName(modeWithIndex)
+                                    .frameSize(frameWidthQP, frameHeightQP)
+                                    .overlapPercent(overlapPercent)
+                                    .annotations(annotations)
+                                    .invertAxes(invertedX, invertedY)
+                                    .createDetections(true)
+                                    .addBuffer(true)
+                                    .build();
+
+                            TilingUtilities.createTiles(request);
+                            logger.info("Created tiles for {} annotations", annotations.size());
+
+                        } catch (IOException e) {
+                            Platform.runLater(() -> UIFunctions.notifyUserOfError(
+                                    "Failed to create tile configurations: " + e.getMessage(),
+                                    "Tiling Error"));
+                            return;
+                        }
+
+                        // 8. Affine alignment
+                        AffineTransformationController.setupAffineTransformationAndValidationGUI(
+                                        macroPixelSize, invertedX, invertedY)
+                                .thenAccept(transform -> {
+                                    if (transform == null) {
+                                        logger.info("User cancelled affine transform step.");
+                                        return;
+                                    }
+
+                                    // 9. Get rotation angles based on modality
+                                    logger.info("Checking rotation requirements for modality: {}", sample.modality());
+                                    RotationManager rotationManager = new RotationManager(sample.modality());
+                                    rotationManager.getRotationAngles(sample.modality())
+                                            .thenAccept(rotationAngles -> {
+                                                logger.info("Rotation angles returned: {}", rotationAngles);
+                                                // Pass rotation info to processAnnotations
+                                                processAnnotations(annotations, transform, sample, project,
+                                                        tempTileDirectory, modeWithIndex, pixelSize,
+                                                        qupathGUI, rotationAngles, rotationManager);
+                                            })
+                                            .exceptionally(ex -> {
+                                                logger.error("Rotation angle selection failed", ex);
+                                                return null;
+                                            });
+                                });
+                    });
+                })
+                .exceptionally(ex -> {
+                    Platform.runLater(() -> UIFunctions.notifyUserOfError(
+                            "Workflow error: " + ex.getMessage(), "Workflow Error"));
+                    logger.error("Workflow failed", ex);
+                    return null;
+                });
+    }
+
     /**
      * Process all annotations: transform tiles, acquire, and queue stitching.
      * This version handles rotation by processing each angle separately.
@@ -343,8 +410,10 @@ public class ExistingImageWorkflow {
                     .join(); // Block here to ensure angles are processed sequentially
         }
     }
+
     /**
-     * Process all annotations: transform tiles, acquire, and queue stitching
+     * Process all annotations: transform tiles, acquire, and queue stitching.
+     * Original version without rotation support.
      */
     private static void processAnnotations(
             List<PathObject> annotations,
