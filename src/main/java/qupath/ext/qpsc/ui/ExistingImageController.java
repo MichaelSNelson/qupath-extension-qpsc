@@ -126,11 +126,11 @@ public class ExistingImageController {
      */
     public static void promptForAnnotations() {
         Platform.runLater(() -> {
-            Alert alert = new Alert(Alert.AlertType.INFORMATION);
-            alert.setTitle("Annotations Required");
-            alert.setHeaderText("No tissue detection script provided or failed.");
-            alert.setContentText("Please create or verify annotations for regions you wish to acquire.");
-            alert.showAndWait();
+            qupath.fx.dialogs.Dialogs.showInfoNotification(
+                    "Annotations Required",
+                    "No tissue detection script provided or failed.\n" +
+                            "Please create or verify annotations for regions you wish to acquire."
+            );
         });
     }
 }

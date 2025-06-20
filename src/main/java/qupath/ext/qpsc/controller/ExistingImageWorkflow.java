@@ -59,9 +59,9 @@ public class ExistingImageWorkflow {
             logger.info("Sample info received: {}", sample);
 
             // 2. Import current image into a QuPath project
-            boolean invertedX = QPPreferenceDialog.getInvertedXProperty();
-            boolean invertedY = QPPreferenceDialog.getInvertedYProperty();
-            logger.info("Importing image to project: invertedX={}, invertedY={}", invertedX, invertedY);
+            boolean flippedX = QPPreferenceDialog.getFlipMacroXProperty();
+            boolean flippedY = QPPreferenceDialog.getFlipMacroYProperty();
+            logger.info("Importing image to project: flippedX={}, flippedY={}", flippedX, flippedY);
 
             // Check if we have an image open first
             var currentImageData = qupathGUI.getImageData();
@@ -109,8 +109,8 @@ public class ExistingImageWorkflow {
                         QPProjectFunctions.addImageToProject(
                                 new File(imagePath),
                                 project,
-                                invertedX,
-                                invertedY
+                                flippedX,
+                                flippedY
                         );
 
                         // Set the project in QuPath
@@ -155,8 +155,8 @@ public class ExistingImageWorkflow {
                                 QPProjectFunctions.addImageToProject(
                                         new File(imagePath),
                                         project,
-                                        invertedX,
-                                        invertedY
+                                        flippedX,
+                                        flippedY
                                 );
 
                                 // Refresh and reopen the image to apply flips
@@ -198,7 +198,8 @@ public class ExistingImageWorkflow {
                     }
 
                     logger.info("Project setup complete, continuing workflow");
-
+                    boolean invertedX = QPPreferenceDialog.getInvertedXProperty();
+                    boolean invertedY = QPPreferenceDialog.getInvertedYProperty();
                     // Continue with the rest of the workflow
                     continueWorkflowAfterProjectSetup(qupathGUI, projectDetails, sample, invertedX, invertedY);
 
@@ -242,10 +243,6 @@ public class ExistingImageWorkflow {
 
                     // 4. Detect/confirm annotations
                     List<PathObject> annotations = collectOrCreateAnnotations(qupathGUI, macroPixelSize);
-                    if (annotations == null || annotations.isEmpty()) {
-                        logger.warn("No valid annotations found or created. Aborting workflow.");
-                        return;
-                    }
 
                     // 5. Show annotation check dialog
                     CompletableFuture<Boolean> annotationCheckFuture = new CompletableFuture<>();
@@ -640,9 +637,11 @@ public class ExistingImageWorkflow {
             if (annotations.isEmpty()) {
                 logger.info("Still no annotations. Prompting user to draw/select tissue regions.");
                 ExistingImageController.promptForAnnotations();
-                return null;
+                // Return empty list instead of null to continue workflow
+                return new ArrayList<>();
             }
         }
+
         logger.info("Found {} tissue annotation(s) in image.", annotations.size());
         return annotations;
     }

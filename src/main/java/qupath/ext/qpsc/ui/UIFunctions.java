@@ -213,6 +213,7 @@ public class UIFunctions {
             exec.scheduleAtFixedRate(() -> {
                 Platform.runLater(() -> {
                     int count = (int) QP.getAnnotationObjects().stream()
+                            .filter(o -> o.getPathClass() != null)  // Add null check
                             .filter(o -> validNames.contains(o.getPathClass().toString()))
                             .count();
                     info.setText("Total Annotation count in image: " + count +
