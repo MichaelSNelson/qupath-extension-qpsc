@@ -131,14 +131,21 @@ public class MinorFunctions {
     }
 
     /**
-     * Extracts a Windows-style path out of a URI like "file:/C:/...TIF".
+     * Extracts a Windows-style path out of a URI like "file:/C:/...".
      * Returns null if no match.
      */
     public static String extractFilePath(String serverPath) {
-        Pattern p = Pattern.compile("file:/(.*?\\.TIF)", Pattern.CASE_INSENSITIVE);
+        // More general pattern to handle any file extension
+        Pattern p = Pattern.compile("file:/(.*?\\.[A-Za-z0-9]+)");
         Matcher m = p.matcher(serverPath);
         if (m.find()) {
-            return m.group(1).replaceFirst("^/", "").replaceAll("%20", " ");
+            String path = m.group(1).replaceFirst("^/", "").replaceAll("%20", " ");
+            // Remove any additional parameters like [--series, 0]
+            int bracketIndex = path.indexOf('[');
+            if (bracketIndex != -1) {
+                path = path.substring(0, bracketIndex);
+            }
+            return path;
         }
         return null;
     }

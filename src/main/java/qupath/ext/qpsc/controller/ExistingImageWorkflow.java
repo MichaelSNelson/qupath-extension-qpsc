@@ -63,94 +63,151 @@ public class ExistingImageWorkflow {
             boolean invertedY = QPPreferenceDialog.getInvertedYProperty();
             logger.info("Importing image to project: invertedX={}, invertedY={}", invertedX, invertedY);
 
-            Map<String, Object> projectDetails;
-            try {
-                if (qupathGUI.getProject() == null) {
-                    // Create new project and import the current image
-                    projectDetails = QPProjectFunctions.createAndOpenQuPathProject(
-                            qupathGUI,
-                            sample.projectsFolder().getAbsolutePath(),
-                            sample.sampleName(),
-                            sample.modality(),
-                            invertedX,
-                            invertedY
-                    );
-
-                    // The image should now be imported and opened in the project
-                    // Verify that the image was successfully imported
-                    if (qupathGUI.getImageData() == null) {
-                        Platform.runLater(() -> UIFunctions.notifyUserOfError(
-                                "Failed to import image into project. Please ensure an image is open.",
-                                "Import Error"));
-                        return;
-                    }
-                } else {
-                    // Project already exists - need to add current image if not already in project
-                    var currentImageData = qupathGUI.getImageData();
-                    if (currentImageData == null) {
-                        Platform.runLater(() -> UIFunctions.notifyUserOfError(
-                                "No image is currently open. Please open an image first.",
-                                "No Image"));
-                        return;
-                    }
-
-                    // Check if image needs to be added to project
-                    var projectEntry = qupathGUI.getProject().getEntry(currentImageData);
-                    if (projectEntry == null) {
-                        // Image not in project - add it with flips
-                        logger.info("Adding current image to existing project with flips");
-                        String imagePath = MinorFunctions.extractFilePath(currentImageData.getServerPath());
-                        if (imagePath != null) {
-                            QPProjectFunctions.addImageToProject(
-                                    new File(imagePath),
-                                    qupathGUI.getProject(),
-                                    invertedX,
-                                    invertedY
-                            );
-
-                            // Refresh and reopen the image to apply flips
-                            qupathGUI.refreshProject();
-
-                            // Find and open the newly added entry
-                            var entries = qupathGUI.getProject().getImageList();
-                            var newEntry = entries.stream()
-                                    .filter(e -> e.getImageName().equals(new File(imagePath).getName()))
-                                    .findFirst()
-                                    .orElse(null);
-
-                            if (newEntry != null) {
-                                qupathGUI.openImageEntry(newEntry);
-                                // Wait a moment for the image to fully load
-                                Thread.sleep(500);
-                            }
-                        }
-                    }
-
-                    // Get project information for existing project
-                    projectDetails = QPProjectFunctions.getCurrentProjectInformation(
-                            sample.projectsFolder().getAbsolutePath(),
-                            sample.sampleName(),
-                            sample.modality()
-                    );
-                }
-            } catch (Exception e) {
+            // Check if we have an image open first
+            var currentImageData = qupathGUI.getImageData();
+            if (currentImageData == null) {
                 Platform.runLater(() -> UIFunctions.notifyUserOfError(
-                        "Failed to create/open project: " + e.getMessage(),
-                        "Project Error"));
+                        "No image is currently open. Please open an image first.",
+                        "No Image"));
                 return;
             }
 
-            // Verify we have a properly loaded image before continuing
+            // Handle project creation/opening synchronously on FX thread
             Platform.runLater(() -> {
-                if (qupathGUI.getImageData() == null) {
-                    UIFunctions.notifyUserOfError(
-                            "No image data available after project setup. Workflow cannot continue.",
-                            "Image Error");
-                    return;
-                }
+                try {
+                    Map<String, Object> projectDetails;
 
-                // Continue with the rest of the workflow
-                continueWorkflowAfterProjectSetup(qupathGUI, projectDetails, sample, invertedX, invertedY);
+                    if (qupathGUI.getProject() == null) {
+                        logger.info("Creating new project and importing image");
+
+                        // Extract the current image path before creating project
+                        var serverPathFull = currentImageData.getServerPath();
+                        logger.info(serverPathFull);
+                        String imagePath = MinorFunctions.extractFilePath(serverPathFull);
+
+                        if (imagePath == null) {
+                            UIFunctions.notifyUserOfError(
+                                    "Cannot extract image path from current image.",
+                                    "Import Error");
+                            return;
+                        }
+
+                        // Create the project first
+                        Project<BufferedImage> project = QPProjectFunctions.createProject(
+                                sample.projectsFolder().getAbsolutePath(),
+                                sample.sampleName()
+                        );
+
+                        if (project == null) {
+                            UIFunctions.notifyUserOfError(
+                                    "Failed to create project.",
+                                    "Project Error");
+                            return;
+                        }
+
+                        // Add the image with flips
+                        QPProjectFunctions.addImageToProject(
+                                new File(imagePath),
+                                project,
+                                invertedX,
+                                invertedY
+                        );
+
+                        // Set the project in QuPath
+                        qupathGUI.setProject(project);
+
+                        // Find and open the newly added image
+                        var entries = project.getImageList();
+                        var imageEntry = entries.stream()
+                                .filter(e -> e.getImageName().equals(new File(imagePath).getName()))
+                                .findFirst()
+                                .orElse(null);
+
+                        if (imageEntry != null) {
+                            qupathGUI.openImageEntry(imageEntry);
+                            logger.info("Opened flipped image in project");
+                        } else {
+                            UIFunctions.notifyUserOfError(
+                                    "Failed to find image in project after import.",
+                                    "Import Error");
+                            return;
+                        }
+
+                        // Get project details
+                        projectDetails = QPProjectFunctions.getCurrentProjectInformation(
+                                sample.projectsFolder().getAbsolutePath(),
+                                sample.sampleName(),
+                                sample.modality()
+                        );
+
+                    } else {
+                        logger.info("Project exists, checking if image needs to be added");
+
+                        // Check if current image is in the project
+                        var project = qupathGUI.getProject();
+                        var projectEntry = project.getEntry(currentImageData);
+
+                        if (projectEntry == null) {
+                            // Image not in project - add it with flips
+                            logger.info("Adding current image to existing project with flips");
+                            String imagePath = MinorFunctions.extractFilePath(currentImageData.getServerPath());
+                            if (imagePath != null) {
+                                QPProjectFunctions.addImageToProject(
+                                        new File(imagePath),
+                                        project,
+                                        invertedX,
+                                        invertedY
+                                );
+
+                                // Refresh and reopen the image to apply flips
+                                qupathGUI.refreshProject();
+
+                                // Find and open the newly added entry
+                                var entries = project.getImageList();
+                                var newEntry = entries.stream()
+                                        .filter(e -> e.getImageName().equals(new File(imagePath).getName()))
+                                        .findFirst()
+                                        .orElse(null);
+
+                                if (newEntry != null) {
+                                    qupathGUI.openImageEntry(newEntry);
+                                    logger.info("Reopened image with flips applied");
+                                }
+                            }
+                        } else {
+                            logger.info("Image already in project");
+                        }
+
+                        // Get project information for existing project
+                        projectDetails = QPProjectFunctions.getCurrentProjectInformation(
+                                sample.projectsFolder().getAbsolutePath(),
+                                sample.sampleName(),
+                                sample.modality()
+                        );
+                    }
+
+                    // Wait a moment for the image to fully load and display
+                    Thread.sleep(500);
+
+                    // Verify we have a properly loaded image before continuing
+                    if (qupathGUI.getImageData() == null) {
+                        UIFunctions.notifyUserOfError(
+                                "No image data available after project setup. Workflow cannot continue.",
+                                "Image Error");
+                        return;
+                    }
+
+                    logger.info("Project setup complete, continuing workflow");
+
+                    // Continue with the rest of the workflow
+                    continueWorkflowAfterProjectSetup(qupathGUI, projectDetails, sample, invertedX, invertedY);
+
+                } catch (Exception e) {
+                    logger.error("Failed during project setup", e);
+                    UIFunctions.notifyUserOfError(
+                            "Failed to create/open project: " + e.getMessage(),
+                            "Project Error");
+                }
             });
         }).exceptionally(ex -> {
             logger.info("Sample setup failed: {}", ex.getMessage());
