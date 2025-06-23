@@ -227,24 +227,7 @@ public class MinorFunctions {
             return null;
         }
     }
-    /**
-     * Retrieves the current stage to QuPath offset.
-     * <p>
-     * In the future this will load from your YAML config or QuPath properties.
-     * For now, it simply returns half the camera frame size in microns using stub values.
-     *
-     * @return a two element list [offsetX, offsetY] in microns
-     */
-    public static double[] getCurrentOffset() {
-        // TODO: replace with values read from YAML (e.g. via MicroscopeConfigManager)
-        final double acquisitionPixelSizeMicrons = 0.2201;  // stub: µm per pixel
-        final int cameraWidthPixels = 1392;                 // stub: camera resolution
-        final int cameraHeightPixels = 1040;
 
-        double offsetX = 0.5 * cameraWidthPixels * acquisitionPixelSizeMicrons;
-        double offsetY = 0.5 * cameraHeightPixels * acquisitionPixelSizeMicrons;
-        return new double[]{ offsetX, offsetY };
-    }
 
     public static String firstLines(String text, int maxLines) {
         String[] lines = text.split("\r?\n");

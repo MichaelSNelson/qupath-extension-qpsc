@@ -20,7 +20,6 @@ import qupath.ext.qpsc.utilities.UtilityFunctions;
 import qupath.ext.qpsc.ui.UIFunctions;
 import qupath.lib.objects.PathObject;
 
-import static qupath.ext.qpsc.utilities.MinorFunctions.getCurrentOffset;
 
 /**
  * MicroscopeController
@@ -235,7 +234,8 @@ public class MicroscopeController {
 
 
 
-    // Then in your JavaFX button-handler:
+    // TODO implement browser for QuPath image that moves microscope to locations
+    // These two functions form a base for that.
     public void onMoveButtonClicked(PathObject tile) {
         // 1) compute stageCoords from QuPath coords
         double[] stageCoords = TransformationFunctions.qpToMicroscopeCoordinates(
@@ -243,14 +243,14 @@ public class MicroscopeController {
                 currentTransform
         );
 
-        // 2) apply any offset
-
-        double[] currentOffset = getCurrentOffset();
-        double[] adjusted = TransformationFunctions.applyOffset(stageCoords, currentOffset, true);
+        // 2) apply any offset TODO remove
+//
+//        double[] currentOffset = getCurrentOffset();
+//        double[] adjusted = TransformationFunctions.applyOffset(stageCoords, currentOffset, true);
 
         // 3) actually move hardware
         try {
-            moveStageXY(adjusted[0], adjusted[1]);
+            moveStageXY(stageCoords[0], stageCoords[1]);
             // maybe pop a confirmation dialog here
         } catch (Exception e) {
             UIFunctions.notifyUserOfError(
@@ -274,15 +274,15 @@ public class MicroscopeController {
         // 2) transform into stage coords
         double [] stageCoords = TransformationFunctions.qpToMicroscopeCoordinates(qpCoords, currentTransform);
 
-        // 3) account for any offset (if you store one)
-        double[] offset = getCurrentOffset();
-        double[] adjusted = TransformationFunctions.applyOffset(stageCoords, offset, true);
+//        // 3) account for any offset (if you store one) TODO remove
+//        double[] offset = getCurrentOffset();
+//        double[] adjusted = TransformationFunctions.applyOffset(stageCoords, offset, true);
 
-        logger.info("Transformed to stage coords: " + List.of(adjusted[0], adjusted[1]));
+        logger.info("Transformed to stage coords: " + List.of(stageCoords[0], stageCoords[1]));
 
         // 4) send to Python
         UtilityFunctions.execCommand(
-                String.valueOf(List.of(String.valueOf(adjusted[0]), String.valueOf(adjusted[1]))),
+                String.valueOf(List.of(String.valueOf(stageCoords[0]), String.valueOf(stageCoords[1]))),
                 "moveStageToCoordinates");
 
         // 5) optionally update the GUI

@@ -134,8 +134,7 @@ public class TransformationFunctions {
     public static AffineTransform addTranslationToScaledAffine(
             AffineTransform scalingTransform,
             double [] qpCoordinateArray,
-            double [] stageCoordinateArray,
-            double [] offset) {
+            double [] stageCoordinateArray) {
         // Reset to pure scale
         scalingTransform.setTransform(
                 scalingTransform.getScaleX(), 0,
@@ -248,35 +247,6 @@ public class TransformationFunctions {
                     : input[i] - off;
         }
         return result;
-    }
-
-    /**
-     * Offsets coordinates for sending to/retrieving from stage.
-     *
-     * @param input        A List<Double> of length 2 ([x, y]).
-     * @param offset       A List<Double> of length 2 ([dx, dy]).
-     * @param sendToStage  If true, adds the offset; if false, subtracts it.
-     * @return             A new List<Double> with the offset applied.
-     * @throws IllegalArgumentException if either list isn’t size 2.
-     */
-    public static List<Double> applyOffset(
-            List<Double> input,
-            List<Double> offset,
-            boolean sendToStage) {
-
-        if (input.size() != 2 || offset.size() != 2)
-            throw new IllegalArgumentException("Both input and offset must have exactly two elements");
-
-        double x = input.get(0);
-        double y = input.get(1);
-        double dx = offset.get(0);
-        double dy = offset.get(1);
-
-        if (sendToStage) {
-            return List.of(x + dx, y + dy);
-        } else {
-            return List.of(x - dx, y - dy);
-        }
     }
 
     /**

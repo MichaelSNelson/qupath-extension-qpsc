@@ -292,7 +292,7 @@ public class ExistingImageWorkflow {
                             String modalityBase = sample.modality().replaceAll("(_\\d+)$", "");
                             QP.getDetectionObjects().stream()
                                     .filter(o -> o.getPathClass() != null &&
-                                            o.getPathClass().toString().toLowerCase().contains(modalityBase))
+                                            o.getPathClass().toString().contains(modalityBase))
                                     .forEach(QP::removeObject);
                             QP.fireHierarchyUpdate();
                             logger.info("Existing tiles should be removed at this point");
@@ -326,14 +326,29 @@ public class ExistingImageWorkflow {
                                         return;
                                     }
 
+                                    // Transform tile configurations from QuPath to stage coordinates
+                                    try {
+                                        List<String> modifiedDirs = TransformationFunctions.transformTileConfiguration(
+                                                tempTileDirectory, transform);
+                                        logger.info("Transformed tile configurations for directories: {}", modifiedDirs);
+                                    } catch (IOException e) {
+                                        logger.error("Failed to transform tile configurations", e);
+                                        Platform.runLater(() -> UIFunctions.notifyUserOfError(
+                                                "Failed to transform tile coordinates: " + e.getMessage(),
+                                                "Transform Error"));
+                                        return;
+                                    }
+
                                     // 9. Get rotation angles based on modality
                                     logger.info("Checking rotation requirements for modality: {}", sample.modality());
                                     RotationManager rotationManager = new RotationManager(sample.modality());
+
                                     rotationManager.getRotationAngles(sample.modality())
                                             .thenAccept(rotationAngles -> {
                                                 logger.info("Rotation angles returned: {}", rotationAngles);
-                                                // Pass rotation info to processAnnotations
-                                                processAnnotations(annotations, transform, sample, project,
+
+                                                // Now process annotations with already-transformed coordinates
+                                                processAnnotations(currentAnnotations, transform, sample, project,
                                                         tempTileDirectory, modeWithIndex, pixelSize,
                                                         qupathGUI, rotationAngles, rotationManager);
                                             })
@@ -371,18 +386,6 @@ public class ExistingImageWorkflow {
         String configFileLocation = QPPreferenceDialog.getMicroscopeConfigFileProperty();
         String projectsFolder = sample.projectsFolder().getAbsolutePath();
 
-        // Transform all tile configurations first
-        try {
-            TransformationFunctions.transformTileConfiguration(tempTileDirectory, transform);
-            logger.info("Transformed tile configurations for all annotations");
-        } catch (IOException e) {
-            logger.error("Failed to transform tile configurations", e);
-            Platform.runLater(() -> UIFunctions.notifyUserOfError(
-                    "Failed to transform tiles: " + e.getMessage(),
-                    "Transform Error"));
-            return;
-        }
-
         // Launch acquisition for each annotation (with all angles handled internally)
         List<CompletableFuture<Void>> acquisitionFutures = new ArrayList<>();
 
@@ -404,10 +407,10 @@ public class ExistingImageWorkflow {
 
                     // Add angles parameter if rotation is needed
                     if (rotationAngles != null && !rotationAngles.isEmpty()) {
-                        cliArgs.add("--angles");
-                        cliArgs.addAll(rotationAngles.stream()
+                        String anglesStr = rotationAngles.stream()
                                 .map(String::valueOf)
-                                .collect(Collectors.toList()));
+                                .collect(Collectors.joining(" ", "(", ")"));
+                        cliArgs.add(anglesStr);
                     }
 
                     var result = CliExecutor.execComplexCommand(
@@ -481,111 +484,6 @@ public class ExistingImageWorkflow {
                                 "Stitching failed for " + annotationName + ": " + e.getMessage(),
                                 "Stitching Error"));
                     }
-                }
-            }, STITCH_EXECUTOR);
-
-            acquisitionFutures.add(acquisitionFuture);
-        }
-
-        // When all acquisitions complete, handle cleanup
-        CompletableFuture.allOf(acquisitionFutures.toArray(new CompletableFuture[0]))
-                .thenRun(() -> {
-                    logger.info("All acquisitions completed");
-                    String handling = QPPreferenceDialog.getTileHandlingMethodProperty();
-                    if ("Delete".equals(handling)) {
-                        UtilityFunctions.deleteTilesAndFolder(tempTileDirectory);
-                    } else if ("Zip".equals(handling)) {
-                        UtilityFunctions.zipTilesAndMove(tempTileDirectory);
-                        UtilityFunctions.deleteTilesAndFolder(tempTileDirectory);
-                    }
-                })
-                .exceptionally(ex -> {
-                    logger.error("Error in acquisition workflow", ex);
-                    return null;
-                });
-    }
-    /**
-     * Process all annotations: transform tiles, acquire, and queue stitching.
-     * Original version without rotation support.
-     */
-    private static void processAnnotations(
-            List<PathObject> annotations,
-            AffineTransform transform,
-            SampleSetupController.SampleSetupResult sample,
-            Project<BufferedImage> project,
-            String tempTileDirectory,
-            String modeWithIndex,
-            double pixelSize,
-            QuPathGUI qupathGUI) {
-
-        String configFileLocation = QPPreferenceDialog.getMicroscopeConfigFileProperty();
-        String projectsFolder = sample.projectsFolder().getAbsolutePath();
-
-        // Transform all tile configurations first
-        try {
-            TransformationFunctions.transformTileConfiguration(tempTileDirectory, transform);
-            logger.info("Transformed tile configurations for all annotations");
-        } catch (IOException e) {
-            logger.error("Failed to transform tile configurations", e);
-            Platform.runLater(() -> UIFunctions.notifyUserOfError(
-                    "Failed to transform tiles: " + e.getMessage(),
-                    "Transform Error"));
-            return;
-        }
-
-        // Launch acquisition for each annotation
-        List<CompletableFuture<Void>> acquisitionFutures = new ArrayList<>();
-
-        for (PathObject annotation : annotations) {
-            String annotationName = annotation.getName();
-            logger.info("Starting acquisition for annotation: {}", annotationName);
-
-            CompletableFuture<Void> acquisitionFuture = CompletableFuture.supplyAsync(() -> {
-                try {
-                    var result = CliExecutor.execComplexCommand(
-                            300,
-                            "tiles done",
-                            res.getString("command.acquisitionWorkflow"),
-                            configFileLocation,
-                            projectsFolder,
-                            sample.sampleName(),
-                            modeWithIndex,
-                            annotationName
-                    );
-
-                    if (result.exitCode() != 0) {
-                        throw new RuntimeException("Acquisition failed for " + annotationName +
-                                ": " + result.stderr());
-                    }
-                    logger.info("Acquisition completed for annotation: {}", annotationName);
-                    return null;
-                } catch (Exception e) {
-                    throw new CompletionException(e);
-                }
-            });
-
-            // Queue stitching after acquisition completes
-            acquisitionFuture.thenRunAsync(() -> {
-                try {
-                    logger.info("Queuing stitching for annotation: {}", annotationName);
-                    String outPath = UtilityFunctions.stitchImagesAndUpdateProject(
-                            projectsFolder,
-                            sample.sampleName(),
-                            modeWithIndex,
-                            annotationName,
-                            qupathGUI,
-                            project,
-                            String.valueOf(QPPreferenceDialog.getCompressionTypeProperty()),
-                            pixelSize,
-                            1  // downsample
-                    );
-                    logger.info("Stitching completed for annotation: {}, output: {}",
-                            annotationName, outPath);
-                } catch (Exception e) {
-                    logger.error("Stitching failed for annotation: " + annotationName, e);
-                    Platform.runLater(() -> UIFunctions.notifyUserOfError(
-                            "Stitching failed for " + annotationName + ": " + e.getMessage(),
-                            "Stitching Error"));
                 }
             }, STITCH_EXECUTOR);
 

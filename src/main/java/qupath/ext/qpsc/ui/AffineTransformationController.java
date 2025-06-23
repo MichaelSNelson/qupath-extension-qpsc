@@ -93,7 +93,7 @@ public class AffineTransformationController {
 
                         // 5. Calculate transform based on the manually aligned position
                         AffineTransform transform = TransformationFunctions.addTranslationToScaledAffine(
-                                scalingTransform, qpRefCoords, measuredStageCoords, null
+                                scalingTransform, qpRefCoords, measuredStageCoords
                         );
                         logger.info("Calculated affine transform from manual alignment: {}", transform);
 
@@ -141,8 +141,7 @@ public class AffineTransformationController {
 
                                         double[] measuredCoords = MicroscopeController.getInstance().getStagePositionXY();
                                         AffineTransform newTransform = TransformationFunctions.addTranslationToScaledAffine(
-                                                currentTransform, tileCoords, measuredCoords, null
-                                        );
+                                                currentTransform, tileCoords, measuredCoords);
                                         logger.info("Refined transform after tile '{}': {}", tile.getName(), newTransform);
                                         tileFuture.complete(newTransform);
 

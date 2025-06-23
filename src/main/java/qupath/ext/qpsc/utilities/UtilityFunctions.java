@@ -260,37 +260,4 @@ public class UtilityFunctions {
         return String.join(System.lineSeparator(), out);
     }
 
-
-
-
-    public static void moveStageToSelectedTile(PathObject sel) throws IOException, InterruptedException {
-
-        RectangleROI roi = (RectangleROI) sel.getROI();
-        double[] coords = {roi.getBoundsX(), roi.getBoundsY()};
-
-        // Find the first URI via Stream API (and handle the empty case if needed):
-        String uri = QP.getCurrentServer()
-                .getURIs()
-                .stream()
-                .findFirst()
-                .map(Object::toString)
-                .orElseThrow(() -> new IllegalStateException("No URIs available"));
-
-        String decoded = URLDecoder.decode(uri, StandardCharsets.UTF_8).replace("file:/", "");
-        double[][] stageBounds = MinorFunctions.readTileExtremesFromFile(decoded);
-
-        assert stageBounds != null;
-        double scaleX = (stageBounds[1][0] - stageBounds[0][0]) / QP.getCurrentServer().getMetadata().getWidth();
-        double scaleY = (stageBounds[1][1] - stageBounds[0][1]) / QP.getCurrentServer().getMetadata().getHeight();
-
-        List<String> target = Arrays.asList(
-                String.valueOf(stageBounds[0][0] + coords[0]*scaleX),
-                String.valueOf(stageBounds[0][1] + coords[1]*scaleY)
-        );
-
-        execCommand(String.valueOf(target), "moveStageToCoordinates.py");
-        logger.info("Moving stage to selected tile...");
-    }
-
-
 }
