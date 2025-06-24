@@ -8,6 +8,7 @@ import java.awt.geom.AffineTransform;
 import java.awt.geom.Point2D;
 import java.io.*;
 import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -58,52 +59,64 @@ public class TransformationFunctions {
         File parent = new File(parentDirPath);
         List<String> modified = new ArrayList<>();
 
-        // For bounding box workflow, check "bounds" folder
-        File boundsDir = new File(parent, "bounds");
-        if (boundsDir.exists()) {
-            File inFile = new File(boundsDir, "TileConfiguration.txt");
-            if (inFile.exists()) {
-                processTileConfigurationFile(inFile, transform);
-                modified.add("bounds");
-            }
-        }
+        logger.info("Looking for TileConfiguration files in: {}", parentDirPath);
 
         // For annotation workflow, check each subdirectory
         File[] subdirs = parent.listFiles(File::isDirectory);
         if (subdirs != null) {
             for (File sub : subdirs) {
-                if (sub.getName().equals("bounds")) continue;  // Skip if already processed
-
                 File inFile = new File(sub, "TileConfiguration.txt");
+                logger.info("Checking for file: {}", inFile.getAbsolutePath());
                 if (inFile.exists()) {
+                    logger.info("Found and transforming: {}", inFile.getAbsolutePath());
                     processTileConfigurationFile(inFile, transform);
                     modified.add(sub.getName());
                 }
             }
         }
 
+        logger.info("Modified directories: {}", modified);
         return modified;
     }
 
     private static void processTileConfigurationFile(
             File inFile,
             AffineTransform transform) throws IOException {
+
+        // First, copy the original file to TileConfiguration_QP.txt to preserve QuPath coordinates
+        File backupFile = new File(inFile.getParent(), "TileConfiguration_QP.txt");
+        Files.copy(inFile.toPath(), backupFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+        logger.info("Backed up original QuPath coordinates to: {}", backupFile.getAbsolutePath());
+
+        // Now transform the coordinates in the original file
         List<String> lines = Files.readAllLines(inFile.toPath());
         List<String> out = new ArrayList<>(lines.size());
-        Pattern p = Pattern.compile("\\d+\\.tif; ; \\(.*?\\),\\s*(.*?)\\)");
+        Pattern p = Pattern.compile("(\\d+\\.tif); ; \\((.*?), (.*?)\\)");  // Fixed regex with proper capture groups
+
+        int transformedCount = 0;
         for (String line : lines) {
             Matcher m = p.matcher(line);
             if (m.find()) {
-                double x = Double.parseDouble(m.group(1));
-                double y = Double.parseDouble(m.group(2));
+                String filename = m.group(1);
+                double x = Double.parseDouble(m.group(2).trim());
+                double y = Double.parseDouble(m.group(3).trim());
+
+                // Transform from QuPath to stage coordinates
                 double[] coords = qpToMicroscopeCoordinates(new double[]{x, y}, transform);
-                out.add(line.replaceFirst("\\(.*?\\)", String.format("(%.3f, %.3f)", coords[0], coords[1])));
+
+                String transformedLine = String.format("%s; ; (%.3f, %.3f)", filename, coords[0], coords[1]);
+                out.add(transformedLine);
+                transformedCount++;
+
+                logger.debug("Transformed: ({}, {}) -> ({}, {})", x, y, coords[0], coords[1]);
             } else {
                 out.add(line);
             }
         }
-        File outFile = new File(inFile.getParent(), "TileConfiguration.txt");
-        Files.write(outFile.toPath(), out);
+
+        // Write transformed coordinates back to TileConfiguration.txt
+        Files.write(inFile.toPath(), out);
+        logger.info("Transformed {} tile coordinates in: {}", transformedCount, inFile.getAbsolutePath());
     }
 
     /**
