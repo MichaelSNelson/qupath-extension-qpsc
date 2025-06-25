@@ -5,11 +5,10 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -19,6 +18,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.io.*;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 import qupath.ext.qpsc.utilities.MinorFunctions;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
@@ -161,20 +161,68 @@ public class CliExecutor {
 
         // ---- Progress counter and timer ----
         AtomicInteger tifCounter = new AtomicInteger();
-        UIFunctions.ProgressHandle progressHandle = null;
-        Pattern tilesPat = tilesDoneRegex == null ? null : Pattern.compile(tilesDoneRegex);
-        int totalTifs = 0;
-        if (tilesPat != null) {
-            Path tileDir = Paths.get(args[2], args[3], args[4], args[5]);
-            totalTifs = MinorFunctions.countTifEntriesInTileConfig(List.of(tileDir.toString()));
-            logger.info("Starting progress bar");
-            if (totalTifs > 0)
-                progressHandle = UIFunctions.showProgressBarAsync(tifCounter, totalTifs, process, 20000);
-        }
+        logger.info("Created tifCounter with identity: {}", System.identityHashCode(tifCounter));
 
+// Around line 160, make totalTifs final
+        Pattern tilesPat = tilesDoneRegex == null ? null : Pattern.compile(tilesDoneRegex);
+        final int totalTifs; // Make it final
+        UIFunctions.ProgressHandle progressHandle = null;
         // --- Inactivity timer ---
         AtomicLong lastProgressTime = new AtomicLong(System.currentTimeMillis());
         AtomicBoolean timedOut = new AtomicBoolean(false);
+// Set up file-based progress monitoring
+        if (args.length > 5) {  // Ensure we have enough arguments for the path
+            Path tileDir = Paths.get(args[2], args[3], args[4], args[5]);
+
+            totalTifs = MinorFunctions.countTifEntriesInTileConfig(List.of(tileDir.toString()));
+            logger.info("Monitoring directory for TIF files: {}", tileDir);
+            logger.info("Expected TIF files: {}", totalTifs);
+
+
+            if (totalTifs > 0) {
+                // The existing AtomicLong lastProgressTime is already defined on line 178
+                progressHandle = UIFunctions.showProgressBarAsync(tifCounter, totalTifs, process, 20000);
+                logger.info("Passed tifCounter (identity: {}) to progress bar", System.identityHashCode(tifCounter));
+                // Create final reference for use in lambda
+                final Path monitorDir = tileDir;
+                final int expectedFiles = totalTifs;
+
+                // Start file monitoring thread
+                Thread fileMonitor = new Thread(() -> {
+                    Set<String> seenFiles = new HashSet<>();
+                    while (process.isAlive() && seenFiles.size() < expectedFiles) {
+                        try {
+                            if (Files.exists(monitorDir)) {
+                                try (Stream<Path> files = Files.list(monitorDir)) {
+                                    files.filter(p -> p.toString().toLowerCase().endsWith(".tif"))
+                                            .forEach(p -> {
+                                                String fileName = p.getFileName().toString();
+                                                if (!seenFiles.contains(fileName)) {
+                                                    seenFiles.add(fileName);
+                                                    tifCounter.incrementAndGet();
+                                                    logger.info("Incremented tifCounter (identity: {}) to: {}",
+                                                            System.identityHashCode(tifCounter), tifCounter.get());
+                                                    lastProgressTime.set(System.currentTimeMillis());
+                                                    logger.debug("New TIF detected: {}, progress: {}/{}",
+                                                            fileName, tifCounter.get(), expectedFiles);
+                                                }
+                                            });
+                                }
+                            }
+                            Thread.sleep(250); // Check every 250ms
+                        } catch (Exception e) {
+                            logger.debug("File monitor error: {}", e.getMessage());
+                        }
+                    }
+                    logger.info("File monitor finished. Found {} TIF files", seenFiles.size());
+                });
+                fileMonitor.setDaemon(true);
+                fileMonitor.start();
+            }
+        } else {
+            totalTifs = 0; // Default value when not monitoring files
+        }
+
 
         // ---- Output Thread ----
         Thread tOut = new Thread(() -> {
@@ -182,9 +230,11 @@ public class CliExecutor {
                 String line;
                 while ((line = outR.readLine()) != null) {
                     out.append(line).append('\n');
+                    logger.debug("CLI output line: {}", line); // ADD THIS
                     if (tilesPat != null && tilesPat.matcher(line).find()) {
                         tifCounter.incrementAndGet();
                         lastProgressTime.set(System.currentTimeMillis());
+                        logger.debug("Progress incremented to: {}", tifCounter.get()); // ADD THIS
                     }
                     // To reset timer on *any* output, uncomment the following line:
                     // else lastProgressTime.set(System.currentTimeMillis());

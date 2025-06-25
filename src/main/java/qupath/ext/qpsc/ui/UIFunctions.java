@@ -124,7 +124,8 @@ public class UIFunctions {
             KeyFrame keyFrame = new KeyFrame(Duration.millis(200), evt -> {
                 int current = progressCounter.get();
                 long now = System.currentTimeMillis();
-
+                logger.debug("Progress bar update: current={}, total={}, process alive={}",
+                        current, totalFiles, process.isAlive());
                 // Record start time once work begins
                 if (current > 0 && startTime.get() == 0) {
                     startTime.set(now);

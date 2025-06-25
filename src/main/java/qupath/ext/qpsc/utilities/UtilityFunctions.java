@@ -91,7 +91,13 @@ public class UtilityFunctions {
                 1.0                  // zSpacingMicrons (can be set as needed)
         );
         String outPath = StitchingWorkflow.run(config);
-
+        //TODO clean up if not needed
+        logger.info("Stitching returned path: {}", outPath); // ADD THIS
+        // Defensive check for extension
+        if (outPath.endsWith(".ome") && !outPath.endsWith(".ome.tif")) {
+            logger.warn("Stitching returned .ome without .tif, appending .tif extension");
+            outPath = outPath + ".tif";
+        }
 
         // 3) Rename according to sample/mode/annotation
         File orig = new File(outPath);
@@ -102,6 +108,7 @@ public class UtilityFunctions {
         if (orig.renameTo(renamed)) {
             outPath = renamed.getAbsolutePath();
             logger.info("Renamed stitched file → {}", baseName);
+            logger.info("Full renamed path: {}", outPath); // ADD THIS
         }
 
         final String finalOut = outPath;  // for use in the lambda below
