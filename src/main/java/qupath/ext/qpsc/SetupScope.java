@@ -134,7 +134,36 @@ public class SetupScope implements QuPathExtension, GitHubProject {
                     }
                 }
 		);
+		// 3) Macro image workflow (only enabled if image has macro)
+		MenuItem macroImageOption = new MenuItem(res.getString("menu.macroimage"));
+		macroImageOption.disableProperty().bind(
+				Bindings.or(
+						// no image open?
+						Bindings.createBooleanBinding(
+								() -> qupath.getImageData() == null,
+								qupath.imageDataProperty()
+						),
+						// or no macro image?
+						Bindings.createBooleanBinding(
+								() -> {
+									var data = qupath.getImageData();
+									if (data == null) return true;
+									var server = data.getServer();
+									return server == null ||
+											!server.getAssociatedImageList().contains("macro");
+								},
+								qupath.imageDataProperty()
+						)
 
+                )
+		);
+		macroImageOption.setOnAction(e -> {
+			try {
+				QPScopeController.getInstance().startWorkflow("macroImage");
+			} catch (IOException ex) {
+				throw new RuntimeException(ex);
+			}
+		});
 		// 3) Basic stage control (test only)
 		MenuItem stageControlOption = new MenuItem(res.getString("menu.stagecontrol"));
 		stageControlOption.setOnAction(e ->
@@ -162,6 +191,7 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 		extensionMenu.getItems().addAll(
 				boundingBoxOption,
 				existingImageOption,
+				macroImageOption,  // Add this line
 				stageControlOption,
 				testOption
 		);
