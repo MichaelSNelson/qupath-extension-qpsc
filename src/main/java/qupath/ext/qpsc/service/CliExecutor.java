@@ -230,12 +230,13 @@ public class CliExecutor {
                 String line;
                 while ((line = outR.readLine()) != null) {
                     out.append(line).append('\n');
-                    logger.debug("CLI output line: {}", line); // ADD THIS
-                    if (tilesPat != null && tilesPat.matcher(line).find()) {
-                        tifCounter.incrementAndGet();
-                        lastProgressTime.set(System.currentTimeMillis());
-                        logger.debug("Progress incremented to: {}", tifCounter.get()); // ADD THIS
-                    }
+                    logger.debug("CLI output line: {}", line);
+                    //This section was used prior to directly checking for the existence of .tif files
+//                    if (tilesPat != null && tilesPat.matcher(line).find()) {
+//                        tifCounter.incrementAndGet();
+//                        lastProgressTime.set(System.currentTimeMillis());
+//                        logger.debug("Progress incremented to: {}", tifCounter.get()); // ADD THIS
+//                    }
                     // To reset timer on *any* output, uncomment the following line:
                     // else lastProgressTime.set(System.currentTimeMillis());
                 }

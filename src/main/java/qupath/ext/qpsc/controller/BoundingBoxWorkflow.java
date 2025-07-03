@@ -154,7 +154,6 @@ public class BoundingBoxWorkflow {
 
                                 // Add angles parameter if rotation is needed
                                 if (rotationAngles != null && !rotationAngles.isEmpty()) {
-                                    cliArgs.add("--angles");
                                     cliArgs.addAll(rotationAngles.stream()
                                             .map(String::valueOf)
                                             .toList());
