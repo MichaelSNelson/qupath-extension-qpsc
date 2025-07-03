@@ -12,6 +12,7 @@ import java.io.BufferedWriter;
 import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.Type;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.*;
@@ -131,25 +132,95 @@ public class MinorFunctions {
     }
 
     /**
-     * Extracts a Windows-style path out of a URI like "file:/C:/...".
-     * Returns null if no match.
+     * Extracts a file path from various QuPath server path formats.
+     * Handles multiple formats including:
+     * - Standard file URLs: "file:/C:/path/to/file.ext"
+     * - QuPath URIs with parameters: "file:/path[--series, 0]"
+     * - Already extracted paths: "C:/path/to/file.ext"
+     *
+     * @param serverPath The server path from QuPath ImageData
+     * @return The extracted file system path, or null if extraction fails
      */
     public static String extractFilePath(String serverPath) {
-        // More general pattern to handle any file extension
-        Pattern p = Pattern.compile("file:/(.*?\\.[A-Za-z0-9]+)");
-        Matcher m = p.matcher(serverPath);
-        if (m.find()) {
-            String path = m.group(1).replaceFirst("^/", "").replaceAll("%20", " ");
-            // Remove any additional parameters like [--series, 0]
-            int bracketIndex = path.indexOf('[');
-            if (bracketIndex != -1) {
-                path = path.substring(0, bracketIndex);
-            }
-            return path;
+        if (serverPath == null || serverPath.isEmpty()) {
+            logger.warn("Server path is null or empty");
+            return null;
         }
+
+        logger.debug("Attempting to extract file path from: {}", serverPath);
+
+        // First, check if it's already a valid file path
+        File directFile = new File(serverPath);
+        if (directFile.exists() && directFile.isFile()) {
+            logger.debug("Server path is already a valid file path");
+            return serverPath;
+        }
+
+        // Try to parse as URI
+        try {
+            // Handle QuPath URIs that might have parameters
+            String cleanPath = serverPath;
+            int bracketIndex = cleanPath.indexOf('[');
+            if (bracketIndex != -1) {
+                cleanPath = cleanPath.substring(0, bracketIndex).trim();
+            }
+
+            URI uri = new URI(cleanPath);
+            if ("file".equals(uri.getScheme())) {
+                File file = new File(uri);
+                if (file.exists()) {
+                    logger.debug("Extracted path via URI parsing: {}", file.getAbsolutePath());
+                    return file.getAbsolutePath();
+                }
+
+                // Try alternative parsing for Windows paths
+                String path = uri.getPath();
+                if (path != null) {
+                    // Remove leading slash for Windows paths
+                    if (path.matches("^/[A-Za-z]:.*")) {
+                        path = path.substring(1);
+                    }
+                    path = path.replace("%20", " ");
+
+                    File altFile = new File(path);
+                    if (altFile.exists()) {
+                        logger.debug("Extracted path via alternative parsing: {}", altFile.getAbsolutePath());
+                        return altFile.getAbsolutePath();
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logger.debug("URI parsing failed: {}", e.getMessage());
+        }
+
+        // Fallback to regex pattern matching
+        // Pattern to match file:/ followed by a path
+        Pattern filePattern = Pattern.compile("file:/+(.+?)(?:\\[|$)");
+        Matcher matcher = filePattern.matcher(serverPath);
+
+        if (matcher.find()) {
+            String path = matcher.group(1);
+            // Clean up the path
+            path = path.replace("%20", " ");
+
+            // Handle Windows paths that might have lost their initial slash
+            if (path.matches("^[A-Za-z]:.*")) {
+                // It's already a Windows path
+            } else if (path.matches("^/[A-Za-z]:.*")) {
+                // Remove leading slash for Windows
+                path = path.substring(1);
+            }
+
+            File file = new File(path);
+            if (file.exists()) {
+                logger.debug("Extracted path via regex: {}", file.getAbsolutePath());
+                return file.getAbsolutePath();
+            }
+        }
+
+        logger.warn("Could not extract valid file path from: {}", serverPath);
         return null;
     }
-
     /**
      * Writes the two extreme coordinate pairs (minX,minY / maxX,maxY) into
      * a text file named "<image>_StageCoordinates.txt".

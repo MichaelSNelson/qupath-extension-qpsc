@@ -1,9 +1,10 @@
 package qupath.ext.qpsc.utilities;
 
-
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.net.URI;
+import java.net.URISyntaxException;
 
 import qupath.lib.gui.QuPathGUI;
 import qupath.fx.dialogs.Dialogs;
@@ -37,10 +38,8 @@ import org.slf4j.LoggerFactory;
  *   - Add images (with optional flipping/transforms) to a project.
  *   - Save or synchronize ImageData.
  */
-
 public class QPProjectFunctions {
     private static final Logger logger = LoggerFactory.getLogger(QPProjectFunctions.class);
-
 
     /**
      * Result container for creating/loading a project.
@@ -49,8 +48,7 @@ public class QPProjectFunctions {
         final String imagingModeWithIndex;
         final String tempTileDirectory;
 
-        ProjectSetup(String imagingModeWithIndex,
-                     String tempTileDirectory) {
+        ProjectSetup(String imagingModeWithIndex, String tempTileDirectory) {
             this.imagingModeWithIndex = imagingModeWithIndex;
             this.tempTileDirectory = tempTileDirectory;
         }
@@ -64,13 +62,7 @@ public class QPProjectFunctions {
      * @param sampleLabel         subfolder / project name
      * @param isSlideFlippedX     flip X on import?
      * @param isSlideFlippedY     flip Y on import?
-     * @return a Map containing:
-     *         <ul>
-     *           <li>"matchingImage" → the {@code ProjectImageEntry} just added (or null)</li>
-     *           <li>"imagingModeWithIndex" → the unique folder name (e.g. "4x_bf_1")</li>
-     *           <li>"currentQuPathProject" → the loaded {@code Project<BufferedImage>}</li>
-     *           <li>"tempTileDirectory" → full path to the imagingMode subfolder</li>
-     *         </ul>
+     * @return a Map containing project details
      */
     public static Map<String,Object> createAndOpenQuPathProject(
             QuPathGUI qupathGUI,
@@ -80,34 +72,213 @@ public class QPProjectFunctions {
             boolean isSlideFlippedX,
             boolean isSlideFlippedY) throws IOException {
 
+        logger.info("Creating/opening project: {} in {}", sampleLabel, projectsFolderPath);
+
         // 1) Prepare folders and preferences
         ProjectSetup setup = prepareProjectFolders(projectsFolderPath, sampleLabel, sampleModality);
 
         // 2) Create or load the actual QuPath project file
-        Project<BufferedImage> project = createOrLoadProject(
-                projectsFolderPath, sampleLabel);
+        Project<BufferedImage> project = createOrLoadProject(projectsFolderPath, sampleLabel);
 
         // 3) Import + open the current image, if any
-        ProjectImageEntry<BufferedImage> matchingImage =
-                importCurrentImage(qupathGUI, project, isSlideFlippedX, isSlideFlippedY);
+        ProjectImageEntry<BufferedImage> matchingImage = null;
+
+        ImageData<BufferedImage> currentImageData = qupathGUI.getImageData();
+        if (currentImageData != null) {
+            logger.info("Current image found, checking if it needs to be added to project");
+
+            // Check if this image is already in the project
+            ProjectImageEntry<BufferedImage> existingEntry = findImageInProject(project, currentImageData);
+
+            if (existingEntry != null) {
+                logger.info("Image already exists in project: {}", existingEntry.getImageName());
+                matchingImage = existingEntry;
+            } else {
+                // Try to extract file path and add to project
+                String imagePath = extractImagePath(currentImageData);
+                if (imagePath != null && new File(imagePath).exists()) {
+                    logger.info("Adding new image to project: {}", imagePath);
+                    matchingImage = importImageToProject(qupathGUI, project, new File(imagePath),
+                            isSlideFlippedX, isSlideFlippedY);
+                } else {
+                    logger.warn("Could not extract valid file path from current image");
+                }
+            }
+        } else {
+            logger.info("No current image open in QuPath");
+        }
+
+        // Set the project as active
+        qupathGUI.setProject(project);
 
         // 4) Package results
         Map<String,Object> result = new HashMap<>();
-        result.put("matchingImage",        matchingImage);
+        result.put("matchingImage", matchingImage);
         result.put("imagingModeWithIndex", setup.imagingModeWithIndex);
         result.put("currentQuPathProject", project);
-        result.put("tempTileDirectory",    setup.tempTileDirectory);
+        result.put("tempTileDirectory", setup.tempTileDirectory);
+
+        logger.info("Project setup complete. Mode: {}, Tiles dir: {}",
+                setup.imagingModeWithIndex, setup.tempTileDirectory);
+
         return result;
+    }
+
+    /**
+     * Find an image in the project that matches the current ImageData.
+     * This checks multiple ways to match images.
+     */
+    private static ProjectImageEntry<BufferedImage> findImageInProject(
+            Project<BufferedImage> project,
+            ImageData<BufferedImage> imageData) {
+
+        if (project == null || imageData == null) {
+            return null;
+        }
+
+        // First, check if we can get the entry directly
+        try {
+            ProjectImageEntry<BufferedImage> entry = project.getEntry(imageData);
+            if (entry != null) {
+                logger.debug("Found image via direct project.getEntry()");
+                return entry;
+            }
+        } catch (Exception e) {
+            logger.debug("Could not find image via getEntry: {}", e.getMessage());
+        }
+
+        // Try to match by server path or URI
+        String serverPath = imageData.getServerPath();
+        if (serverPath != null) {
+            for (ProjectImageEntry<BufferedImage> entry : project.getImageList()) {
+                try {
+                    // Check if the URIs match
+                    if (entry.getURIs() != null && !entry.getURIs().isEmpty()) {
+                        for (URI uri : entry.getURIs()) {
+                            if (uri.toString().equals(serverPath) ||
+                                    serverPath.contains(uri.toString())) {
+                                logger.debug("Found image via URI match: {}", uri);
+                                return entry;
+                            }
+                        }
+                    }
+
+                    // Check by image name
+                    String imageName = new File(extractImagePath(imageData)).getName();
+                    if (imageName.equals(entry.getImageName())) {
+                        logger.debug("Found image via name match: {}", imageName);
+                        return entry;
+                    }
+                } catch (Exception e) {
+                    logger.debug("Error checking entry: {}", e.getMessage());
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Extract a file path from ImageData, handling various server path formats.
+     */
+    private static String extractImagePath(ImageData<BufferedImage> imageData) {
+        if (imageData == null) {
+            return null;
+        }
+
+        String serverPath = imageData.getServerPath();
+        if (serverPath == null) {
+            return null;
+        }
+
+        logger.debug("Extracting path from server path: {}", serverPath);
+
+        // Try multiple extraction methods
+
+        // 1. First try the existing MinorFunctions method
+        String path = MinorFunctions.extractFilePath(serverPath);
+        if (path != null && new File(path).exists()) {
+            logger.debug("Extracted via MinorFunctions: {}", path);
+            return path;
+        }
+
+        // 2. Try direct URI parsing
+        try {
+            URI uri = new URI(serverPath);
+            if ("file".equals(uri.getScheme())) {
+                File file = new File(uri);
+                if (file.exists()) {
+                    logger.debug("Extracted via URI: {}", file.getAbsolutePath());
+                    return file.getAbsolutePath();
+                }
+            }
+        } catch (URISyntaxException e) {
+            logger.debug("Not a valid URI: {}", serverPath);
+        }
+
+        // 3. Check if it's already a file path
+        File directFile = new File(serverPath);
+        if (directFile.exists()) {
+            logger.debug("Server path is already a file path: {}", serverPath);
+            return serverPath;
+        }
+
+        // 4. Try to get from the first URI in the image server
+        try {
+            ImageServer<BufferedImage> server = imageData.getServer();
+            if (server != null && server.getURIs() != null && !server.getURIs().isEmpty()) {
+                URI firstUri = server.getURIs().iterator().next();
+                if ("file".equals(firstUri.getScheme())) {
+                    File file = new File(firstUri);
+                    if (file.exists()) {
+                        logger.debug("Extracted from server URI: {}", file.getAbsolutePath());
+                        return file.getAbsolutePath();
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logger.debug("Could not extract from server URIs: {}", e.getMessage());
+        }
+
+        logger.warn("Could not extract valid file path from: {}", serverPath);
+        return null;
+    }
+
+    /**
+     * Import an image file to the project and open it in the GUI.
+     */
+    private static ProjectImageEntry<BufferedImage> importImageToProject(
+            QuPathGUI qupathGUI,
+            Project<BufferedImage> project,
+            File imageFile,
+            boolean flipX,
+            boolean flipY) throws IOException {
+
+        // Add image with flips
+        addImageToProject(imageFile, project, flipX, flipY);
+
+        // Find the newly added entry
+        String baseName = imageFile.getName();
+        ProjectImageEntry<BufferedImage> entry = project.getImageList().stream()
+                .filter(e -> baseName.equals(e.getImageName()))
+                .findFirst()
+                .orElse(null);
+
+        if (entry != null) {
+            // Open the image
+            qupathGUI.openImageEntry(entry);
+            qupathGUI.refreshProject();
+            logger.info("Opened image in GUI: {}", baseName);
+        } else {
+            logger.warn("Could not find newly added image in project: {}", baseName);
+        }
+
+        return entry;
     }
 
     /**
      * Build a unique subfolder for this sample + modality, and compute the
      * temp–tiles directory path.
-     *
-     * @param projectsFolderPath  Root folder under which all samples live.
-     * @param sampleLabel         Name of this sample (used as a subfolder).
-     * @param modality            Imaging mode name (e.g. "4x_bf") chosen by user.
-     * @return A small struct holding the chosen subfolder name and full tile path.
      */
     private static ProjectSetup prepareProjectFolders(
             String projectsFolderPath,
@@ -116,8 +287,7 @@ public class QPProjectFunctions {
 
         // e.g. "4x_bf" → "4x_bf_1", "4x_bf_2", ...
         String imagingModeWithIndex = MinorFunctions.getUniqueFolderName(
-                Paths.get(projectsFolderPath, sampleLabel, modality)
-                        .toString());
+                Paths.get(projectsFolderPath, sampleLabel, modality).toString());
 
         // full path: /…/projectsFolder/sampleLabel/4x_bf_1
         String tempTileDirectory = Paths.get(
@@ -129,135 +299,13 @@ public class QPProjectFunctions {
 
     /**
      * Create the .qpproj (or load it, if present).
-     * Returns the Project&lt;BufferedImage&gt; instance.
+     * Returns the Project<BufferedImage> instance.
      */
     private static Project<BufferedImage> createOrLoadProject(
             String projectsFolderPath,
             String sampleLabel) throws IOException {
         return createProject(projectsFolderPath, sampleLabel);
     }
-
-    /**
-     * If QuPath currently has an open image, imports it (with optional flips),
-     * then sets & opens it in the GUI.  Returns the matching entry or null.
-     */
-    private static ProjectImageEntry<BufferedImage> importCurrentImage(
-            QuPathGUI qupathGUI,
-            Project<BufferedImage> project,
-            boolean flipX,
-            boolean flipY) throws IOException {
-
-        if (QP.getCurrentImageData() == null) return null;
-
-        String serverPath     = QP.getCurrentImageData().getServerPath();
-        String imageFilePath  = MinorFunctions.extractFilePath(serverPath);
-        if (imageFilePath == null) return null;
-
-        // Import + flip
-        addImageToProject(new File(imageFilePath), project, flipX, flipY);
-        qupathGUI.setProject(project);
-
-        // Find the entry we just added
-        String baseName = new File(imageFilePath).getName();
-        return project.getImageList().stream()
-                .filter(e -> new File(e.getImageName()).getName().equals(baseName))
-                .findFirst()
-                .map(entry -> {
-                    qupathGUI.openImageEntry(entry);
-                    qupathGUI.refreshProject();
-                    return entry;
-                }).orElse(null);
-    }
-
-
-
-//    /**
-//     * Create a new QuPath project (or open an existing one) under
-//     *   &lt;projectsFolderPath&gt;/&lt;sampleLabel&gt;,
-//     * then—for the image currently open in QuPath—add it (with optional flips)
-//     * and open it in the GUI.
-//     *
-//     * <p><strong>Return map keys:</strong>
-//     * <ul>
-//     *   <li><strong>"matchingImage"</strong> → the {@code ProjectImageEntry} for the image you just added (or null)</li>
-//     *   <li><strong>"imagingModeWithIndex"</strong> → folder name (e.g. "4x_bf_1") for your next-stage tiles</li>
-//     *   <li><strong>"currentQuPathProject"</strong> → the loaded {@code Project<BufferedImage>}</li>
-//     *   <li><strong>"tempTileDirectory"</strong> → full path to &lt;sampleLabel&gt;/&lt;imagingModeWithIndex&gt;</li>
-//     * </ul>
-//     *
-//     * @param qupathGUI            the QuPath GUI instance (used to set/open the project)
-//     * @param projectsFolderPath   absolute path to your root "projects " folder
-//     * @param sampleLabel          name of the subfolder/project to create or open
-//     * @param preferences          the QuPath PreferenceSheet items (to read "First Scan Type ")
-//     * @param isSlideFlippedX      whether to horizontally flip the slide image on import
-//     * @param isSlideFlippedY      whether to vertically flip the slide image on import
-//     * @return a Map<String,Object> containing the keys described above
-//     * @throws IOException if anything goes wrong creating/loading the project folder
-//     */
-//    public static Map<String,Object> createAndOpenQuPathProject(
-//            QuPathGUI qupathGUI,
-//            String projectsFolderPath,
-//            String sampleLabel,
-//            ObservableList<PropertySheet.Item> preferences,
-//            boolean isSlideFlippedX,
-//            boolean isSlideFlippedY) throws IOException {
-//
-//        // 1) Read "First Scan Type " from the preferences list
-//        String firstImagingMode = preferences.stream()
-//                .filter(item -> "First Scan Type".equals(item.getName()))
-//                .findFirst()
-//                .map(item -> item.getValue().toString())
-//                .orElseThrow(() -> new IllegalArgumentException(
-//                        "Preference "First Scan Type " not found"));
-//
-//        // 2) Create (or load) the QuPath project under projectsFolderPath/sampleLabel
-//        Project<BufferedImage> project = QPProjectFunctions.createProjectFolder(
-//                projectsFolderPath, sampleLabel);
-//
-//        // 2a) Make a unique subfolder name for this imaging mode (e.g. "4x_bf_1 ")
-//        String imagingModeWithIndex = MinorFunctions.getUniqueFolderName(
-//                projectsFolderPath + File.separator + sampleLabel + File.separator + firstImagingMode);
-//
-//        // 2b) Build the temp tiles folder path
-//        String tempTileDirectory = projectsFolderPath
-//                + File.separator + sampleLabel
-//                + File.separator + imagingModeWithIndex;
-//
-//        // 3) If there’s a currently open image in QuPath, import it (with flips) and open its entry
-//        ProjectImageEntry<BufferedImage> matchingImage = null;
-//        if (QP.getCurrentImageData() != null) {
-//            String serverPath      = QP.getCurrentImageData().getServerPath();
-//            String macroImagePath  = MinorFunctions.extractFilePath(serverPath);
-//            if (macroImagePath != null) {
-//                // import into project
-//                QPProjectFunctions.addImageToProject(
-//                        new File(macroImagePath),
-//                        project, isSlideFlippedX, isSlideFlippedY);
-//
-//                // set & open in the GUI
-//                qupathGUI.setProject(project);
-//                List<ProjectImageEntry<BufferedImage>> entries = project.getImageList();
-//                File imageFile = new File(macroImagePath);
-//                matchingImage = entries.stream()
-//                        .filter(e -> new File(e.getImageName()).getName()
-//                                .equals(imageFile.getName()))
-//                        .findFirst().orElse(null);
-//
-//                if (matchingImage != null) {
-//                    qupathGUI.openImageEntry(matchingImage);
-//                }
-//                qupathGUI.refreshProject();
-//            }
-//        }
-//
-//        // 4) Package everything up
-//        Map<String,Object> result = new HashMap<>();
-//        result.put("matchingImage",        matchingImage);
-//        result.put("imagingModeWithIndex", imagingModeWithIndex);
-//        result.put("currentQuPathProject", project);
-//        result.put("tempTileDirectory",    tempTileDirectory);
-//        return result;
-//    }
 
     /**
      * Returns project info for an already open project.
@@ -292,6 +340,10 @@ public class QPProjectFunctions {
             logger.warn("Cannot add image: project is null");
             return false;
         }
+
+        logger.info("Adding image to project: {} (flipX={}, flipY={})",
+                imageFile.getName(), isSlideFlippedX, isSlideFlippedY);
+
         String imageUri = imageFile.toURI().toString();
         ImageServer<BufferedImage> original = ImageServers.buildServer(imageUri);
         AffineTransform transform = new AffineTransform();
@@ -315,6 +367,8 @@ public class QPProjectFunctions {
 
         project.syncChanges();
         entry.saveImageData(imageData);
+
+        logger.info("Successfully added image to project: {}", imageFile.getName());
         return true;
     }
 
@@ -322,23 +376,10 @@ public class QPProjectFunctions {
      * Creates (or loads) a QuPath project in the folder:
      *   {projectsFolderPath}/{sampleLabel}
      * and ensures a "SlideImages" subfolder exists.
-     * <p>
-     * - If no .qpproj file is found, a new Project<BufferedImage> is created.
-     * - If one or more .qpproj files are present, the first is loaded (with a warning if >1).
-     * - Any missing directories (root, sample, SlideImages) are created,
-     *   and any failure to do so pops up an error dialog and returns null.
-     *
-     * @param projectsFolderPath  Base directory under which all samples live.
-     * @param sampleLabel         Name of the sample (and hence of the subdirectory).
-     * @return                    A Project<BufferedImage> instance, or null if directory creation
-     *                            or project load/create fails.
      */
     public static Project<BufferedImage> createProject(String projectsFolderPath,
                                                        String sampleLabel) {
-        // Resolve the three directories we need:
-        //  1) rootPath
-        //  2) sampleDir (rootPath/sampleLabel)
-        //  3) slideImagesDir (sampleDir/SlideImages)
+        // Resolve the three directories we need
         Path rootPath        = Paths.get(projectsFolderPath);
         Path sampleDir       = rootPath.resolve(sampleLabel);
         Path slideImagesDir  = sampleDir.resolve("SlideImages");
@@ -362,10 +403,11 @@ public class QPProjectFunctions {
         try {
             if (qpprojFiles == null || qpprojFiles.length == 0) {
                 // No project exists yet → create a new one
+                logger.info("Creating new project in: {}", sampleDir);
                 project = Projects.createProject(sampleDir.toFile(), BufferedImage.class);
             } else {
                 if (qpprojFiles.length > 1) {
-                    // Warn if multiple projects found; we’ll load the first
+                    // Warn if multiple projects found; we'll load the first
                     Dialogs.showErrorNotification(
                             "Warning: Multiple project files",
                             "Found " + qpprojFiles.length + " .qpproj files in:\n  " +
@@ -373,6 +415,7 @@ public class QPProjectFunctions {
                     );
                 }
                 // Load the first existing project
+                logger.info("Loading existing project: {}", qpprojFiles[0].getName());
                 project = ProjectIO.loadProject(qpprojFiles[0], BufferedImage.class);
             }
         } catch (IOException e) {
@@ -384,12 +427,15 @@ public class QPProjectFunctions {
             return null;
         }
 
-      return project;
+        return project;
     }
 
     /** Saves the current ImageData into its ProjectImageEntry. */
     public static void saveCurrentImageData() throws IOException {
         ProjectImageEntry<BufferedImage> entry = QP.getProjectEntry();
-        entry.saveImageData(QP.getCurrentImageData());
+        if (entry != null && QP.getCurrentImageData() != null) {
+            entry.saveImageData(QP.getCurrentImageData());
+            logger.info("Saved current image data to project entry");
+        }
     }
 }
