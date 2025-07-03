@@ -1,6 +1,5 @@
 package qupath.ext.qpsc.service;
 
-
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -18,13 +17,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.io.*;
 import java.util.regex.Pattern;
+import java.util.regex.Matcher;
 import java.util.stream.Stream;
 
 import qupath.ext.qpsc.utilities.MinorFunctions;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.ui.UIFunctions;
-import qupath.ext.qpsc.utilities.MinorFunctions;
-
 
 /**
  * CliExecutor
@@ -34,10 +32,9 @@ import qupath.ext.qpsc.utilities.MinorFunctions;
  *   - Starts processes, applies timeouts, captures stdout/stderr.
  *   - Returns structured ExecResult for callers to inspect exit codes, output, or errors.
  */
-
-
 public class CliExecutor {
     private static final Logger logger = LoggerFactory.getLogger(CliExecutor.class.getName());
+
     /** Result of a CLI call. */
     public record ExecResult(
             int            exitCode,
@@ -55,21 +52,8 @@ public class CliExecutor {
     }
 
     /**
-     * Execute a CLI command (resolved against the user’s configured CLI folder),
+     * Execute a CLI command (resolved against the user's configured CLI folder),
      * wait up to the specified timeout, capture its standard output, and return it.
-     *
-     * <p>The first element of {@code args} is treated as the executable name
-     * (without ".exe "), which is looked up in the folder returned by
-     * {@link QPPreferenceDialog#getCliFolder()}.
-     * Any remaining elements of {@code args} are passed as command-line arguments.</p>
-     *
-     * @param timeoutSec Number of seconds to wait before forcibly killing the process;
-     *                   zero means wait indefinitely.
-     * @param args       Command name (first element, no extension) followed by any arguments to pass.
-     * @return the trimmed stdout of the process.
-     * @throws IOException          if an I/O error occurs, the process exits non-zero,
-     *                              or the process times out.
-     * @throws InterruptedException if the current thread is interrupted while waiting.
      */
     public static String execCommandAndGetOutput(int timeoutSec, String... args)
             throws IOException, InterruptedException {
@@ -86,7 +70,7 @@ public class CliExecutor {
             cmd.addAll(Arrays.asList(args).subList(1, args.length));
         }
 
-        // 3) Log exactly what we’re about to run
+        // 3) Log exactly what we're about to run
         logger.info("→ Running external command: {}  (resolved via {})", cmd, cliFolder);
 
         // 4) Start the process
@@ -117,37 +101,27 @@ public class CliExecutor {
     }
 
     /**
-     * Runs a CLI command with an inactivity timeout: if no matching stdout line (e.g., "tiles done")
-     * is seen for the specified time, the process is killed and returns timedOut=true.
-     * The inactivity timer is reset every time progress is made (i.e., the regex matches a line).
-     *
-     * @param inactivityTimeoutSec Timeout in seconds with no progress before killing process
-     * @param tilesDoneRegex   Regex to count progress (e.g., "tiles done"). Can be null.
-     * @param args             Command-line args after the executable.
-     * @return ExecResult containing exit code, timeout flag, and full stdout/stderr.
-     * @throws IOException          On I/O error.
-     * @throws InterruptedException If interrupted while waiting for the process to complete.
+     * Runs a CLI command with an inactivity timeout and optional progress monitoring.
      */
     public static ExecResult execComplexCommand(
             int inactivityTimeoutSec,
             String tilesDoneRegex,
             String... args) throws IOException, InterruptedException {
 
-        // ---- Build command (as before) ----
+        // ---- Build command ----
         String exeName = args[0] + (MinorFunctions.isWindows() ? ".exe" : "");
         String cliFolder = QPPreferenceDialog.getCliFolder();
         Path exePath = Path.of(cliFolder, exeName);
 
-        List<String> cmd = new java.util.ArrayList<>();
-
-        logger.info(String.valueOf(cmd));
+        List<String> cmd = new ArrayList<>();
         cmd.add(exePath.toString());
         if (args.length > 1) cmd.addAll(Arrays.asList(args).subList(1, args.length));
+
         logger.info("→ Running external command: {} (via folder: {})", cmd, cliFolder);
-        logger.info("cmd: " + cmd);
         for (int i = 0; i < cmd.size(); i++) {
-            logger.info("Arg " + i + ": " + cmd.get(i));
+            logger.info("Arg {}: {}", i, cmd.get(i));
         }
+
         // ---- Launch process ----
         ProcessBuilder pb = new ProcessBuilder(cmd);
         pb.environment().put("PYTHONUNBUFFERED", "1");
@@ -163,52 +137,152 @@ public class CliExecutor {
         AtomicInteger tifCounter = new AtomicInteger();
         logger.info("Created tifCounter with identity: {}", System.identityHashCode(tifCounter));
 
-// Around line 160, make totalTifs final
         Pattern tilesPat = tilesDoneRegex == null ? null : Pattern.compile(tilesDoneRegex);
-        final int totalTifs; // Make it final
+        int totalTifs = 0;
         UIFunctions.ProgressHandle progressHandle = null;
+
         // --- Inactivity timer ---
         AtomicLong lastProgressTime = new AtomicLong(System.currentTimeMillis());
         AtomicBoolean timedOut = new AtomicBoolean(false);
-// Set up file-based progress monitoring
-// Set up file-based progress monitoring
-        if (args.length > 5) {  // Ensure we have enough arguments for the path
-            Path tileDir = Paths.get(args[2], args[3], args[4], args[5]);
 
-            int baseTifs = MinorFunctions.countTifEntriesInTileConfig(List.of(tileDir.toString()));
-            logger.info("Monitoring directory for TIF files: {}", tileDir);
+        // Set up file-based progress monitoring
+        Path baseDir = null;
+        Set<Path> tileDirs = new HashSet<>();
 
-            // Check if angles are provided (last argument contains angle values)
-            int angleMultiplier = 1;
-            if (args.length > 6) {
-                String lastArg = args[args.length - 1];
-                // Check if it looks like angle arguments (contains numbers with possible negative signs)
-                if (lastArg.matches(".*[-]?\\d+.*")) {
-                    // Count the number of angles by splitting on spaces
-                    String[] angleParts = lastArg.trim().split("\\s+");
-                    angleMultiplier = angleParts.length;
-                    logger.info("PPM acquisition detected with {} angles: {}", angleMultiplier, lastArg);
-                }
+        if (args.length >= 6) {  // We have enough args to construct a path
+            baseDir = Paths.get(args[2], args[3], args[4]); // projects/sample/mode
+            logger.info("Base directory for monitoring: {}", baseDir);
+
+            // Check for PPM angles in the arguments
+            List<Double> angles = extractAngles(args);
+            int angleCount = angles.isEmpty() ? 1 : angles.size();
+
+            // For bounds workflow
+            if ("bounds".equals(args[5])) {
+                Path boundsDir = baseDir.resolve("bounds");
+                tileDirs.add(boundsDir);
+
+                // Count expected tiles from TileConfiguration
+                int baseTiles = MinorFunctions.countTifEntriesInTileConfig(List.of(boundsDir.toString()));
+                totalTifs = baseTiles * angleCount;
+
+                logger.info("Bounds workflow: monitoring {} for {} base tiles × {} angles = {} total files",
+                        boundsDir, baseTiles, angleCount, totalTifs);
+            } else {
+                // For annotation workflow, args[5] is the annotation name
+                Path annotationDir = baseDir.resolve(args[5]);
+                tileDirs.add(annotationDir);
+
+                int baseTiles = MinorFunctions.countTifEntriesInTileConfig(List.of(annotationDir.toString()));
+                totalTifs = baseTiles * angleCount;
+
+                logger.info("Annotation workflow: monitoring {} for {} base tiles × {} angles = {} total files",
+                        annotationDir, baseTiles, angleCount, totalTifs);
             }
 
-            // Multiply expected tiles by number of angles
-            totalTifs = baseTifs * angleMultiplier;
-            logger.info("Expected TIF files: {} (base tiles: {}, angles: {})",
-                    totalTifs, totalTifs / angleMultiplier, angleMultiplier);
-
-
+            // Start progress bar if we have tiles to monitor
             if (totalTifs > 0) {
-                // The existing AtomicLong lastProgressTime is already defined on line 178
-                progressHandle = UIFunctions.showProgressBarAsync(tifCounter, totalTifs, process, 20000);
-                logger.info("Passed tifCounter (identity: {}) to progress bar", System.identityHashCode(tifCounter));
+                progressHandle = UIFunctions.showProgressBarAsync(tifCounter, totalTifs, process,
+                        inactivityTimeoutSec * 1000);
+                logger.info("Started progress bar for {} expected tiles", totalTifs);
 
-                // Continue with the rest of the file monitoring setup...
-                // [rest of the existing code continues here]
+// Create monitoring thread
+                final Set<Path> finalTileDirs = new HashSet<>(tileDirs);
+                final int expectedFiles = totalTifs;
+
+                Thread fileMonitor = new Thread(() -> {
+                    Set<String> seenFiles = new HashSet<>();
+                    logger.info("File monitor thread started");
+                    logger.info("  - Watching directories: {}", finalTileDirs);
+                    logger.info("  - Expecting {} total TIF files", expectedFiles);
+                    logger.info("  - Using tifCounter with identity: {}", System.identityHashCode(tifCounter));
+
+                    // First, verify the directories exist
+                    for (Path dir : finalTileDirs) {
+                        if (Files.exists(dir)) {
+                            logger.info("  - Directory EXISTS: {}", dir);
+                            // List immediate contents
+                            try {
+                                logger.info("  - Contents of {}: ", dir);
+                                Files.list(dir).limit(10).forEach(p ->
+                                        logger.info("    - {}", p.getFileName()));
+                            } catch (IOException e) {
+                                logger.error("Failed to list directory contents", e);
+                            }
+                        } else {
+                            logger.warn("  - Directory MISSING: {}", dir);
+                        }
+                    }
+
+                    int checkCount = 0;
+                    while (seenFiles.size() < expectedFiles) {
+                        try {
+                            checkCount++;
+
+                            // Check all monitored directories
+                            for (Path monitorDir : finalTileDirs) {
+                                if (Files.exists(monitorDir)) {
+                                    List<Path> tifFiles = new ArrayList<>();
+                                    try (Stream<Path> files = Files.walk(monitorDir)) {
+                                        files.filter(p -> {
+                                            String name = p.getFileName().toString().toLowerCase();
+                                            return name.endsWith(".tif") || name.endsWith(".tiff");
+                                        }).forEach(tifFiles::add);
+                                    }
+
+                                    // Log what we found on first check and periodically
+                                    if (checkCount == 1 || checkCount % 40 == 0) {
+                                        logger.info("Check #{} - Found {} TIF files in {}",
+                                                checkCount, tifFiles.size(), monitorDir);
+                                    }
+
+                                    // Process new files
+                                    for (Path p : tifFiles) {
+                                        String filePath = p.toString();
+                                        if (!seenFiles.contains(filePath)) {
+                                            seenFiles.add(filePath);
+                                            int oldCount = tifCounter.get();
+                                            int newCount = tifCounter.incrementAndGet();
+                                            lastProgressTime.set(System.currentTimeMillis());
+                                            logger.info("NEW TIF DETECTED: {}", p.getFileName());
+                                            logger.info("  - Counter incremented from {} to {}", oldCount, newCount);
+                                            logger.info("  - Total found so far: {}/{}", newCount, expectedFiles);
+                                        }
+                                    }
+                                } else if (checkCount == 1 || checkCount % 40 == 0) {
+                                    logger.warn("Directory still missing on check #{}: {}", checkCount, monitorDir);
+                                }
+                            }
+
+                            // Log periodic status
+                            if (checkCount % 40 == 0) { // Every 10 seconds
+                                logger.info("=== File Monitor Status ===");
+                                logger.info("  Checks performed: {}", checkCount);
+                                logger.info("  Files found: {}/{}", seenFiles.size(), expectedFiles);
+                                logger.info("  Counter value: {}", tifCounter.get());
+                                logger.info("  Process alive: {}", process.isAlive());
+                                logger.info("==========================");
+                            }
+
+                            // Check if we should stop
+                            if (!process.isAlive() && seenFiles.size() >= expectedFiles) {
+                                logger.info("Process ended and all files found, stopping monitor");
+                                break;
+                            }
+
+                            Thread.sleep(250); // Check every 250ms
+                        } catch (Exception e) {
+                            logger.error("File monitor error", e);
+                        }
+                    }
+
+                    logger.info("File monitor thread ending - found {}/{} files",
+                            seenFiles.size(), expectedFiles);
+                }, "TIF-File-Monitor");
+                fileMonitor.setDaemon(true);
+                fileMonitor.start();
             }
-        } else {
-            totalTifs = 0; // Default value when not monitoring files
         }
-
 
         // ---- Output Thread ----
         Thread tOut = new Thread(() -> {
@@ -216,25 +290,32 @@ public class CliExecutor {
                 String line;
                 while ((line = outR.readLine()) != null) {
                     out.append(line).append('\n');
-                    logger.debug("CLI output line: {}", line);
-                    //This section was used prior to directly checking for the existence of .tif files
+                    logger.debug("CLI stdout: {}", line);
+
+                    // Check for progress pattern in output
+                    //commented out for double counting
 //                    if (tilesPat != null && tilesPat.matcher(line).find()) {
-//                        tifCounter.incrementAndGet();
+//                        int count = tifCounter.incrementAndGet();
 //                        lastProgressTime.set(System.currentTimeMillis());
-//                        logger.debug("Progress incremented to: {}", tifCounter.get()); // ADD THIS
+//                        logger.debug("Progress from stdout regex: {}", count);
 //                    }
-                    // To reset timer on *any* output, uncomment the following line:
-                    // else lastProgressTime.set(System.currentTimeMillis());
+
+                    // Reset timer on any output to prevent premature timeout
+                    lastProgressTime.set(System.currentTimeMillis());
                 }
             } catch (IOException ignored) { }
         });
+
         Thread tErr = new Thread(() -> {
             try {
                 String line;
-                while ((line = errR.readLine()) != null)
+                while ((line = errR.readLine()) != null) {
                     err.append(line).append('\n');
+                    logger.debug("CLI stderr: {}", line);
+                }
             } catch (IOException ignored) { }
         });
+
         tOut.start();
         tErr.start();
 
@@ -244,7 +325,9 @@ public class CliExecutor {
                 while (process.isAlive()) {
                     long now = System.currentTimeMillis();
                     long idle = (now - lastProgressTime.get()) / 1000L;
+
                     if (idle > inactivityTimeoutSec) {
+                        logger.warn("Process inactive for {} seconds, killing...", idle);
                         timedOut.set(true);
                         process.destroyForcibly();
                         err.append("Process killed after inactivity timeout of ")
@@ -264,10 +347,53 @@ public class CliExecutor {
         tErr.join();
         timeoutThread.join(100);
 
-        if (progressHandle != null) progressHandle.close();
+        if (progressHandle != null) {
+            logger.info("Closing progress bar handle");
+            progressHandle.close();
+        }
 
         return new ExecResult(process.exitValue(), timedOut.get(), out, err);
     }
 
+    /**
+     * Extract angle values from command arguments.
+     * Looks for --angles parameter or parenthesized angle list.
+     */
+    private static List<Double> extractAngles(String[] args) {
+        List<Double> angles = new ArrayList<>();
 
+        for (int i = 0; i < args.length; i++) {
+            // Check for --angles parameter
+            if ("--angles".equals(args[i]) && i + 1 < args.length) {
+                // Parse space-separated angles
+                String[] angleStrs = args[i + 1].split("\\s+");
+                for (String angleStr : angleStrs) {
+                    try {
+                        angles.add(Double.parseDouble(angleStr));
+                    } catch (NumberFormatException e) {
+                        logger.debug("Could not parse angle: {}", angleStr);
+                    }
+                }
+            }
+
+            // Check for parenthesized format like "(90.0)"
+            if (args[i].matches("\\(.*\\)")) {
+                String angleList = args[i].replaceAll("[()]", "");
+                String[] angleStrs = angleList.split("\\s+");
+                for (String angleStr : angleStrs) {
+                    try {
+                        angles.add(Double.parseDouble(angleStr));
+                    } catch (NumberFormatException e) {
+                        logger.debug("Could not parse angle from parentheses: {}", angleStr);
+                    }
+                }
+            }
+        }
+
+        if (!angles.isEmpty()) {
+            logger.info("Detected {} rotation angles: {}", angles.size(), angles);
+        }
+
+        return angles;
+    }
 }

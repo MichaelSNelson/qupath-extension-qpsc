@@ -1,6 +1,7 @@
 package qupath.ext.qpsc.ui;
 
 import javafx.animation.KeyFrame;
+import javafx.animation.PauseTransition;
 import javafx.animation.Timeline;
 import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
@@ -84,13 +85,17 @@ public class UIFunctions {
     }
     /**
      * Show a progress bar that watches an AtomicInteger and updates itself periodically.
+     * The progress bar will stay open until either:
+     * - All expected files are found (progress reaches 100%)
+     * - The timeout is reached with no progress
+     * - It is explicitly closed via the returned handle
+     *
      * @param progressCounter Thread-safe counter (incremented externally as work completes).
      * @param totalFiles      The max value of progressCounter.
-     * @param process         The background Process to watch for liveness.
+     * @param process         The background Process to watch for liveness (can be null).
      * @param timeoutMs       If no progress for this many ms, bar will auto-terminate.
-     * @return a ProgressHandle you can .close() when you’re done (or ignore if you let it timeout).
+     * @return a ProgressHandle you can .close() when you're done.
      */
-
     public static ProgressHandle showProgressBarAsync(
             AtomicInteger progressCounter,
             int totalFiles,
@@ -100,13 +105,15 @@ public class UIFunctions {
         final ProgressHandle[] handleHolder = new ProgressHandle[1];
 
         Platform.runLater(() -> {
-            logger.info("Creating progress bar UI on FX thread.");
+            logger.info("Creating progress bar UI on FX thread for {} total files", totalFiles);
             Stage stage = new Stage();
             ProgressBar progressBar = new ProgressBar(0);
             progressBar.setPrefWidth(300);
             Label timeLabel = new Label("Estimating time…");
             Label progressLabel = new Label("Processed 0 of " + totalFiles);
-            VBox vbox = new VBox(10, progressBar, timeLabel, progressLabel);
+            Label statusLabel = new Label("Monitoring file creation...");
+
+            VBox vbox = new VBox(10, progressBar, progressLabel, timeLabel, statusLabel);
             vbox.setStyle("-fx-padding: 10;");
 
             stage.initModality(Modality.NONE);
@@ -117,64 +124,110 @@ public class UIFunctions {
 
             // Shared timing state
             AtomicLong startTime = new AtomicLong(0);
-            AtomicLong lastUpdateTime = new AtomicLong(System.currentTimeMillis());
+            AtomicLong lastProgressTime = new AtomicLong(System.currentTimeMillis());
+            AtomicInteger lastSeenProgress = new AtomicInteger(0);
 
             // Build the Timeline
             final Timeline timeline = new Timeline();
-            KeyFrame keyFrame = new KeyFrame(Duration.millis(200), evt -> {
+            KeyFrame keyFrame = new KeyFrame(Duration.millis(500), evt -> {
                 int current = progressCounter.get();
                 long now = System.currentTimeMillis();
-                logger.debug("Progress bar update: current={}, total={}, process alive={}",
-                        current, totalFiles, process.isAlive());
+
+                // Log every 10th check to avoid spam
+                if (evt.getSource() instanceof Timeline) {
+                    Timeline tl = (Timeline) evt.getSource();
+                    if (tl.getCycleCount() % 10 == 0) {
+                        logger.debug("Progress bar reading counter (id: {}): value = {}",
+                                System.identityHashCode(progressCounter), current);
+                    }
+                }
+
+                // Log progress updates
+                if (current != lastSeenProgress.get()) {
+                    logger.info("PROGRESS UPDATE: {} of {} files", current, totalFiles);
+                    lastSeenProgress.set(current);
+                    lastProgressTime.set(now);
+                }
+
                 // Record start time once work begins
                 if (current > 0 && startTime.get() == 0) {
                     startTime.set(now);
                 }
 
-                // Update fraction & labels
+                // Update UI
                 double fraction = totalFiles > 0 ? current / (double) totalFiles : 0.0;
                 progressBar.setProgress(fraction);
                 progressLabel.setText("Processed " + current + " of " + totalFiles);
 
-                if (startTime.get() > 0 && current > 0) {
+                // Update status based on process state
+                if (process != null && !process.isAlive()) {
+                    statusLabel.setText("Acquisition complete, waiting for files...");
+                }
+
+                // Calculate time estimate
+                if (startTime.get() > 0 && current > 0 && current < totalFiles) {
                     long elapsed = now - startTime.get();
                     long remMs = (long) ((elapsed / (double) current) * (totalFiles - current));
                     timeLabel.setText("Remaining: " + (remMs / 1000) + " s");
+                } else if (current >= totalFiles) {
+                    timeLabel.setText("Complete!");
+                    statusLabel.setText("All files detected");
                 }
 
-                // Check for stall or completion
-                boolean stalled = (!process.isAlive())
-                        || (current == lastUpdateTime.get() && now - lastUpdateTime.get() > timeoutMs);
+                // Check completion conditions
+                boolean complete = (current >= totalFiles);
+                boolean stalled = false;
 
-                if (fraction >= 1.0 || stalled) {
-                    logger.info("Progress bar closing (fraction={}, stalled={}, current={}, total={})", fraction, stalled, current, totalFiles);
+                // Only check for stall if we haven't made progress in a while
+                // AND we haven't reached completion
+                if (!complete && current > 0) {
+                    long timeSinceProgress = now - lastProgressTime.get();
+                    stalled = timeSinceProgress > timeoutMs;
+
+                    if (stalled) {
+                        logger.warn("Progress stalled: no new files for {} ms (current: {}, total: {})",
+                                timeSinceProgress, current, totalFiles);
+                        statusLabel.setText("Timeout - no new files detected");
+                        statusLabel.setTextFill(Color.RED);
+                    }
+                }
+
+                // Close only when complete or truly stalled
+                if (complete || stalled) {
+                    logger.info("Progress bar closing - complete: {}, stalled: {}, files: {}/{}",
+                            complete, stalled, current, totalFiles);
                     timeline.stop();
-                    stage.close();
-                } else {
-                    lastUpdateTime.set(now);
+
+                    // Show final status for a moment before closing
+                    if (complete) {
+                        PauseTransition pause = new PauseTransition(Duration.seconds(1));
+                        pause.setOnFinished(e -> stage.close());
+                        pause.play();
+                    } else {
+                        stage.close();
+                    }
                 }
             });
             timeline.getKeyFrames().add(keyFrame);
             timeline.setCycleCount(Timeline.INDEFINITE);
 
-            // Store the ProgressHandle so we can return it below
+            // Store the ProgressHandle
             handleHolder[0] = new ProgressHandle(stage, timeline);
 
-            logger.info("Starting progress Timeline on FX thread.");
+            logger.info("Starting progress Timeline on FX thread");
             timeline.play();
         });
 
-        // Wait for handle to be set before returning (avoid NPE)
+        // Wait for handle to be set before returning
         while (handleHolder[0] == null) {
             try {
                 Thread.sleep(10);
             } catch (InterruptedException ignored) {}
         }
-        logger.info("ProgressHandle returned to caller.");
+
+        logger.info("Progress bar initialized for {} files with {} ms timeout", totalFiles, timeoutMs);
         return handleHolder[0];
     }
-
-
 
 
     /**
