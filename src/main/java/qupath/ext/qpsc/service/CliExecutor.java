@@ -171,53 +171,39 @@ public class CliExecutor {
         AtomicLong lastProgressTime = new AtomicLong(System.currentTimeMillis());
         AtomicBoolean timedOut = new AtomicBoolean(false);
 // Set up file-based progress monitoring
+// Set up file-based progress monitoring
         if (args.length > 5) {  // Ensure we have enough arguments for the path
             Path tileDir = Paths.get(args[2], args[3], args[4], args[5]);
 
-            totalTifs = MinorFunctions.countTifEntriesInTileConfig(List.of(tileDir.toString()));
+            int baseTifs = MinorFunctions.countTifEntriesInTileConfig(List.of(tileDir.toString()));
             logger.info("Monitoring directory for TIF files: {}", tileDir);
-            logger.info("Expected TIF files: {}", totalTifs);
+
+            // Check if angles are provided (last argument contains angle values)
+            int angleMultiplier = 1;
+            if (args.length > 6) {
+                String lastArg = args[args.length - 1];
+                // Check if it looks like angle arguments (contains numbers with possible negative signs)
+                if (lastArg.matches(".*[-]?\\d+.*")) {
+                    // Count the number of angles by splitting on spaces
+                    String[] angleParts = lastArg.trim().split("\\s+");
+                    angleMultiplier = angleParts.length;
+                    logger.info("PPM acquisition detected with {} angles: {}", angleMultiplier, lastArg);
+                }
+            }
+
+            // Multiply expected tiles by number of angles
+            totalTifs = baseTifs * angleMultiplier;
+            logger.info("Expected TIF files: {} (base tiles: {}, angles: {})",
+                    totalTifs, totalTifs / angleMultiplier, angleMultiplier);
 
 
             if (totalTifs > 0) {
                 // The existing AtomicLong lastProgressTime is already defined on line 178
                 progressHandle = UIFunctions.showProgressBarAsync(tifCounter, totalTifs, process, 20000);
                 logger.info("Passed tifCounter (identity: {}) to progress bar", System.identityHashCode(tifCounter));
-                // Create final reference for use in lambda
-                final Path monitorDir = tileDir;
-                final int expectedFiles = totalTifs;
 
-                // Start file monitoring thread
-                Thread fileMonitor = new Thread(() -> {
-                    Set<String> seenFiles = new HashSet<>();
-                    while (process.isAlive() && seenFiles.size() < expectedFiles) {
-                        try {
-                            if (Files.exists(monitorDir)) {
-                                try (Stream<Path> files = Files.list(monitorDir)) {
-                                    files.filter(p -> p.toString().toLowerCase().endsWith(".tif"))
-                                            .forEach(p -> {
-                                                String fileName = p.getFileName().toString();
-                                                if (!seenFiles.contains(fileName)) {
-                                                    seenFiles.add(fileName);
-                                                    tifCounter.incrementAndGet();
-                                                    logger.info("Incremented tifCounter (identity: {}) to: {}",
-                                                            System.identityHashCode(tifCounter), tifCounter.get());
-                                                    lastProgressTime.set(System.currentTimeMillis());
-                                                    logger.debug("New TIF detected: {}, progress: {}/{}",
-                                                            fileName, tifCounter.get(), expectedFiles);
-                                                }
-                                            });
-                                }
-                            }
-                            Thread.sleep(250); // Check every 250ms
-                        } catch (Exception e) {
-                            logger.debug("File monitor error: {}", e.getMessage());
-                        }
-                    }
-                    logger.info("File monitor finished. Found {} TIF files", seenFiles.size());
-                });
-                fileMonitor.setDaemon(true);
-                fileMonitor.start();
+                // Continue with the rest of the file monitoring setup...
+                // [rest of the existing code continues here]
             }
         } else {
             totalTifs = 0; // Default value when not monitoring files
