@@ -35,7 +35,10 @@ public class MacroImageAnalyzer {
         MEAN("Mean threshold"),
         PERCENTILE("Percentile-based"),
         FIXED("Fixed value"),
-        IJ_AUTO("ImageJ Auto threshold");
+        IJ_AUTO("ImageJ Auto threshold"),
+        HE_EOSIN("H&E Eosin detection"),
+        HE_DUAL("H&E Dual threshold"),
+        COLOR_DECONVOLUTION("Color deconvolution");
 
         private final String description;
 
@@ -112,15 +115,67 @@ public class MacroImageAnalyzer {
         ImageServer<?> server = imageData.getServer();
 
         // Check for associated macro image
-        if (!server.getAssociatedImageList().contains("macro")) {
-            logger.warn("No macro image found in the current image");
+        var associatedList = server.getAssociatedImageList();
+        logger.info("Available associated images: {}", associatedList);
+
+        String macroKey = null;
+        String macroName = null;
+
+        // Find which entry contains "macro"
+        for (String name : associatedList) {
+            if (name.toLowerCase().contains("macro")) {
+                macroName = name;
+                break;
+            }
+        }
+
+        if (macroName == null) {
+            logger.warn("No macro image found in the associated images list");
             return null;
         }
 
-        // Extract macro image
-        BufferedImage macro = (BufferedImage) server.getAssociatedImage("macro");
+        logger.info("Found macro image entry: '{}'", macroName);
+
+        // For BioFormats server, we might need to try different approaches
+        BufferedImage macro = null;
+
+        try {
+            // First, try the full name as shown in the list
+            logger.debug("Trying full name: '{}'", macroName);
+            macro = (BufferedImage) server.getAssociatedImage(macroName);
+        } catch (Exception e) {
+            logger.debug("Full name failed: {}", e.getMessage());
+        }
+
+        if (macro == null && macroName.startsWith("Series ")) {
+            try {
+                // Try just the series part without description
+                String seriesKey = macroName.split("\\s*\\(")[0].trim();
+                logger.debug("Trying series key: '{}'", seriesKey);
+                macro = (BufferedImage) server.getAssociatedImage(seriesKey);
+            } catch (Exception e) {
+                logger.debug("Series key failed: {}", e.getMessage());
+            }
+        }
+
         if (macro == null) {
-            logger.error("Failed to extract macro image");
+            try {
+                // Try just "macro" as a last resort
+                logger.debug("Trying simple 'macro' key");
+                macro = (BufferedImage) server.getAssociatedImage("macro");
+            } catch (Exception e) {
+                logger.debug("Simple 'macro' failed: {}", e.getMessage());
+            }
+        }
+
+        // If still null, let's try to understand what keys the server expects
+        if (macro == null) {
+            logger.error("Failed to extract macro image. Server class: {}", server.getClass().getName());
+            logger.error("Tried keys: '{}', series extract, and 'macro'", macroName);
+
+            // Debug what's happening
+            debugBioFormatsAssociatedImages(server);
+
             return null;
         }
 
@@ -133,7 +188,15 @@ public class MacroImageAnalyzer {
 
         // Apply thresholding
         int threshold = calculateThreshold(macro, method, params);
-        BufferedImage thresholded = applyThreshold(macro, threshold);
+        BufferedImage thresholded = null;
+
+        // For H&E methods, we need special handling
+        if (method == ThresholdMethod.HE_EOSIN || method == ThresholdMethod.HE_DUAL ||
+                method == ThresholdMethod.COLOR_DECONVOLUTION) {
+            thresholded = applyColorThreshold(macro, method, params);
+        } else {
+            thresholded = applyThreshold(macro, threshold);
+        }
 
         // Find tissue regions
         List<ROI> regions = findTissueRegions(thresholded);
@@ -145,7 +208,6 @@ public class MacroImageAnalyzer {
 
         return new MacroAnalysisResult(macro, thresholded, bounds, regions,
                 scaleX, scaleY, threshold);
-
     }
 
     /**
@@ -180,6 +242,10 @@ public class MacroImageAnalyzer {
                 // Could integrate with ImageJ here
                 logger.warn("ImageJ auto threshold not implemented, using Otsu");
                 yield calculateOtsuThreshold(histogram);
+            }
+            case HE_EOSIN, HE_DUAL, COLOR_DECONVOLUTION -> {
+                // These are handled separately in applyColorThreshold
+                yield 0;
             }
         };
     }
@@ -291,6 +357,151 @@ public class MacroImageAnalyzer {
         }
 
         return binary;
+    }
+
+    /**
+     * Applies color-based thresholding for H&E stained images.
+     */
+    private static BufferedImage applyColorThreshold(BufferedImage image,
+                                                     ThresholdMethod method,
+                                                     Map<String, Object> params) {
+        BufferedImage binary = new BufferedImage(image.getWidth(), image.getHeight(),
+                BufferedImage.TYPE_BYTE_BINARY);
+
+        // Get threshold parameters
+        double eosinThreshold = (Double) params.getOrDefault("eosinThreshold", 0.15);
+        double hematoxylinThreshold = (Double) params.getOrDefault("hematoxylinThreshold", 0.15);
+        double saturationThreshold = (Double) params.getOrDefault("saturationThreshold", 0.1);
+        double brightnessMin = (Double) params.getOrDefault("brightnessMin", 0.2);
+        double brightnessMax = (Double) params.getOrDefault("brightnessMax", 0.95);
+
+        for (int y = 0; y < image.getHeight(); y++) {
+            for (int x = 0; x < image.getWidth(); x++) {
+                int rgb = image.getRGB(x, y);
+
+                boolean isTissue = false;
+
+                switch (method) {
+                    case HE_EOSIN -> {
+                        // Detect pink/red eosin stain
+                        isTissue = detectEosin(rgb, eosinThreshold, saturationThreshold,
+                                brightnessMin, brightnessMax);
+                    }
+                    case HE_DUAL -> {
+                        // Detect both eosin (pink) and hematoxylin (purple/blue)
+                        isTissue = detectEosin(rgb, eosinThreshold, saturationThreshold,
+                                brightnessMin, brightnessMax) ||
+                                detectHematoxylin(rgb, hematoxylinThreshold, saturationThreshold,
+                                        brightnessMin, brightnessMax);
+                    }
+                    case COLOR_DECONVOLUTION -> {
+                        // Simple color deconvolution for H&E
+                        isTissue = detectByColorDeconvolution(rgb, brightnessMin, brightnessMax);
+                    }
+                }
+
+                int newPixel = isTissue ? 0x000000 : 0xFFFFFF;
+                binary.setRGB(x, y, newPixel);
+            }
+        }
+
+        return binary;
+    }
+
+    /**
+     * Detects eosin (pink/red) staining in H&E images.
+     */
+    private static boolean detectEosin(int rgb, double threshold, double saturationMin,
+                                       double brightnessMin, double brightnessMax) {
+        int r = (rgb >> 16) & 0xFF;
+        int g = (rgb >> 8) & 0xFF;
+        int b = rgb & 0xFF;
+
+        // Convert to normalized values
+        double rNorm = r / 255.0;
+        double gNorm = g / 255.0;
+        double bNorm = b / 255.0;
+
+        // Calculate HSB values
+        float[] hsb = Color.RGBtoHSB(r, g, b, null);
+        float hue = hsb[0];
+        float saturation = hsb[1];
+        float brightness = hsb[2];
+
+        // Eosin is pink/red: hue around 0-20 or 340-360 degrees
+        boolean isEosinHue = (hue < 0.055 || hue > 0.944);  // Convert degrees to 0-1 range
+
+        // Also check if red channel is dominant
+        boolean redDominant = rNorm > gNorm && rNorm > bNorm && (rNorm - bNorm) > threshold;
+
+        // Check saturation and brightness
+        boolean goodSaturation = saturation > saturationMin;
+        boolean goodBrightness = brightness > brightnessMin && brightness < brightnessMax;
+
+        return (isEosinHue || redDominant) && goodSaturation && goodBrightness;
+    }
+
+    /**
+     * Detects hematoxylin (purple/blue) staining in H&E images.
+     */
+    private static boolean detectHematoxylin(int rgb, double threshold, double saturationMin,
+                                             double brightnessMin, double brightnessMax) {
+        int r = (rgb >> 16) & 0xFF;
+        int g = (rgb >> 8) & 0xFF;
+        int b = rgb & 0xFF;
+
+        // Convert to normalized values
+        double rNorm = r / 255.0;
+        double gNorm = g / 255.0;
+        double bNorm = b / 255.0;
+
+        // Calculate HSB values
+        float[] hsb = Color.RGBtoHSB(r, g, b, null);
+        float hue = hsb[0];
+        float saturation = hsb[1];
+        float brightness = hsb[2];
+
+        // Hematoxylin is purple/blue: hue around 240-280 degrees
+        boolean isHematoxylinHue = (hue > 0.667 && hue < 0.778);
+
+        // Also check if blue channel is relatively strong
+        boolean blueDominant = bNorm > threshold && bNorm >= rNorm * 0.8;
+
+        // Check saturation and brightness
+        boolean goodSaturation = saturation > saturationMin;
+        boolean goodBrightness = brightness > brightnessMin && brightness < brightnessMax;
+
+        return (isHematoxylinHue || blueDominant) && goodSaturation && goodBrightness;
+    }
+
+    /**
+     * Simple color deconvolution approach for H&E detection.
+     * This is a simplified version - full color deconvolution would use stain vectors.
+     */
+    private static boolean detectByColorDeconvolution(int rgb, double brightnessMin, double brightnessMax) {
+        int r = (rgb >> 16) & 0xFF;
+        int g = (rgb >> 8) & 0xFF;
+        int b = rgb & 0xFF;
+
+        // Simple approach: detect non-white areas with color
+        double brightness = (r + g + b) / (3.0 * 255.0);
+
+        // Check if it's not too bright (white background) or too dark
+        if (brightness < brightnessMin || brightness > brightnessMax) {
+            return false;
+        }
+
+        // Check if there's significant color (not gray)
+        double rNorm = r / 255.0;
+        double gNorm = g / 255.0;
+        double bNorm = b / 255.0;
+
+        double maxChannel = Math.max(Math.max(rNorm, gNorm), bNorm);
+        double minChannel = Math.min(Math.min(rNorm, gNorm), bNorm);
+        double colorfulness = maxChannel - minChannel;
+
+        // If there's significant color variation, it's likely stained tissue
+        return colorfulness > 0.1;
     }
 
     /**
@@ -421,5 +632,77 @@ public class MacroImageAnalyzer {
         ImageIO.write(overlay, "png", new File(dir, "macro_bounds.png"));
 
         logger.info("Saved analysis images to {}", outputPath);
+    }
+
+    /**
+     * Debug helper to understand BioFormats associated image naming.
+     * Call this to see what's actually happening with the server.
+     */
+    private static void debugBioFormatsAssociatedImages(ImageServer<?> server) {
+        logger.info("=== BioFormats Associated Images Debug ===");
+        logger.info("Server class: {}", server.getClass().getName());
+
+        var list = server.getAssociatedImageList();
+        logger.info("Associated image list: {}", list);
+
+        // Try each name in the list
+        for (String name : list) {
+            logger.info("Testing key: '{}'", name);
+
+            // Try exact name
+            try {
+                BufferedImage img = (BufferedImage) server.getAssociatedImage(name);
+                if (img != null) {
+                    logger.info("  SUCCESS with exact name: {} ({}x{})",
+                            name, img.getWidth(), img.getHeight());
+                }
+            } catch (Exception e) {
+                logger.info("  FAILED with exact name: {}", e.getMessage());
+            }
+
+            // If it's a Series format, try variations
+            if (name.startsWith("Series ")) {
+                // Try without parentheses
+                String seriesOnly = name.split("\\s*\\(")[0].trim();
+                if (!seriesOnly.equals(name)) {
+                    try {
+                        BufferedImage img = (BufferedImage) server.getAssociatedImage(seriesOnly);
+                        if (img != null) {
+                            logger.info("  SUCCESS with series only: {} ({}x{})",
+                                    seriesOnly, img.getWidth(), img.getHeight());
+                        }
+                    } catch (Exception e) {
+                        logger.info("  FAILED with series only: {}", e.getMessage());
+                    }
+                }
+
+                // Try lowercase
+                try {
+                    BufferedImage img = (BufferedImage) server.getAssociatedImage(name.toLowerCase());
+                    if (img != null) {
+                        logger.info("  SUCCESS with lowercase: {} ({}x{})",
+                                name.toLowerCase(), img.getWidth(), img.getHeight());
+                    }
+                } catch (Exception e) {
+                    logger.info("  FAILED with lowercase: {}", e.getMessage());
+                }
+            }
+        }
+
+        // Also try common keys that might work
+        String[] commonKeys = {"macro", "label", "thumbnail", "overview"};
+        logger.info("Testing common keys...");
+        for (String key : commonKeys) {
+            try {
+                BufferedImage img = (BufferedImage) server.getAssociatedImage(key);
+                if (img != null) {
+                    logger.info("  SUCCESS with '{}': {}x{}", key, img.getWidth(), img.getHeight());
+                }
+            } catch (Exception e) {
+                logger.info("  FAILED with '{}': {}", key, e.getMessage());
+            }
+        }
+
+        logger.info("=== End Debug ===");
     }
 }

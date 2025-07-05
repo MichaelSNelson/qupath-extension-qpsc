@@ -69,6 +69,10 @@ public class MacroImageController {
             dialog.setHeaderText("Configure acquisition using macro image analysis");
             dialog.setResizable(true);
 
+            // Set dialog size
+            dialog.getDialogPane().setPrefSize(700, 600);
+            dialog.getDialogPane().setMinHeight(Region.USE_PREF_SIZE);
+
             // Create tabbed interface
             TabPane tabs = new TabPane();
             tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
@@ -261,36 +265,148 @@ public class MacroImageController {
         Spinner<Integer> fixedSpinner = new Spinner<>(0, 255, 128);
         fixedSpinner.setEditable(true);
 
+        // H&E Eosin parameters
+        Label eosinLabel = new Label("Eosin Sensitivity:");
+        Spinner<Double> eosinSpinner = new Spinner<>(0.0, 1.0, 0.15, 0.05);
+        eosinSpinner.setEditable(true);
+
+        // H&E Hematoxylin parameters
+        Label hematoxylinLabel = new Label("Hematoxylin Sensitivity:");
+        Spinner<Double> hematoxylinSpinner = new Spinner<>(0.0, 1.0, 0.15, 0.05);
+        hematoxylinSpinner.setEditable(true);
+
+        // Saturation threshold
+        Label saturationLabel = new Label("Min Saturation:");
+        Spinner<Double> saturationSpinner = new Spinner<>(0.0, 1.0, 0.1, 0.05);
+        saturationSpinner.setEditable(true);
+
+        // Brightness range
+        Label brightnessMinLabel = new Label("Min Brightness:");
+        Spinner<Double> brightnessMinSpinner = new Spinner<>(0.0, 1.0, 0.2, 0.05);
+        brightnessMinSpinner.setEditable(true);
+
+        Label brightnessMaxLabel = new Label("Max Brightness:");
+        Spinner<Double> brightnessMaxSpinner = new Spinner<>(0.0, 1.0, 0.95, 0.05);
+        brightnessMaxSpinner.setEditable(true);
+
         // Initially hide all parameters
         percentileLabel.setVisible(false);
         percentileSpinner.setVisible(false);
         fixedLabel.setVisible(false);
         fixedSpinner.setVisible(false);
+        eosinLabel.setVisible(false);
+        eosinSpinner.setVisible(false);
+        hematoxylinLabel.setVisible(false);
+        hematoxylinSpinner.setVisible(false);
+        saturationLabel.setVisible(false);
+        saturationSpinner.setVisible(false);
+        brightnessMinLabel.setVisible(false);
+        brightnessMinSpinner.setVisible(false);
+        brightnessMaxLabel.setVisible(false);
+        brightnessMaxSpinner.setVisible(false);
 
         paramsGrid.add(percentileLabel, 0, 0);
         paramsGrid.add(percentileSpinner, 1, 0);
         paramsGrid.add(fixedLabel, 0, 1);
         paramsGrid.add(fixedSpinner, 1, 1);
+        paramsGrid.add(eosinLabel, 0, 2);
+        paramsGrid.add(eosinSpinner, 1, 2);
+        paramsGrid.add(hematoxylinLabel, 0, 3);
+        paramsGrid.add(hematoxylinSpinner, 1, 3);
+        paramsGrid.add(saturationLabel, 0, 4);
+        paramsGrid.add(saturationSpinner, 1, 4);
+        paramsGrid.add(brightnessMinLabel, 0, 5);
+        paramsGrid.add(brightnessMinSpinner, 1, 5);
+        paramsGrid.add(brightnessMaxLabel, 0, 6);
+        paramsGrid.add(brightnessMaxSpinner, 1, 6);
 
         // Update parameter visibility based on method
         methodCombo.getSelectionModel().selectedItemProperty().addListener((obs, old, method) -> {
-            percentileLabel.setVisible(method == MacroImageAnalyzer.ThresholdMethod.PERCENTILE);
-            percentileSpinner.setVisible(method == MacroImageAnalyzer.ThresholdMethod.PERCENTILE);
-            fixedLabel.setVisible(method == MacroImageAnalyzer.ThresholdMethod.FIXED);
-            fixedSpinner.setVisible(method == MacroImageAnalyzer.ThresholdMethod.FIXED);
+            // Hide all first
+            percentileLabel.setVisible(false);
+            percentileSpinner.setVisible(false);
+            fixedLabel.setVisible(false);
+            fixedSpinner.setVisible(false);
+            eosinLabel.setVisible(false);
+            eosinSpinner.setVisible(false);
+            hematoxylinLabel.setVisible(false);
+            hematoxylinSpinner.setVisible(false);
+            saturationLabel.setVisible(false);
+            saturationSpinner.setVisible(false);
+            brightnessMinLabel.setVisible(false);
+            brightnessMinSpinner.setVisible(false);
+            brightnessMaxLabel.setVisible(false);
+            brightnessMaxSpinner.setVisible(false);
+
+            // Show relevant parameters
+            switch (method) {
+                case PERCENTILE -> {
+                    percentileLabel.setVisible(true);
+                    percentileSpinner.setVisible(true);
+                }
+                case FIXED -> {
+                    fixedLabel.setVisible(true);
+                    fixedSpinner.setVisible(true);
+                }
+                case HE_EOSIN -> {
+                    eosinLabel.setVisible(true);
+                    eosinSpinner.setVisible(true);
+                    saturationLabel.setVisible(true);
+                    saturationSpinner.setVisible(true);
+                    brightnessMinLabel.setVisible(true);
+                    brightnessMinSpinner.setVisible(true);
+                    brightnessMaxLabel.setVisible(true);
+                    brightnessMaxSpinner.setVisible(true);
+                }
+                case HE_DUAL -> {
+                    eosinLabel.setVisible(true);
+                    eosinSpinner.setVisible(true);
+                    hematoxylinLabel.setVisible(true);
+                    hematoxylinSpinner.setVisible(true);
+                    saturationLabel.setVisible(true);
+                    saturationSpinner.setVisible(true);
+                    brightnessMinLabel.setVisible(true);
+                    brightnessMinSpinner.setVisible(true);
+                    brightnessMaxLabel.setVisible(true);
+                    brightnessMaxSpinner.setVisible(true);
+                }
+                case COLOR_DECONVOLUTION -> {
+                    brightnessMinLabel.setVisible(true);
+                    brightnessMinSpinner.setVisible(true);
+                    brightnessMaxLabel.setVisible(true);
+                    brightnessMaxSpinner.setVisible(true);
+                }
+            }
         });
 
         // Preview button
         Button previewButton = new Button("Preview Threshold");
         ImageView previewImage = new ImageView();
-        previewImage.setFitWidth(300);
         previewImage.setPreserveRatio(true);
+        previewImage.setSmooth(true);
+
+        // Create a scroll pane for the image
+        ScrollPane imageScroll = new ScrollPane(previewImage);
+        imageScroll.setPrefViewportHeight(400);
+        imageScroll.setPrefViewportWidth(500);
+        imageScroll.setFitToWidth(true);
+        imageScroll.setFitToHeight(true);
+        imageScroll.setPannable(true);
+
+        // Bind image size to scroll pane size
+        previewImage.fitWidthProperty().bind(imageScroll.widthProperty().subtract(20));
+        previewImage.fitHeightProperty().bind(imageScroll.heightProperty().subtract(20));
 
         previewButton.setOnAction(e -> {
             // Run analysis with current settings
             Map<String, Object> params = new HashMap<>();
             params.put("percentile", percentileSpinner.getValue());
             params.put("threshold", fixedSpinner.getValue());
+            params.put("eosinThreshold", eosinSpinner.getValue());
+            params.put("hematoxylinThreshold", hematoxylinSpinner.getValue());
+            params.put("saturationThreshold", saturationSpinner.getValue());
+            params.put("brightnessMin", brightnessMinSpinner.getValue());
+            params.put("brightnessMax", brightnessMaxSpinner.getValue());
 
             var result = MacroImageAnalyzer.analyzeMacroImage(
                     gui.getImageData(),
@@ -301,24 +417,39 @@ public class MacroImageController {
             if (result != null) {
                 Image fxImage = SwingFXUtils.toFXImage(result.getThresholdedImage(), null);
                 previewImage.setImage(fxImage);
+
+                // Force layout update
+                Platform.runLater(() -> {
+                    imageScroll.layout();
+                    previewImage.autosize();
+                });
             }
         });
 
         // Layout
-        content.getChildren().addAll(
+        VBox contentBox = new VBox(10);
+        contentBox.getChildren().addAll(
                 new Label("Threshold Method:"),
                 methodCombo,
                 paramsGrid,
                 new Separator(),
                 previewButton,
-                previewImage
+                imageScroll
         );
 
-        // Store components
-        content.setUserData(Map.of(
-                "method", methodCombo,
+        // Make the VBox grow to fill available space
+        VBox.setVgrow(imageScroll, Priority.ALWAYS);
+        contentBox.setFillWidth(true);
+
+        contentBox.setUserData(Map.of(
+        "method", methodCombo,
                 "percentile", percentileSpinner,
-                "fixed", fixedSpinner
+                "fixed", fixedSpinner,
+                "eosinThreshold", eosinSpinner,
+                "hematoxylinThreshold", hematoxylinSpinner,
+                "saturationThreshold", saturationSpinner,
+                "brightnessMin", brightnessMinSpinner,
+                "brightnessMax", brightnessMaxSpinner
         ));
 
         tab.setContent(content);
@@ -394,10 +525,20 @@ public class MacroImageController {
                 (ComboBox<MacroImageAnalyzer.ThresholdMethod>) thresholdData.get("method");
         Spinner<Double> percentileSpinner = (Spinner<Double>) thresholdData.get("percentile");
         Spinner<Integer> fixedSpinner = (Spinner<Integer>) thresholdData.get("fixed");
+        Spinner<Double> eosinSpinner = (Spinner<Double>) thresholdData.get("eosinThreshold");
+        Spinner<Double> hematoxylinSpinner = (Spinner<Double>) thresholdData.get("hematoxylinThreshold");
+        Spinner<Double> saturationSpinner = (Spinner<Double>) thresholdData.get("saturationThreshold");
+        Spinner<Double> brightnessMinSpinner = (Spinner<Double>) thresholdData.get("brightnessMin");
+        Spinner<Double> brightnessMaxSpinner = (Spinner<Double>) thresholdData.get("brightnessMax");
 
         Map<String, Object> thresholdParams = new HashMap<>();
         thresholdParams.put("percentile", percentileSpinner.getValue());
         thresholdParams.put("threshold", fixedSpinner.getValue());
+        thresholdParams.put("eosinThreshold", eosinSpinner.getValue());
+        thresholdParams.put("hematoxylinThreshold", hematoxylinSpinner.getValue());
+        thresholdParams.put("saturationThreshold", saturationSpinner.getValue());
+        thresholdParams.put("brightnessMin", brightnessMinSpinner.getValue());
+        thresholdParams.put("brightnessMax", brightnessMaxSpinner.getValue());
 
         // Get options
         var optionsData = (Map<String, Object>) optionsTab.getContent().getUserData();

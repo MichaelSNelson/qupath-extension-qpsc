@@ -69,6 +69,7 @@ public class QPScopeController {
             case "boundingBox"  -> BoundingBoxWorkflow.run();
             case "existingImage"-> ExistingImageWorkflow.run();
             case "basicStageInterface"-> StageMovementController.showTestStageMovementDialog();
+            case "macroImage"       -> MacroImageWorkflow.run();  // Add this line
             case "test" ->  TestWorkflow.runTestWorkflow();
             default             -> logger.warning("Unknown workflow mode " + mode);
         }
