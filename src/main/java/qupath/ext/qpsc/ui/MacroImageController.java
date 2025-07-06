@@ -8,10 +8,12 @@ import javafx.scene.image.ImageView;
 import javafx.scene.layout.*;
 import javafx.stage.Modality;
 import javafx.embed.swing.SwingFXUtils;
+import javafx.util.StringConverter;
 import qupath.ext.qpsc.utilities.AffineTransformManager;
 import qupath.ext.qpsc.utilities.MacroImageAnalyzer;
 import qupath.lib.gui.QuPathGUI;
 
+import java.text.DecimalFormat;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.ResourceBundle;
@@ -103,34 +105,44 @@ public class MacroImageController {
             // Result converter
             dialog.setResultConverter(button -> {
                 if (button == runType) {
-                    // First get sample setup
-                    var sampleFuture = new CompletableFuture<SampleSetupController.SampleSetupResult>();
-
-                    Platform.runLater(() -> {
-                        SampleSetupController.showDialog()
-                                .thenAccept(sample -> {
-                                    if (sample != null) {
-                                        // Gather all settings
-                                        WorkflowConfig config = gatherWorkflowConfig(
-                                                sample, transformTab, thresholdTab, optionsTab);
-                                        sampleFuture.complete(sample);
-                                        future.complete(config);
-                                    } else {
-                                        future.complete(null);
-                                    }
-                                })
-                                .exceptionally(ex -> {
-                                    future.completeExceptionally(ex);
-                                    return null;
-                                });
-                    });
-
-                    return null; // We handle the result asynchronously
+                    // Gather settings immediately while dialog is still open
+                    WorkflowConfig config = gatherWorkflowConfig(
+                            null,  // We'll get sample setup separately
+                            transformTab, thresholdTab, optionsTab);
+                    return config;
                 }
                 return null;
             });
 
-            dialog.showAndWait();
+            var result = dialog.showAndWait();
+            if (result.isPresent() && result.get() != null) {
+                // Now show sample setup dialog
+                SampleSetupController.showDialog()
+                        .thenAccept(sample -> {
+                            if (sample != null) {
+                                // Create complete config with sample info
+                                WorkflowConfig completeConfig = new WorkflowConfig(
+                                        sample,
+                                        result.get().useExistingTransform(),
+                                        result.get().selectedTransform(),
+                                        result.get().saveTransform(),
+                                        result.get().transformName(),
+                                        result.get().thresholdMethod(),
+                                        result.get().thresholdParams(),
+                                        result.get().createSingleBounds()
+                                );
+                                future.complete(completeConfig);
+                            } else {
+                                future.complete(null);
+                            }
+                        })
+                        .exceptionally(ex -> {
+                            future.completeExceptionally(ex);
+                            return null;
+                        });
+            } else {
+                future.complete(null);
+            }
 
             if (!future.isDone()) {
                 future.complete(null);
@@ -267,8 +279,23 @@ public class MacroImageController {
 
         // H&E Eosin parameters
         Label eosinLabel = new Label("Eosin Sensitivity:");
-        Spinner<Double> eosinSpinner = new Spinner<>(0.0, 1.0, 0.15, 0.05);
+        Spinner<Double> eosinSpinner = new Spinner<>(0.0, 2.0, 0.3, 0.1);
         eosinSpinner.setEditable(true);
+        eosinSpinner.getValueFactory().setConverter(new StringConverter<Double>() {
+            private final DecimalFormat df = new DecimalFormat("#.####");
+            @Override
+            public String toString(Double value) {
+                return df.format(value);
+            }
+            @Override
+            public Double fromString(String string) {
+                try {
+                    return Double.parseDouble(string);
+                } catch (NumberFormatException e) {
+                    return eosinSpinner.getValue();
+                }
+            }
+        });
 
         // H&E Hematoxylin parameters
         Label hematoxylinLabel = new Label("Hematoxylin Sensitivity:");
@@ -282,12 +309,20 @@ public class MacroImageController {
 
         // Brightness range
         Label brightnessMinLabel = new Label("Min Brightness:");
-        Spinner<Double> brightnessMinSpinner = new Spinner<>(0.0, 1.0, 0.2, 0.05);
+        Spinner<Double> brightnessMinSpinner = new Spinner<>(0.0, 1.0, 0.6, 0.05);
         brightnessMinSpinner.setEditable(true);
 
         Label brightnessMaxLabel = new Label("Max Brightness:");
         Spinner<Double> brightnessMaxSpinner = new Spinner<>(0.0, 1.0, 0.95, 0.05);
         brightnessMaxSpinner.setEditable(true);
+
+        Label minSizeLabel = new Label("Min Region Size (pixels):");
+        Spinner<Integer> minSizeSpinner = new Spinner<>(100, 10000, 1000, 100);
+        minSizeSpinner.setEditable(true);
+
+// Add to grid at line ~356:
+        paramsGrid.add(minSizeLabel, 0, 7);
+        paramsGrid.add(minSizeSpinner, 1, 7);
 
         // Initially hide all parameters
         percentileLabel.setVisible(false);
@@ -340,6 +375,12 @@ public class MacroImageController {
 
             // Show relevant parameters
             switch (method) {
+                case COLOR_DECONVOLUTION -> {
+                    brightnessMinLabel.setVisible(true);
+                    brightnessMinSpinner.setVisible(true);
+                    brightnessMaxLabel.setVisible(true);
+                    brightnessMaxSpinner.setVisible(true);
+                }
                 case PERCENTILE -> {
                     percentileLabel.setVisible(true);
                     percentileSpinner.setVisible(true);
@@ -357,6 +398,8 @@ public class MacroImageController {
                     brightnessMinSpinner.setVisible(true);
                     brightnessMaxLabel.setVisible(true);
                     brightnessMaxSpinner.setVisible(true);
+                    minSizeLabel.setVisible(true);
+                    minSizeSpinner.setVisible(true);
                 }
                 case HE_DUAL -> {
                     eosinLabel.setVisible(true);
@@ -370,12 +413,7 @@ public class MacroImageController {
                     brightnessMaxLabel.setVisible(true);
                     brightnessMaxSpinner.setVisible(true);
                 }
-                case COLOR_DECONVOLUTION -> {
-                    brightnessMinLabel.setVisible(true);
-                    brightnessMinSpinner.setVisible(true);
-                    brightnessMaxLabel.setVisible(true);
-                    brightnessMaxSpinner.setVisible(true);
-                }
+
             }
         });
 
@@ -407,7 +445,7 @@ public class MacroImageController {
             params.put("saturationThreshold", saturationSpinner.getValue());
             params.put("brightnessMin", brightnessMinSpinner.getValue());
             params.put("brightnessMax", brightnessMaxSpinner.getValue());
-
+            params.put("minRegionSize", minSizeSpinner.getValue());
             var result = MacroImageAnalyzer.analyzeMacroImage(
                     gui.getImageData(),
                     methodCombo.getValue(),
@@ -449,10 +487,12 @@ public class MacroImageController {
                 "hematoxylinThreshold", hematoxylinSpinner,
                 "saturationThreshold", saturationSpinner,
                 "brightnessMin", brightnessMinSpinner,
-                "brightnessMax", brightnessMaxSpinner
+                "brightnessMax", brightnessMaxSpinner,
+                "minSize", minSizeSpinner
+
         ));
 
-        tab.setContent(content);
+        tab.setContent(contentBox);
         return tab;
     }
 
@@ -530,6 +570,7 @@ public class MacroImageController {
         Spinner<Double> saturationSpinner = (Spinner<Double>) thresholdData.get("saturationThreshold");
         Spinner<Double> brightnessMinSpinner = (Spinner<Double>) thresholdData.get("brightnessMin");
         Spinner<Double> brightnessMaxSpinner = (Spinner<Double>) thresholdData.get("brightnessMax");
+        Spinner<Integer> minSizeSpinner = (Spinner<Integer>) thresholdData.get("minSize");
 
         Map<String, Object> thresholdParams = new HashMap<>();
         thresholdParams.put("percentile", percentileSpinner.getValue());
@@ -539,7 +580,7 @@ public class MacroImageController {
         thresholdParams.put("saturationThreshold", saturationSpinner.getValue());
         thresholdParams.put("brightnessMin", brightnessMinSpinner.getValue());
         thresholdParams.put("brightnessMax", brightnessMaxSpinner.getValue());
-
+        thresholdParams.put("minRegionSize", minSizeSpinner.getValue());
         // Get options
         var optionsData = (Map<String, Object>) optionsTab.getContent().getUserData();
         RadioButton singleBounds = (RadioButton) optionsData.get("singleBounds");

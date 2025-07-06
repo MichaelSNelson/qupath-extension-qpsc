@@ -188,7 +188,7 @@ public class MacroImageAnalyzer {
 
         // Apply thresholding
         int threshold = calculateThreshold(macro, method, params);
-        BufferedImage thresholded = null;
+        BufferedImage thresholded;
 
         // For H&E methods, we need special handling
         if (method == ThresholdMethod.HE_EOSIN || method == ThresholdMethod.HE_DUAL ||
@@ -199,7 +199,8 @@ public class MacroImageAnalyzer {
         }
 
         // Find tissue regions
-        List<ROI> regions = findTissueRegions(thresholded);
+        int minRegionSize = (Integer) params.getOrDefault("minRegionSize", 1000);
+        List<ROI> regions = findTissueRegions(thresholded, minRegionSize);
         ROI bounds = computeBoundingBox(regions);
 
         logger.info("Found {} tissue regions with overall bounds: ({}, {}, {}, {})",
@@ -432,7 +433,7 @@ public class MacroImageAnalyzer {
         boolean isEosinHue = (hue < 0.055 || hue > 0.944);  // Convert degrees to 0-1 range
 
         // Also check if red channel is dominant
-        boolean redDominant = rNorm > gNorm && rNorm > bNorm && (rNorm - bNorm) > threshold;
+        boolean redDominant = rNorm > gNorm * (1 + threshold) && rNorm > bNorm * (1 + threshold);
 
         // Check saturation and brightness
         boolean goodSaturation = saturation > saturationMin;
@@ -509,7 +510,7 @@ public class MacroImageAnalyzer {
      * Note: This is a basic implementation - could be enhanced with
      * morphological operations, size filtering, etc.
      */
-    private static List<ROI> findTissueRegions(BufferedImage binary) {
+    private static List<ROI> findTissueRegions(BufferedImage binary, int minSize) {
         List<ROI> regions = new ArrayList<>();
         int width = binary.getWidth();
         int height = binary.getHeight();
@@ -520,7 +521,8 @@ public class MacroImageAnalyzer {
                 if (!visited[y][x] && (binary.getRGB(x, y) & 0xFF) == 0) {
                     // Found tissue pixel - flood fill to find region
                     Rectangle bounds = floodFill(binary, visited, x, y);
-                    if (bounds.width > 10 && bounds.height > 10) { // Filter small regions
+                    int area = bounds.width * bounds.height;
+                    if (area > minSize) {
                         ROI roi = ROIs.createRectangleROI(bounds.x, bounds.y,
                                 bounds.width, bounds.height,
                                 ImagePlane.getDefaultPlane());
