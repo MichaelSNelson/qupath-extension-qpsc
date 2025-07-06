@@ -4,13 +4,22 @@ import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.DoubleProperty;
 import javafx.beans.property.ObjectProperty;
 import javafx.beans.property.StringProperty;
+import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import qupath.ext.qpsc.utilities.AffineTransformManager;
+import qupath.ext.qpsc.utilities.MacroImageAnalyzer;
 import qupath.fx.prefs.controlsfx.PropertyItemBuilder;
 import qupath.lib.gui.QuPathGUI;
 import qupath.lib.gui.prefs.PathPrefs;
 import qupath.lib.images.writers.ome.OMEPyramidWriter;
 
+import java.io.File;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
+import java.util.ResourceBundle;
 
 /**
  * QPPreferenceDialog
@@ -22,9 +31,13 @@ import java.util.Arrays;
  */
 
 public class QPPreferenceDialog {
-    private static final String CATEGORY = "Microscopy in QuPath";
+
+    private static final Logger logger = LoggerFactory.getLogger(QPPreferenceDialog.class);
+    private static final String CATEGORY = ResourceBundle.getBundle("qupath.ext.qpsc.ui.strings").getString("name");
 
     // --- Preference definitions ---
+    private static final StringProperty savedTransformNameProperty  =
+            PathPrefs.createPersistentPreference("savedMicroscopeTransform", "");
     private static final BooleanProperty flipMacroXProperty =
             PathPrefs.createPersistentPreference("isFlippedXProperty", false);
     private static final BooleanProperty flipMacroYProperty =
@@ -67,6 +80,7 @@ public class QPPreferenceDialog {
                     "smartpath.cliFolder",
                     "C:\\Users\\lociuser\\Codes\\smartpath\\smart-wsi-scanner\\.venv\\Scripts"
             );
+
     /**
      * Register all preferences in QuPath’s PreferencePane. Call once during extension installation.
      */
@@ -77,6 +91,14 @@ public class QPPreferenceDialog {
                 qupath.getPreferencePane()
                         .getPropertySheet()
                         .getItems();
+
+        items.add(new PropertyItemBuilder<>(savedTransformNameProperty , String.class)
+                .propertyType(PropertyItemBuilder.PropertyType.CHOICE)
+                .name("Microscope Alignment Transform")
+                .category(CATEGORY)
+                .description("Saved transform for stage-to-image alignment")
+                .choices(FXCollections.observableArrayList(getAvailableTransforms()))
+                .build());
 
         items.add(new PropertyItemBuilder<>(flipMacroXProperty, Boolean.class)
                 .name("Flip macro image X")
@@ -167,6 +189,9 @@ public class QPPreferenceDialog {
     public static boolean getInvertedYProperty() {
         return invertedYProperty.get();
     }
+    public static String getSavedTransformName() {
+        return savedTransformNameProperty.get();
+    }
 
     public static String getMicroscopeConfigFileProperty() {
         return microscopeConfigFileProperty.get();
@@ -191,5 +216,25 @@ public class QPPreferenceDialog {
     }
     public static String getCliFolder() {
         return cliFolderProperty.getValue();
+    }
+    public static void setSavedTransformName(String name) {
+        savedTransformNameProperty.set(name);
+    }
+    private static List<String> getAvailableTransforms() {
+        List<String> transforms = new ArrayList<>();
+        transforms.add(""); // Empty option for no transform
+
+        try {
+            String configPath = getMicroscopeConfigFileProperty();
+            if (configPath != null && !configPath.isEmpty()) {
+                AffineTransformManager manager = new AffineTransformManager(
+                        new File(configPath).getParent());
+                manager.getAllTransforms().forEach(t -> transforms.add(t.getName()));
+            }
+        } catch (Exception e) {
+            logger.debug("Could not load transforms: {}", e.getMessage());
+        }
+
+        return transforms;
     }
 }

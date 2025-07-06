@@ -18,6 +18,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.ResourceBundle;
 import java.util.concurrent.CompletableFuture;
+//TODO ADD LOGGING
 
 /**
  * UI controller for macro image-based acquisition workflows.
@@ -66,9 +67,9 @@ public class MacroImageController {
             ResourceBundle res = ResourceBundle.getBundle("qupath.ext.qpsc.ui.strings");
 
             Dialog<WorkflowConfig> dialog = new Dialog<>();
-            dialog.initModality(Modality.APPLICATION_MODAL);
-            dialog.setTitle("Macro Image Acquisition Setup");
-            dialog.setHeaderText("Configure acquisition using macro image analysis");
+            dialog.initModality(Modality.NONE);
+            dialog.setTitle("Microscope Alignment Setup");
+            dialog.setHeaderText("Create or verify microscope alignment using macro image analysis");
             dialog.setResizable(true);
 
             // Set dialog size
@@ -82,7 +83,7 @@ public class MacroImageController {
             // Tab 1: Transform Selection
             Tab transformTab = createTransformTab(transformManager, currentMicroscope);
 
-            // Tab 2: Threshold Settings
+            // Tab 2: Threshold Settings - with COLOR_DECONVOLUTION as default
             Tab thresholdTab = createThresholdTab(gui);
 
             // Tab 3: Acquisition Options
@@ -98,39 +99,42 @@ public class MacroImageController {
             dialog.getDialogPane().setContent(content);
 
             // Buttons
-            ButtonType runType = new ButtonType("Run Workflow", ButtonBar.ButtonData.OK_DONE);
+            ButtonType runType = new ButtonType("Create/Verify Alignment", ButtonBar.ButtonData.OK_DONE);
             ButtonType cancelType = new ButtonType("Cancel", ButtonBar.ButtonData.CANCEL_CLOSE);
             dialog.getDialogPane().getButtonTypes().addAll(runType, cancelType);
 
-            // Result converter
+            // Store the tabs for access in result converter
+            dialog.getDialogPane().setUserData(tabs);
+
+            // Result converter - simplified to just return a marker
             dialog.setResultConverter(button -> {
                 if (button == runType) {
-                    // Gather settings immediately while dialog is still open
-                    WorkflowConfig config = gatherWorkflowConfig(
-                            null,  // We'll get sample setup separately
-                            transformTab, thresholdTab, optionsTab);
-                    return config;
+                    // Return a non-null marker to indicate success
+                    return new WorkflowConfig(null, false, null, false, "",
+                            MacroImageAnalyzer.ThresholdMethod.COLOR_DECONVOLUTION,
+                            new HashMap<>(), true);
                 }
                 return null;
             });
 
             var result = dialog.showAndWait();
+
             if (result.isPresent() && result.get() != null) {
-                // Now show sample setup dialog
+                // User clicked "Run Workflow" - now gather the actual settings
+                Tab transformTabFinal = tabs.getTabs().get(0);
+                Tab thresholdTabFinal = tabs.getTabs().get(1);
+                Tab optionsTabFinal = tabs.getTabs().get(2);
+
+                // Show sample setup dialog
                 SampleSetupController.showDialog()
                         .thenAccept(sample -> {
                             if (sample != null) {
-                                // Create complete config with sample info
-                                WorkflowConfig completeConfig = new WorkflowConfig(
+                                // Now gather the complete config with all settings
+                                WorkflowConfig completeConfig = gatherWorkflowConfig(
                                         sample,
-                                        result.get().useExistingTransform(),
-                                        result.get().selectedTransform(),
-                                        result.get().saveTransform(),
-                                        result.get().transformName(),
-                                        result.get().thresholdMethod(),
-                                        result.get().thresholdParams(),
-                                        result.get().createSingleBounds()
-                                );
+                                        transformTabFinal,
+                                        thresholdTabFinal,
+                                        optionsTabFinal);
                                 future.complete(completeConfig);
                             } else {
                                 future.complete(null);
@@ -141,23 +145,19 @@ public class MacroImageController {
                             return null;
                         });
             } else {
-                future.complete(null);
-            }
-
-            if (!future.isDone()) {
+                // User cancelled the main dialog
                 future.complete(null);
             }
         });
 
         return future;
     }
-
     /**
      * Creates the transform selection tab.
      */
     private static Tab createTransformTab(AffineTransformManager manager,
                                           String currentMicroscope) {
-        Tab tab = new Tab("Transform");
+        Tab tab = new Tab("1. Transform");
 
         VBox content = new VBox(10);
         content.setPadding(new Insets(10));
@@ -252,7 +252,7 @@ public class MacroImageController {
      * Creates the threshold configuration tab.
      */
     private static Tab createThresholdTab(QuPathGUI gui) {
-        Tab tab = new Tab("Threshold");
+        Tab tab = new Tab("2. Threshold");
 
         VBox content = new VBox(10);
         content.setPadding(new Insets(10));
@@ -260,7 +260,7 @@ public class MacroImageController {
         // Threshold method selection
         ComboBox<MacroImageAnalyzer.ThresholdMethod> methodCombo = new ComboBox<>();
         methodCombo.getItems().addAll(MacroImageAnalyzer.ThresholdMethod.values());
-        methodCombo.getSelectionModel().select(MacroImageAnalyzer.ThresholdMethod.OTSU);
+
 
         // Method-specific parameters
         GridPane paramsGrid = new GridPane();
@@ -357,63 +357,34 @@ public class MacroImageController {
 
         // Update parameter visibility based on method
         methodCombo.getSelectionModel().selectedItemProperty().addListener((obs, old, method) -> {
-            // Hide all first
-            percentileLabel.setVisible(false);
-            percentileSpinner.setVisible(false);
-            fixedLabel.setVisible(false);
-            fixedSpinner.setVisible(false);
-            eosinLabel.setVisible(false);
-            eosinSpinner.setVisible(false);
-            hematoxylinLabel.setVisible(false);
-            hematoxylinSpinner.setVisible(false);
-            saturationLabel.setVisible(false);
-            saturationSpinner.setVisible(false);
-            brightnessMinLabel.setVisible(false);
-            brightnessMinSpinner.setVisible(false);
-            brightnessMaxLabel.setVisible(false);
-            brightnessMaxSpinner.setVisible(false);
-
-            // Show relevant parameters
-            switch (method) {
-                case COLOR_DECONVOLUTION -> {
-                    brightnessMinLabel.setVisible(true);
-                    brightnessMinSpinner.setVisible(true);
-                    brightnessMaxLabel.setVisible(true);
-                    brightnessMaxSpinner.setVisible(true);
-                }
-                case PERCENTILE -> {
-                    percentileLabel.setVisible(true);
-                    percentileSpinner.setVisible(true);
-                }
-                case FIXED -> {
-                    fixedLabel.setVisible(true);
-                    fixedSpinner.setVisible(true);
-                }
-                case HE_EOSIN -> {
-                    eosinLabel.setVisible(true);
-                    eosinSpinner.setVisible(true);
-                    saturationLabel.setVisible(true);
-                    saturationSpinner.setVisible(true);
-                    brightnessMinLabel.setVisible(true);
-                    brightnessMinSpinner.setVisible(true);
-                    brightnessMaxLabel.setVisible(true);
-                    brightnessMaxSpinner.setVisible(true);
-                    minSizeLabel.setVisible(true);
-                    minSizeSpinner.setVisible(true);
-                }
-                case HE_DUAL -> {
-                    eosinLabel.setVisible(true);
-                    eosinSpinner.setVisible(true);
-                    hematoxylinLabel.setVisible(true);
-                    hematoxylinSpinner.setVisible(true);
-                    saturationLabel.setVisible(true);
-                    saturationSpinner.setVisible(true);
-                    brightnessMinLabel.setVisible(true);
-                    brightnessMinSpinner.setVisible(true);
-                    brightnessMaxLabel.setVisible(true);
-                    brightnessMaxSpinner.setVisible(true);
-                }
-
+            updateThresholdParameterVisibility(method,
+                    percentileLabel, percentileSpinner,
+                    fixedLabel, fixedSpinner,
+                    eosinLabel, eosinSpinner,
+                    hematoxylinLabel, hematoxylinSpinner,
+                    saturationLabel, saturationSpinner,
+                    brightnessMinLabel, brightnessMinSpinner,
+                    brightnessMaxLabel, brightnessMaxSpinner,
+                    minSizeLabel, minSizeSpinner);
+        });
+        // Set default selection AFTER the listener is attached, to make sure all options are available
+        methodCombo.getSelectionModel().select(MacroImageAnalyzer.ThresholdMethod.COLOR_DECONVOLUTION);
+        updateThresholdParameterVisibility(MacroImageAnalyzer.ThresholdMethod.COLOR_DECONVOLUTION,
+                percentileLabel, percentileSpinner,
+                fixedLabel, fixedSpinner,
+                eosinLabel, eosinSpinner,
+                hematoxylinLabel, hematoxylinSpinner,
+                saturationLabel, saturationSpinner,
+                brightnessMinLabel, brightnessMinSpinner,
+                brightnessMaxLabel, brightnessMaxSpinner,
+                minSizeLabel, minSizeSpinner);
+        Platform.runLater(() -> {
+            MacroImageAnalyzer.ThresholdMethod currentMethod = methodCombo.getValue();
+            if (currentMethod == MacroImageAnalyzer.ThresholdMethod.COLOR_DECONVOLUTION) {
+                brightnessMinLabel.setVisible(true);
+                brightnessMinSpinner.setVisible(true);
+                brightnessMaxLabel.setVisible(true);
+                brightnessMaxSpinner.setVisible(true);
             }
         });
 
@@ -495,12 +466,84 @@ public class MacroImageController {
         tab.setContent(contentBox);
         return tab;
     }
+    private static void updateThresholdParameterVisibility(
+            MacroImageAnalyzer.ThresholdMethod method,
+            Label percentileLabel, Spinner<Double> percentileSpinner,
+            Label fixedLabel, Spinner<Integer> fixedSpinner,
+            Label eosinLabel, Spinner<Double> eosinSpinner,
+            Label hematoxylinLabel, Spinner<Double> hematoxylinSpinner,
+            Label saturationLabel, Spinner<Double> saturationSpinner,
+            Label brightnessMinLabel, Spinner<Double> brightnessMinSpinner,
+            Label brightnessMaxLabel, Spinner<Double> brightnessMaxSpinner,
+            Label minSizeLabel, Spinner<Integer> minSizeSpinner) {
 
+        // Hide all first
+        percentileLabel.setVisible(false);
+        percentileSpinner.setVisible(false);
+        fixedLabel.setVisible(false);
+        fixedSpinner.setVisible(false);
+        eosinLabel.setVisible(false);
+        eosinSpinner.setVisible(false);
+        hematoxylinLabel.setVisible(false);
+        hematoxylinSpinner.setVisible(false);
+        saturationLabel.setVisible(false);
+        saturationSpinner.setVisible(false);
+        brightnessMinLabel.setVisible(false);
+        brightnessMinSpinner.setVisible(false);
+        brightnessMaxLabel.setVisible(false);
+        brightnessMaxSpinner.setVisible(false);
+        minSizeLabel.setVisible(false);
+        minSizeSpinner.setVisible(false);
+
+        // Show relevant parameters
+        if (method != null) {
+            switch (method) {
+                case COLOR_DECONVOLUTION -> {
+                    brightnessMinLabel.setVisible(true);
+                    brightnessMinSpinner.setVisible(true);
+                    brightnessMaxLabel.setVisible(true);
+                    brightnessMaxSpinner.setVisible(true);
+                }
+                case PERCENTILE -> {
+                    percentileLabel.setVisible(true);
+                    percentileSpinner.setVisible(true);
+                }
+                case FIXED -> {
+                    fixedLabel.setVisible(true);
+                    fixedSpinner.setVisible(true);
+                }
+                case HE_EOSIN -> {
+                    eosinLabel.setVisible(true);
+                    eosinSpinner.setVisible(true);
+                    saturationLabel.setVisible(true);
+                    saturationSpinner.setVisible(true);
+                    brightnessMinLabel.setVisible(true);
+                    brightnessMinSpinner.setVisible(true);
+                    brightnessMaxLabel.setVisible(true);
+                    brightnessMaxSpinner.setVisible(true);
+                    minSizeLabel.setVisible(true);
+                    minSizeSpinner.setVisible(true);
+                }
+                case HE_DUAL -> {
+                    eosinLabel.setVisible(true);
+                    eosinSpinner.setVisible(true);
+                    hematoxylinLabel.setVisible(true);
+                    hematoxylinSpinner.setVisible(true);
+                    saturationLabel.setVisible(true);
+                    saturationSpinner.setVisible(true);
+                    brightnessMinLabel.setVisible(true);
+                    brightnessMinSpinner.setVisible(true);
+                    brightnessMaxLabel.setVisible(true);
+                    brightnessMaxSpinner.setVisible(true);
+                }
+            }
+        }
+    }
     /**
      * Creates the acquisition options tab.
      */
     private static Tab createOptionsTab() {
-        Tab tab = new Tab("Options");
+        Tab tab = new Tab("3. Options");
 
         VBox content = new VBox(10);
         content.setPadding(new Insets(10));

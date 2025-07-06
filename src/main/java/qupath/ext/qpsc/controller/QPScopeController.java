@@ -3,9 +3,7 @@ package qupath.ext.qpsc.controller;
 import java.io.IOException;
 import java.util.concurrent.CompletableFuture;
 import java.util.logging.Logger;
-import javafx.concurrent.Task;
-import qupath.ext.qpsc.controller.MicroscopeController;
-import qupath.ext.qpsc.ui.InterfaceController;
+
 import qupath.ext.qpsc.ui.StageMovementController;
 
 /**
@@ -69,7 +67,7 @@ public class QPScopeController {
             case "boundingBox"  -> BoundingBoxWorkflow.run();
             case "existingImage"-> ExistingImageWorkflow.run();
             case "basicStageInterface"-> StageMovementController.showTestStageMovementDialog();
-            case "macroImage"       -> MacroImageWorkflow.run();  // Add this line
+            case "microscopeAlignment"       -> MicroscopeAlignmentWorkflow.run();  // Add this line
             case "test" ->  TestWorkflow.runTestWorkflow();
             default             -> logger.warning("Unknown workflow mode " + mode);
         }

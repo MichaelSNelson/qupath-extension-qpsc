@@ -317,46 +317,58 @@ public class ExistingImageWorkflow {
                                     "Tiling Error"));
                             return;
                         }
-                        // 8. Affine alignment
-                        AffineTransformationController.setupAffineTransformationAndValidationGUI(
-                                        macroPixelSize, invertedX, invertedY)
-                                .thenAccept(transform -> {
-                                    if (transform == null) {
-                                        logger.info("User cancelled affine transform step.");
-                                        return;
-                                    }
+// 8. Check for saved transform first
+                        AffineTransform savedTransform = AffineTransformManager.loadSavedTransformFromPreferences();
+                        if (savedTransform != null) {
+                            logger.info("Using saved microscope alignment, skipping manual alignment");
 
-                                    // Transform tile configurations from QuPath to stage coordinates
-                                    try {
-                                        List<String> modifiedDirs = TransformationFunctions.transformTileConfiguration(
-                                                tempTileDirectory, transform);
-                                        logger.info("Transformed tile configurations for directories: {}", modifiedDirs);
-                                    } catch (IOException e) {
-                                        logger.error("Failed to transform tile configurations", e);
-                                        Platform.runLater(() -> UIFunctions.notifyUserOfError(
-                                                "Failed to transform tile coordinates: " + e.getMessage(),
-                                                "Transform Error"));
-                                        return;
-                                    }
+                            // Transform tile configurations
+                            try {
+                                List<String> modifiedDirs = TransformationFunctions.transformTileConfiguration(
+                                        tempTileDirectory, savedTransform);
+                                logger.info("Transformed tile configurations for directories: {}", modifiedDirs);
+                            } catch (IOException e) {
+                                logger.error("Failed to transform tile configurations", e);
+                                Platform.runLater(() -> UIFunctions.notifyUserOfError(
+                                        "Failed to transform tile coordinates: " + e.getMessage(),
+                                        "Transform Error"));
+                                return;
+                            }
 
-                                    // 9. Get rotation angles based on modality
-                                    logger.info("Checking rotation requirements for modality: {}", sample.modality());
-                                    RotationManager rotationManager = new RotationManager(sample.modality());
+                            // Continue with rotation and acquisition
+                            proceedWithRotationAndAcquisition(currentAnnotations, savedTransform, sample,
+                                    project, tempTileDirectory, modeWithIndex, pixelSize, qupathGUI);
 
-                                    rotationManager.getRotationAngles(sample.modality())
-                                            .thenAccept(rotationAngles -> {
-                                                logger.info("Rotation angles returned: {}", rotationAngles);
+                        } else {
+                            // No saved transform - do manual alignment
+                            logger.info("No saved transform found, proceeding with manual alignment");
 
-                                                // Now process annotations with already-transformed coordinates
-                                                processAnnotations(currentAnnotations, transform, sample, project,
-                                                        tempTileDirectory, modeWithIndex, pixelSize,
-                                                        qupathGUI, rotationAngles, rotationManager);
-                                            })
-                                            .exceptionally(ex -> {
-                                                logger.error("Rotation angle selection failed", ex);
-                                                return null;
-                                            });
-                                });
+                            AffineTransformationController.setupAffineTransformationAndValidationGUI(
+                                            macroPixelSize, invertedX, invertedY)
+                                    .thenAccept(transform -> {
+                                        if (transform == null) {
+                                            logger.info("User cancelled affine transform step.");
+                                            return;
+                                        }
+
+                                        // Transform tile configurations
+                                        try {
+                                            List<String> modifiedDirs = TransformationFunctions.transformTileConfiguration(
+                                                    tempTileDirectory, transform);
+                                            logger.info("Transformed tile configurations for directories: {}", modifiedDirs);
+                                        } catch (IOException e) {
+                                            logger.error("Failed to transform tile configurations", e);
+                                            Platform.runLater(() -> UIFunctions.notifyUserOfError(
+                                                    "Failed to transform tile coordinates: " + e.getMessage(),
+                                                    "Transform Error"));
+                                            return;
+                                        }
+
+                                        // Continue with rotation and acquisition
+                                        proceedWithRotationAndAcquisition(currentAnnotations, transform, sample,
+                                                project, tempTileDirectory, modeWithIndex, pixelSize, qupathGUI);
+                                    });
+                        }
                     });
                 })
                 .exceptionally(ex -> {
@@ -367,6 +379,34 @@ public class ExistingImageWorkflow {
                 });
     }
 
+    private static void proceedWithRotationAndAcquisition(
+            List<PathObject> annotations,
+            AffineTransform transform,
+            SampleSetupController.SampleSetupResult sample,
+            Project<BufferedImage> project,
+            String tempTileDirectory,
+            String modeWithIndex,
+            double pixelSize,
+            QuPathGUI qupathGUI) {
+
+        // 9. Get rotation angles based on modality
+        logger.info("Checking rotation requirements for modality: {}", sample.modality());
+        RotationManager rotationManager = new RotationManager(sample.modality());
+
+        rotationManager.getRotationAngles(sample.modality())
+                .thenAccept(rotationAngles -> {
+                    logger.info("Rotation angles returned: {}", rotationAngles);
+
+                    // Process annotations with already-transformed coordinates
+                    processAnnotations(annotations, transform, sample, project,
+                            tempTileDirectory, modeWithIndex, pixelSize,
+                            qupathGUI, rotationAngles, rotationManager);
+                })
+                .exceptionally(ex -> {
+                    logger.error("Rotation angle selection failed", ex);
+                    return null;
+                });
+    }
     /**
      * Process all annotations: transform tiles, acquire, and queue stitching.
      * This version handles rotation by processing each angle separately.

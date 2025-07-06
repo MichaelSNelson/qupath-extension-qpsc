@@ -39,7 +39,8 @@ public class BoundingBoxController {
             Dialog<BoundingBoxResult> dlg = new Dialog<>();
             dlg.initModality(Modality.APPLICATION_MODAL);
             dlg.setTitle(res.getString("boundingBox.title"));
-            dlg.setHeaderText(res.getString("boundingBox.header"));
+            dlg.setHeaderText(res.getString("boundingBox.header") +
+                    "\n\nNote: Enter coordinates in microscope stage units (microns).");
 
             // 2) Add OK and Cancel buttons, with localized labels
             ButtonType okType = new ButtonType(

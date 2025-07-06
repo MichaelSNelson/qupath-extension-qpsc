@@ -135,12 +135,13 @@ public class SetupScope implements QuPathExtension, GitHubProject {
                 }
 		);
 // 3) Macro image workflow (only enabled if image has macro)
-		MenuItem macroImageOption = new MenuItem(res.getString("menu.macroimage"));
+		MenuItem alignmentOption = new MenuItem(res.getString("menu.microscopeAlignment"));
 
-		logger.info("Creating macro image menu item. Config valid: {}", configValid);
+		logger.info("Creating microscope alignment menu item. Config valid: {}", configValid);
+
 
 // Create a simple binding like existing image uses
-		macroImageOption.disableProperty().bind(
+		alignmentOption.disableProperty().bind(
 				Bindings.createBooleanBinding(
 						() -> {
 							if (!configValid) {
@@ -180,9 +181,9 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 				)
 		);
 
-		macroImageOption.setOnAction(e -> {
+		alignmentOption.setOnAction(e -> {
 			try {
-				QPScopeController.getInstance().startWorkflow("macroImage");
+				QPScopeController.getInstance().startWorkflow("microscopeAlignment");
 			} catch (IOException ex) {
 				throw new RuntimeException(ex);
 			}
@@ -211,40 +212,39 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 					}
 				}
 		);
-		MenuItem testRefreshOption = new MenuItem("Test Macro Detection");
-		testRefreshOption.setOnAction(e -> {
-			var data = qupath.getImageData();
-			if (data == null) {
-				logger.info("TEST: No image data");
-			} else {
-				var server = data.getServer();
-				if (server == null) {
-					logger.info("TEST: No server");
-				} else {
-					try {
-						var list = server.getAssociatedImageList();
-						logger.info("TEST: Associated images = {}", list);
-						logger.info("TEST: Contains macro = {}", list != null && list.contains("macro"));
-
-						// Force re-evaluation of bindings
-						Platform.runLater(() -> {
-							macroImageOption.disableProperty().get(); // Force evaluation
-							logger.info("TEST: Macro menu disabled = {}", macroImageOption.isDisable());
-						});
-					} catch (Exception ex) {
-						logger.error("TEST: Error", ex);
-					}
-				}
-			}
-		});
+//		MenuItem testRefreshOption = new MenuItem("Test Macro Detection");
+//		testRefreshOption.setOnAction(e -> {
+//			var data = qupath.getImageData();
+//			if (data == null) {
+//				logger.info("TEST: No image data");
+//			} else {
+//				var server = data.getServer();
+//				if (server == null) {
+//					logger.info("TEST: No server");
+//				} else {
+//					try {
+//						var list = server.getAssociatedImageList();
+//						logger.info("TEST: Associated images = {}", list);
+//						logger.info("TEST: Contains macro = {}", list != null && list.contains("macro"));
+//
+//						// Force re-evaluation of bindings
+//						Platform.runLater(() -> {
+//							alignmentOption.disableProperty().get(); // Force evaluation
+//							logger.info("TEST: Macro menu disabled = {}", alignmentOption.isDisable());
+//						});
+//					} catch (Exception ex) {
+//						logger.error("TEST: Error", ex);
+//					}
+//				}
+//			}
+//		});
 		// Add them straight to the QP Scope menu
 		extensionMenu.getItems().addAll(
 				boundingBoxOption,
 				existingImageOption,
-				macroImageOption,  // Add this line
+				alignmentOption,  // Add this line
 				stageControlOption,
-				testOption,
-				testRefreshOption
+				testOption
 		);
 
 		logger.info("Menu items added for extension: " + EXTENSION_NAME);

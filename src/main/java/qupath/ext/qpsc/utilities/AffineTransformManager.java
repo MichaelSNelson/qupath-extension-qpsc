@@ -5,8 +5,11 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import qupath.ext.qpsc.controller.MicroscopeController;
+import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 
 import java.awt.geom.AffineTransform;
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -265,5 +268,62 @@ public class AffineTransformManager {
 
         logger.info("Transform validation passed for all test points");
         return true;
+    }
+    /**
+     * Loads and applies a saved transform from preferences.
+     *
+     * @return The loaded transform, or null if no saved transform exists or cannot be loaded
+     */
+    public static AffineTransform loadSavedTransformFromPreferences() {
+        String savedTransformName = QPPreferenceDialog.getSavedTransformName();
+        if (savedTransformName == null || savedTransformName.isEmpty()) {
+            logger.debug("No saved transform name in preferences");
+            return null;
+        }
+
+        try {
+            String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
+            AffineTransformManager manager = new AffineTransformManager(
+                    new File(configPath).getParent());
+
+            TransformPreset savedPreset = manager.getTransform(savedTransformName);
+
+            if (savedPreset != null) {
+                logger.info("Loaded saved microscope alignment: {}", savedTransformName);
+                AffineTransform transform = savedPreset.getTransform();
+
+                // Apply it to the microscope controller
+                MicroscopeController.getInstance().setCurrentTransform(transform);
+
+                return transform;
+            } else {
+                logger.warn("Saved transform '{}' not found in transform manager", savedTransformName);
+                return null;
+            }
+        } catch (Exception e) {
+            logger.error("Error loading saved transform", e);
+            return null;
+        }
+    }
+
+    /**
+     * Checks if a valid saved transform exists in preferences.
+     *
+     * @return true if a transform is saved and can be loaded
+     */
+    public static boolean hasSavedTransform() {
+        String savedName = QPPreferenceDialog.getSavedTransformName();
+        if (savedName == null || savedName.isEmpty()) {
+            return false;
+        }
+
+        try {
+            String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
+            AffineTransformManager manager = new AffineTransformManager(
+                    new File(configPath).getParent());
+            return manager.getTransform(savedName) != null;
+        } catch (Exception e) {
+            return false;
+        }
     }
 }
