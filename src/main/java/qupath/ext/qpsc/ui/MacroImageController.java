@@ -385,6 +385,8 @@ public class MacroImageController {
                 brightnessMinSpinner.setVisible(true);
                 brightnessMaxLabel.setVisible(true);
                 brightnessMaxSpinner.setVisible(true);
+                minSizeLabel.setVisible(true);
+                minSizeSpinner.setVisible(true);
             }
         });
 
