@@ -102,22 +102,14 @@ public class QPProjectFunctions {
             } else {
                 // Try to extract file path and add to project
                 String imagePath = extractImagePath(currentImageData);
-                try {
+
                     if (imagePath != null && new File(imagePath).exists()) {
                         logger.info("Adding new image to project: {}", imagePath);
                         matchingImage = importImageToProject(qupathGUI, project, new File(imagePath),
                                 isSlideFlippedX, isSlideFlippedY);
-                        waitForImageLoaded(qupathGUI, imagePath, () -> {
-                            System.out.println("Wait for image to load");
-
-                        });
                     } else {
                         logger.warn("Could not extract valid file path from current image");
                     }
-
-                } catch (Exception ex) {
-                    ex.printStackTrace();
-                }
             }
         } else {
             logger.info("No current image open in QuPath");
@@ -496,31 +488,5 @@ public class QPProjectFunctions {
             logger.info("Saved current image data to project entry");
         }
     }
-    public static void waitForImageLoaded(QuPathGUI qupath, String expectedImageNameOrPath, Runnable onLoaded) {
-        new Thread(() -> {
-            boolean loaded = false;
-            while (!loaded) {
-                try {
-                    // Sleep between checks
-                    Thread.sleep(200);
 
-                    // Get the currently active image in the viewer
-                    ImageData<?> imageData = qupath.getImageData();
-                    if (imageData != null) {
-                        String serverPath = imageData.getServer().getPath();
-                        System.out.println("Currently loaded image: " + serverPath);
-
-                        if (serverPath != null && serverPath.contains(expectedImageNameOrPath)) {
-                            loaded = true;
-                            System.out.println("Target image loaded!");
-                            // Run logic on UI thread
-                            Platform.runLater(onLoaded);
-                        }
-                    }
-                } catch (InterruptedException e) {
-                    break;
-                }
-            }
-        }).start();
-    }
 }
