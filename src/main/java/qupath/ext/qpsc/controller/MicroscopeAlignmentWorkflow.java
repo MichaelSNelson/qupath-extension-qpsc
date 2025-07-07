@@ -77,12 +77,30 @@ public class MicroscopeAlignmentWorkflow {
     /**
      * Processes the workflow based on user configuration.
      */
-    // In MacroImageWorkflow.java, replace the processWorkflow method starting around line 94:
     private static void processWorkflow(QuPathGUI gui,
                                         MacroImageController.WorkflowConfig config,
                                         AffineTransformManager transformManager) {
 
-        // 1. First ensure we have a properly set up project with flipped image
+        // 1. FIRST analyze the macro image BEFORE any project operations
+        logger.info("Analyzing macro image before project setup");
+
+        MacroImageAnalyzer.MacroAnalysisResult analysis = MacroImageAnalyzer.analyzeMacroImage(
+                gui.getImageData(),
+                config.thresholdMethod(),
+                config.thresholdParams()
+        );
+
+        if (analysis == null) {
+            Platform.runLater(() -> UIFunctions.notifyUserOfError(
+                    "Failed to analyze macro image. Ensure the image has an associated macro.",
+                    "Analysis Error"));
+            return;
+        }
+
+        logger.info("Macro image analysis successful, found {} tissue regions",
+                analysis.getTissueRegions().size());
+
+        // 2. Now set up the project (which may lose the macro image if flips are needed)
         logger.info("Setting up project for macro workflow");
 
         // Get flip preferences
@@ -91,6 +109,10 @@ public class MicroscopeAlignmentWorkflow {
 
         Platform.runLater(() -> {
             try {
+                // Log current state
+                logger.info("Current image data before project setup: {}",
+                        gui.getImageData() != null ? "Available" : "NULL");
+
                 // Create/open project and add current image with flips
                 Map<String, Object> projectDetails = QPProjectFunctions.createAndOpenQuPathProject(
                         gui,
@@ -106,26 +128,39 @@ public class MicroscopeAlignmentWorkflow {
                 String tempTileDirectory = (String) projectDetails.get("tempTileDirectory");
                 String modeWithIndex = (String) projectDetails.get("imagingModeWithIndex");
 
-                // Wait for image to load
-                Thread.sleep(500);
+                // Wait for image to load and verify it's available
+                Thread.sleep(1000);
 
-                // 2. Now analyze macro image
-                logger.info("Analyzing macro image with method: {}", config.thresholdMethod());
+                // Log current state after project setup
+                logger.info("Current image data after project setup: {}",
+                        gui.getImageData() != null ? "Available" : "NULL");
 
-                MacroImageAnalyzer.MacroAnalysisResult analysis = MacroImageAnalyzer.analyzeMacroImage(
-                        gui.getImageData(),
-                        config.thresholdMethod(),
-                        config.thresholdParams()
-                );
+                // Verify image data is loaded
+                if (gui.getImageData() == null) {
+                    logger.error("Image data not available after project setup");
 
-                if (analysis == null) {
-                    Platform.runLater(() -> UIFunctions.notifyUserOfError(
-                            "Failed to analyze macro image. Ensure the image has an associated macro.",
-                            "Analysis Error"));
-                    return;
+                    // Try to recover by checking if we have a matching image to open
+                    var matchingImage = projectDetails.get("matchingImage");
+                    if (matchingImage instanceof qupath.lib.projects.ProjectImageEntry) {
+                        logger.info("Attempting to open matching image from project");
+                        gui.openImageEntry((qupath.lib.projects.ProjectImageEntry<BufferedImage>) matchingImage);
+                        Thread.sleep(1000);
+
+                        if (gui.getImageData() == null) {
+                            UIFunctions.notifyUserOfError(
+                                    "Failed to load image after project setup. Please try reopening the image manually.",
+                                    "Image Loading Error");
+                            return;
+                        }
+                    } else {
+                        UIFunctions.notifyUserOfError(
+                                "Image data not available after project setup. Please try again.",
+                                "Image Loading Error");
+                        return;
+                    }
                 }
 
-                // 3. Create annotations from macro analysis
+                // 3. Create annotations from macro analysis (already done before project setup)
                 createAnnotationsFromMacro(gui, analysis, config);
 
                 // 4. Get annotations that were just created
@@ -152,7 +187,7 @@ public class MicroscopeAlignmentWorkflow {
                 int cameraWidth = mgr.getInteger("imagingMode", config.sampleSetup().modality(), "detector", "width_px");
                 int cameraHeight = mgr.getInteger("imagingMode", config.sampleSetup().modality(), "detector", "height_px");
 
-                // Get macro pixel size for scaling
+                // Get macro pixel size from the original analysis (not from current image which might not have macro)
                 double macroPixelSize = gui.getImageData().getServer()
                         .getPixelCalibration().getAveragedPixelSizeMicrons();
 

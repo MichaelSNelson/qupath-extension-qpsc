@@ -60,6 +60,7 @@ public class QPProjectFunctions {
      * @param qupathGUI           the QuPath GUI instance
      * @param projectsFolderPath  root folder for all projects
      * @param sampleLabel         subfolder / project name
+     * @param sampleModality      imaging modality
      * @param isSlideFlippedX     flip X on import?
      * @param isSlideFlippedY     flip Y on import?
      * @return a Map containing project details
@@ -93,6 +94,9 @@ public class QPProjectFunctions {
             if (existingEntry != null) {
                 logger.info("Image already exists in project: {}", existingEntry.getImageName());
                 matchingImage = existingEntry;
+
+                // Important: When we set the project, QuPath might clear the current image
+                // So we need to ensure it gets reopened after project is set
             } else {
                 // Try to extract file path and add to project
                 String imagePath = extractImagePath(currentImageData);
@@ -110,6 +114,23 @@ public class QPProjectFunctions {
 
         // Set the project as active
         qupathGUI.setProject(project);
+
+        // Setting the project can clear the current image, so ensure we reopen it
+        if (matchingImage != null) {
+            logger.info("Reopening image after project set: {}", matchingImage.getImageName());
+            qupathGUI.openImageEntry(matchingImage);
+            // Wait briefly for image to load
+            try {
+                Thread.sleep(1000);
+            } catch (InterruptedException e) {
+                logger.debug("Interrupted while waiting for image load");
+            }
+
+            // Verify image loaded successfully
+            if (qupathGUI.getImageData() == null) {
+                logger.error("Failed to reopen image after setting project");
+            }
+        }
 
         // 4) Package results
         Map<String,Object> result = new HashMap<>();
@@ -330,6 +351,7 @@ public class QPProjectFunctions {
 
     /**
      * Adds an image file to the given project, applying flips if requested.
+     * This method preserves associated images (like macro images) when adding to the project.
      */
     public static boolean addImageToProject(
             File imageFile,
@@ -345,15 +367,40 @@ public class QPProjectFunctions {
                 imageFile.getName(), isSlideFlippedX, isSlideFlippedY);
 
         String imageUri = imageFile.toURI().toString();
-        ImageServer<BufferedImage> original = ImageServers.buildServer(imageUri);
+        ImageServer<BufferedImage> server = ImageServers.buildServer(imageUri);
+
+        // Check if we need to apply transforms
+        if (!isSlideFlippedX && !isSlideFlippedY) {
+            // No transforms needed - add directly to preserve all associated images
+            logger.info("No flips needed, adding image directly to preserve associated images");
+            ProjectImageEntry<BufferedImage> entry = project.addImage(server.getBuilder());
+
+            ImageData<BufferedImage> imageData = entry.readImageData();
+            var regionStore = QPEx.getQuPath().getImageRegionStore();
+            var thumb = regionStore.getThumbnail(imageData.getServer(), 0, 0, true);
+            var imageType = GuiTools.estimateImageType(imageData.getServer(), thumb);
+            imageData.setImageType(imageType);
+            entry.setImageName(imageFile.getName());
+
+            project.syncChanges();
+            entry.saveImageData(imageData);
+
+            logger.info("Successfully added image to project with all associated images");
+            return true;
+        }
+
+        // If we need to flip, we have to use the TransformedServerBuilder
+        // but this will lose associated images
+        logger.warn("Applying flips to image - associated images (macro) will not be preserved in the project");
+
         AffineTransform transform = new AffineTransform();
         double scaleX = isSlideFlippedX ? -1 : 1;
         double scaleY = isSlideFlippedY ? -1 : 1;
         transform.scale(scaleX, scaleY);
-        if (isSlideFlippedX) transform.translate(-original.getWidth(), 0);
-        if (isSlideFlippedY) transform.translate(0, -original.getHeight());
+        if (isSlideFlippedX) transform.translate(-server.getWidth(), 0);
+        if (isSlideFlippedY) transform.translate(0, -server.getHeight());
 
-        ImageServer<BufferedImage> flipped = new TransformedServerBuilder(original)
+        ImageServer<BufferedImage> flipped = new TransformedServerBuilder(server)
                 .transform(transform)
                 .build();
         ProjectImageEntry<BufferedImage> entry = project.addImage(flipped.getBuilder());
@@ -368,7 +415,7 @@ public class QPProjectFunctions {
         project.syncChanges();
         entry.saveImageData(imageData);
 
-        logger.info("Successfully added image to project: {}", imageFile.getName());
+        logger.info("Successfully added flipped image to project (associated images not preserved)");
         return true;
     }
 
