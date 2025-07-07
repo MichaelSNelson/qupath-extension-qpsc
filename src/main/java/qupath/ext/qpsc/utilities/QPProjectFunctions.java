@@ -108,7 +108,7 @@ public class QPProjectFunctions {
                         matchingImage = importImageToProject(qupathGUI, project, new File(imagePath),
                                 isSlideFlippedX, isSlideFlippedY);
                         waitForImageLoaded(qupathGUI, imagePath, () -> {
-                            System.out.println("Now running annotation logic!");
+                            System.out.println("Wait for image to load");
 
                         });
                     } else {
