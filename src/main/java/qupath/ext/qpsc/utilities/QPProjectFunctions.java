@@ -6,6 +6,7 @@ import java.nio.file.Paths;
 import java.net.URI;
 import java.net.URISyntaxException;
 
+import javafx.application.Platform;
 import qupath.lib.gui.QuPathGUI;
 import qupath.fx.dialogs.Dialogs;
 import qupath.lib.gui.scripting.QPEx;
@@ -29,6 +30,7 @@ import java.util.Map;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
 
 /**
  * QPProjectFunctions
@@ -100,12 +102,21 @@ public class QPProjectFunctions {
             } else {
                 // Try to extract file path and add to project
                 String imagePath = extractImagePath(currentImageData);
-                if (imagePath != null && new File(imagePath).exists()) {
-                    logger.info("Adding new image to project: {}", imagePath);
-                    matchingImage = importImageToProject(qupathGUI, project, new File(imagePath),
-                            isSlideFlippedX, isSlideFlippedY);
-                } else {
-                    logger.warn("Could not extract valid file path from current image");
+                try {
+                    if (imagePath != null && new File(imagePath).exists()) {
+                        logger.info("Adding new image to project: {}", imagePath);
+                        matchingImage = importImageToProject(qupathGUI, project, new File(imagePath),
+                                isSlideFlippedX, isSlideFlippedY);
+                        waitForImageLoaded(qupathGUI, imagePath, () -> {
+                            System.out.println("Now running annotation logic!");
+
+                        });
+                    } else {
+                        logger.warn("Could not extract valid file path from current image");
+                    }
+
+                } catch (Exception ex) {
+                    ex.printStackTrace();
                 }
             }
         } else {
@@ -484,5 +495,32 @@ public class QPProjectFunctions {
             entry.saveImageData(QP.getCurrentImageData());
             logger.info("Saved current image data to project entry");
         }
+    }
+    public static void waitForImageLoaded(QuPathGUI qupath, String expectedImageNameOrPath, Runnable onLoaded) {
+        new Thread(() -> {
+            boolean loaded = false;
+            while (!loaded) {
+                try {
+                    // Sleep between checks
+                    Thread.sleep(200);
+
+                    // Get the currently active image in the viewer
+                    ImageData<?> imageData = qupath.getImageData();
+                    if (imageData != null) {
+                        String serverPath = imageData.getServer().getPath();
+                        System.out.println("Currently loaded image: " + serverPath);
+
+                        if (serverPath != null && serverPath.contains(expectedImageNameOrPath)) {
+                            loaded = true;
+                            System.out.println("Target image loaded!");
+                            // Run logic on UI thread
+                            Platform.runLater(onLoaded);
+                        }
+                    }
+                } catch (InterruptedException e) {
+                    break;
+                }
+            }
+        }).start();
     }
 }
