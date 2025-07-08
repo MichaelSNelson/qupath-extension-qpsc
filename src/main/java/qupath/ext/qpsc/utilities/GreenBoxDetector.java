@@ -31,7 +31,7 @@ public class GreenBoxDetector {
         public double brightnessMax = 0.9;      // Maximum brightness
         public int minBoxWidth = 100;           // Minimum box width in pixels
         public int minBoxHeight = 100;          // Minimum box height in pixels
-        public int edgeThickness = 10;          // Expected thickness of box edges
+        public int edgeThickness = 3;          // Expected thickness of box edges
         public boolean requireRectangle = true; // Only accept rectangular shapes
     }
 
