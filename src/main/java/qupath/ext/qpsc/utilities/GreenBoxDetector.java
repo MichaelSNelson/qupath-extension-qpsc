@@ -338,30 +338,42 @@ public class GreenBoxDetector {
 
     /**
      * Calculates initial affine transform based on green box detection.
+     * The green box in the macro represents the exact area of the main image.
      *
-     * @param greenBoxInMacro The detected green box in macro coordinates
-     * @param mainImageBounds The bounds of the main image
-     * @param macroPixelSize Pixel size of the macro image in microns
+     * @param greenBoxInMacro The detected green box in macro coordinates (pixels)
+     * @param mainImageWidth Width of the main image in pixels
+     * @param mainImageHeight Height of the main image in pixels
+     * @param macroPixelSize Pixel size of the macro image in microns (default ~80)
      * @param mainPixelSize Pixel size of the main image in microns
      * @return Initial affine transform from macro to main image coordinates
      */
     public static AffineTransform calculateInitialTransform(
             ROI greenBoxInMacro,
-            Rectangle mainImageBounds,
+            int mainImageWidth,
+            int mainImageHeight,
             double macroPixelSize,
             double mainPixelSize) {
 
-        // The green box in the macro image represents the same physical area as the main image
-        // So we need to map greenBox coordinates to mainImage coordinates
+        // The green box area in the macro represents the entire main image
+        // We need to map macro pixels to main image pixels
 
-        // Calculate scale factors
-        double scaleX = (mainImageBounds.width * mainPixelSize) /
-                (greenBoxInMacro.getBoundsWidth() * macroPixelSize);
-        double scaleY = (mainImageBounds.height * mainPixelSize) /
-                (greenBoxInMacro.getBoundsHeight() * macroPixelSize);
+        // Physical size of the green box in microns
+        double boxWidthMicrons = greenBoxInMacro.getBoundsWidth() * macroPixelSize;
+        double boxHeightMicrons = greenBoxInMacro.getBoundsHeight() * macroPixelSize;
 
-        // Calculate translation
-        // The top-left of the green box maps to (0,0) in the main image
+        // Physical size of the main image in microns
+        double mainWidthMicrons = mainImageWidth * mainPixelSize;
+        double mainHeightMicrons = mainImageHeight * mainPixelSize;
+
+        // These should be approximately equal - log any discrepancy
+        logger.info("Green box physical size: {}x{} µm", boxWidthMicrons, boxHeightMicrons);
+        logger.info("Main image physical size: {}x{} µm", mainWidthMicrons, mainHeightMicrons);
+
+        // Calculate pixel-to-pixel scale factors
+        double scaleX = mainImageWidth / greenBoxInMacro.getBoundsWidth();
+        double scaleY = mainImageHeight / greenBoxInMacro.getBoundsHeight();
+
+        // Translation to align top-left corners
         double translateX = -greenBoxInMacro.getBoundsX() * scaleX;
         double translateY = -greenBoxInMacro.getBoundsY() * scaleY;
 
@@ -370,8 +382,12 @@ public class GreenBoxDetector {
         transform.translate(translateX, translateY);
         transform.scale(scaleX, scaleY);
 
-        logger.info("Initial transform from green box: scale=({}, {}), translate=({}, {})",
+        logger.info("Green box transform: scale=({}, {}), translate=({}, {})",
                 scaleX, scaleY, translateX, translateY);
+        logger.info("Maps macro box ({}, {}, {}, {}) to main image (0, 0, {}, {})",
+                greenBoxInMacro.getBoundsX(), greenBoxInMacro.getBoundsY(),
+                greenBoxInMacro.getBoundsWidth(), greenBoxInMacro.getBoundsHeight(),
+                mainImageWidth, mainImageHeight);
 
         return transform;
     }

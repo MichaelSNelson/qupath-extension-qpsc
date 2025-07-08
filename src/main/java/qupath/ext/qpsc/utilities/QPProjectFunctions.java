@@ -7,6 +7,8 @@ import java.net.URI;
 import java.net.URISyntaxException;
 
 import javafx.application.Platform;
+import javafx.beans.value.ChangeListener;
+import javafx.beans.value.ObservableValue;
 import qupath.lib.gui.QuPathGUI;
 import qupath.fx.dialogs.Dialogs;
 import qupath.lib.gui.scripting.QPEx;
@@ -478,6 +480,20 @@ public class QPProjectFunctions {
         }
 
         return project;
+    }
+    public static void onImageLoadedInViewer(QuPathGUI qupathGUI, String expectedImagePath, Runnable onLoaded) {
+        ChangeListener<ImageData<?>> listener = new ChangeListener<ImageData<?>>() {
+            @Override
+            public void changed(ObservableValue<? extends ImageData<?>> obs, ImageData<?> oldImage, ImageData<?> newImage) {
+                if (newImage == null) return;
+                String serverPath = newImage.getServer().getPath();
+                if (serverPath != null && serverPath.contains(expectedImagePath)) {
+                    qupathGUI.getViewer().imageDataProperty().removeListener(this);
+                    onLoaded.run();
+                }
+            }
+        };
+        qupathGUI.getViewer().imageDataProperty().addListener(listener);
     }
 
     /** Saves the current ImageData into its ProjectImageEntry. */

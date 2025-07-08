@@ -11,161 +11,412 @@ import javafx.embed.swing.SwingFXUtils;
 import javafx.util.StringConverter;
 import qupath.ext.qpsc.utilities.AffineTransformManager;
 import qupath.ext.qpsc.utilities.MacroImageAnalyzer;
+import qupath.ext.qpsc.utilities.GreenBoxDetector;
 import qupath.lib.gui.QuPathGUI;
 
 import java.text.DecimalFormat;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.ResourceBundle;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
-//TODO ADD LOGGING
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
- * UI controller for macro image-based acquisition workflows.
- * Handles dialogs for transform selection, threshold configuration,
- * and workflow options.
+ * UI controller for microscope alignment workflow.
+ * This workflow creates/refines affine transforms between macro and main images.
  *
  * @since 0.3.0
  */
 public class MacroImageController {
+    private static final Logger logger = LoggerFactory.getLogger(MacroImageController.class);
 
     /**
-     * Configuration for the macro workflow.
+     * Configuration for the alignment workflow.
      */
-    public record WorkflowConfig(
-            SampleSetupController.SampleSetupResult sampleSetup,
+    public record AlignmentConfig(
             boolean useExistingTransform,
             AffineTransformManager.TransformPreset selectedTransform,
             boolean saveTransform,
             String transformName,
             MacroImageAnalyzer.ThresholdMethod thresholdMethod,
             Map<String, Object> thresholdParams,
-            boolean createSingleBounds
+            GreenBoxDetector.DetectionParams greenBoxParams,
+            boolean useGreenBoxDetection
     ) {}
 
     /**
-     * Result from save transform dialog.
+     * Shows the main alignment workflow dialog.
+     * This is focused on creating/refining transforms, NOT acquisition.
      */
-    public record SaveTransformResult(
-            String name,
-            String microscope,
-            String mountingMethod,
-            String notes
-    ) {}
-
-    /**
-     * Shows the main macro workflow configuration dialog.
-     */
-    public static CompletableFuture<WorkflowConfig> showWorkflowDialog(
+    public static CompletableFuture<AlignmentConfig> showAlignmentDialog(
             QuPathGUI gui,
             AffineTransformManager transformManager,
             String currentMicroscope) {
 
-        CompletableFuture<WorkflowConfig> future = new CompletableFuture<>();
+        CompletableFuture<AlignmentConfig> future = new CompletableFuture<>();
 
         Platform.runLater(() -> {
             ResourceBundle res = ResourceBundle.getBundle("qupath.ext.qpsc.ui.strings");
 
-            Dialog<WorkflowConfig> dialog = new Dialog<>();
+            Dialog<AlignmentConfig> dialog = new Dialog<>();
             dialog.initModality(Modality.NONE);
             dialog.setTitle("Microscope Alignment Setup");
-            dialog.setHeaderText("Create or verify microscope alignment using macro image analysis");
+            dialog.setHeaderText("Create or verify microscope alignment between macro and main images");
             dialog.setResizable(true);
 
             // Set dialog size
-            dialog.getDialogPane().setPrefSize(700, 600);
+            dialog.getDialogPane().setPrefSize(800, 700);
             dialog.getDialogPane().setMinHeight(Region.USE_PREF_SIZE);
 
-            // Create tabbed interface
+            // Create tabbed interface with color coding
             TabPane tabs = new TabPane();
             tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
 
+            // Create styled tabs with colors to make them more noticeable
             // Tab 1: Transform Selection
             Tab transformTab = createTransformTab(transformManager, currentMicroscope);
+            Label transformLabel = new Label("1. Transform");
+            transformLabel.setStyle("-fx-text-fill: white; -fx-font-weight: bold; -fx-background-color: #3498db; -fx-padding: 5;");
+            transformTab.setGraphic(transformLabel);
 
-            // Tab 2: Threshold Settings - with COLOR_DECONVOLUTION as default
+            // Tab 2: Green Box Detection (with asterisk to show it needs visiting)
+            Tab greenBoxTab = createGreenBoxTab(gui);
+            Label greenBoxLabel = new Label("2. Green Box Detection *");
+            greenBoxLabel.setStyle("-fx-text-fill: white; -fx-font-weight: bold; -fx-background-color: #27ae60; -fx-padding: 5;");
+            greenBoxTab.setGraphic(greenBoxLabel);
+
+            // Tab 3: Tissue Threshold Settings (with asterisk to show it needs visiting)
             Tab thresholdTab = createThresholdTab(gui);
+            Label thresholdLabel = new Label("3. Tissue Detection *");
+            thresholdLabel.setStyle("-fx-text-fill: white; -fx-font-weight: bold; -fx-background-color: #e67e22; -fx-padding: 5;");
+            thresholdTab.setGraphic(thresholdLabel);
 
-            // Tab 3: Acquisition Options
-            Tab optionsTab = createOptionsTab();
+            tabs.getTabs().addAll(transformTab, greenBoxTab, thresholdTab);
 
-            tabs.getTabs().addAll(transformTab, thresholdTab, optionsTab);
+            // Track which tabs have been visited
+            Set<Tab> visitedTabs = new HashSet<>();
+            visitedTabs.add(transformTab); // First tab is always visited
 
-            // Dialog content
+            tabs.getSelectionModel().selectedItemProperty().addListener((obs, oldTab, newTab) -> {
+                if (newTab != null) {
+                    visitedTabs.add(newTab);
+                }
+            });
+
+            // Add instructions
             VBox content = new VBox(10);
             content.setPadding(new Insets(10));
-            content.getChildren().add(tabs);
+
+            Label instructions = new Label(
+                    "This workflow creates an alignment transform between the macro image and main image.\n" +
+                            "1. Choose to create new or refine existing transform\n" +
+                            "2. Configure green box detection to find the scanned area (REQUIRED: Visit this tab)\n" +
+                            "3. Configure tissue detection for annotation placement (OR visit this tab)\n\n" +
+                            "You must visit at least one detection tab (2 or 3) before proceeding.\n" +
+                            "The created transform will be saved and available in the Existing Image workflow."
+            );
+            instructions.setWrapText(true);
+            instructions.setStyle("-fx-background-color: #ecf0f1; -fx-padding: 10; -fx-border-color: #bdc3c7; -fx-font-weight: bold;");
+
+            content.getChildren().addAll(instructions, tabs);
 
             dialog.getDialogPane().setContent(content);
 
             // Buttons
-            ButtonType runType = new ButtonType("Create/Verify Alignment", ButtonBar.ButtonData.OK_DONE);
+            ButtonType createType = new ButtonType("Create/Update Alignment", ButtonBar.ButtonData.OK_DONE);
             ButtonType cancelType = new ButtonType("Cancel", ButtonBar.ButtonData.CANCEL_CLOSE);
-            dialog.getDialogPane().getButtonTypes().addAll(runType, cancelType);
+            dialog.getDialogPane().getButtonTypes().addAll(createType, cancelType);
 
-            // Store the tabs for access in result converter
-            dialog.getDialogPane().setUserData(tabs);
+            // Disable OK button until detection tabs are visited
+            Button okButton = (Button) dialog.getDialogPane().lookupButton(createType);
+            okButton.setDisable(true);
 
-            // Result converter - simplified to just return a marker
+            // Update button state when tabs are visited
+            tabs.getSelectionModel().selectedItemProperty().addListener((obs, oldTab, newTab) -> {
+                if (newTab != null) {
+                    visitedTabs.add(newTab);
+
+                    // Remove asterisk from visited tab
+                    if (newTab == greenBoxTab && greenBoxLabel.getText().endsWith(" *")) {
+                        greenBoxLabel.setText("2. Green Box Detection");
+                    } else if (newTab == thresholdTab && thresholdLabel.getText().endsWith(" *")) {
+                        thresholdLabel.setText("3. Tissue Detection");
+                    }
+
+                    // Enable OK button only if at least one detection tab has been visited
+                    boolean hasVisitedDetection = visitedTabs.contains(greenBoxTab) ||
+                            visitedTabs.contains(thresholdTab);
+                    okButton.setDisable(!hasVisitedDetection);
+
+                    // Update button tooltip
+                    if (!hasVisitedDetection) {
+                        okButton.setTooltip(new Tooltip("Please visit at least one detection tab (Green Box or Tissue Detection)"));
+                    } else {
+                        okButton.setTooltip(null);
+                    }
+                }
+            });
+
+            // Result converter
             dialog.setResultConverter(button -> {
-                if (button == runType) {
-                    // Return a non-null marker to indicate success
-                    return new WorkflowConfig(null, false, null, false, "",
-                            MacroImageAnalyzer.ThresholdMethod.COLOR_DECONVOLUTION,
-                            new HashMap<>(), true);
+                if (button == createType) {
+                    return gatherAlignmentConfig(transformTab, greenBoxTab, thresholdTab);
                 }
                 return null;
             });
 
-            var result = dialog.showAndWait();
-
-            if (result.isPresent() && result.get() != null) {
-                // User clicked "Run Workflow" - now gather the actual settings
-                Tab transformTabFinal = tabs.getTabs().get(0);
-                Tab thresholdTabFinal = tabs.getTabs().get(1);
-                Tab optionsTabFinal = tabs.getTabs().get(2);
-
-                // Show sample setup dialog
-                SampleSetupController.showDialog()
-                        .thenAccept(sample -> {
-                            if (sample != null) {
-                                // Now gather the complete config with all settings
-                                WorkflowConfig completeConfig = gatherWorkflowConfig(
-                                        sample,
-                                        transformTabFinal,
-                                        thresholdTabFinal,
-                                        optionsTabFinal);
-                                future.complete(completeConfig);
-                            } else {
-                                future.complete(null);
-                            }
-                        })
-                        .exceptionally(ex -> {
-                            future.completeExceptionally(ex);
-                            return null;
-                        });
-            } else {
-                // User cancelled the main dialog
-                future.complete(null);
-            }
+            dialog.showAndWait().ifPresentOrElse(
+                    config -> {
+                        if (config != null) {
+                            future.complete(config);
+                        } else {
+                            future.complete(null);
+                        }
+                    },
+                    () -> future.complete(null)
+            );
         });
 
         return future;
     }
+
+    /**
+     * Creates the green box detection tab.
+     */
+    private static Tab createGreenBoxTab(QuPathGUI gui) {
+        Tab tab = new Tab();
+
+        VBox content = new VBox(10);
+        content.setPadding(new Insets(10));
+
+        // Enable/disable green box detection
+        CheckBox enableGreenBox = new CheckBox("Use green box detection for initial positioning");
+        enableGreenBox.setSelected(true);
+
+        // Detection parameters
+        GridPane paramsGrid = new GridPane();
+        paramsGrid.setHgap(10);
+        paramsGrid.setVgap(5);
+        paramsGrid.setDisable(false);
+
+        Label greenThresholdLabel = new Label("Green Dominance:");
+        Spinner<Double> greenThresholdSpinner = new Spinner<>(0.0, 1.0, 0.4, 0.05);
+        greenThresholdSpinner.setEditable(true);
+        greenThresholdSpinner.setPrefWidth(100);
+
+        Label saturationLabel = new Label("Min Saturation:");
+        Spinner<Double> saturationSpinner = new Spinner<>(0.0, 1.0, 0.3, 0.05);
+        saturationSpinner.setEditable(true);
+        saturationSpinner.setPrefWidth(100);
+
+        Label brightnessMinLabel = new Label("Min Brightness:");
+        Spinner<Double> brightnessMinSpinner = new Spinner<>(0.0, 1.0, 0.3, 0.05);
+        brightnessMinSpinner.setEditable(true);
+        brightnessMinSpinner.setPrefWidth(100);
+
+        Label brightnessMaxLabel = new Label("Max Brightness:");
+        Spinner<Double> brightnessMaxSpinner = new Spinner<>(0.0, 1.0, 0.9, 0.05);
+        brightnessMaxSpinner.setEditable(true);
+        brightnessMaxSpinner.setPrefWidth(100);
+
+        Label edgeThicknessLabel = new Label("Edge Thickness:");
+        Spinner<Integer> edgeThicknessSpinner = new Spinner<>(1, 50, 3, 1);
+        edgeThicknessSpinner.setEditable(true);
+        edgeThicknessSpinner.setPrefWidth(100);
+
+        // Add to grid
+        int row = 0;
+        paramsGrid.add(greenThresholdLabel, 0, row);
+        paramsGrid.add(greenThresholdSpinner, 1, row++);
+        paramsGrid.add(saturationLabel, 0, row);
+        paramsGrid.add(saturationSpinner, 1, row++);
+        paramsGrid.add(brightnessMinLabel, 0, row);
+        paramsGrid.add(brightnessMinSpinner, 1, row++);
+        paramsGrid.add(brightnessMaxLabel, 0, row);
+        paramsGrid.add(brightnessMaxSpinner, 1, row++);
+        paramsGrid.add(edgeThicknessLabel, 0, row);
+        paramsGrid.add(edgeThicknessSpinner, 1, row++);
+
+        // Bind enable state
+        enableGreenBox.selectedProperty().addListener((obs, old, selected) -> {
+            paramsGrid.setDisable(!selected);
+        });
+
+        // Preview button and image
+        Button previewButton = new Button("Preview Green Box Detection");
+        ImageView previewImage = new ImageView();
+        previewImage.setPreserveRatio(true);
+        previewImage.setSmooth(true);
+
+        ScrollPane imageScroll = new ScrollPane(previewImage);
+        imageScroll.setPrefViewportHeight(300);
+        imageScroll.setFitToWidth(true);
+        imageScroll.setFitToHeight(true);
+        imageScroll.setPannable(true);
+
+        previewImage.fitWidthProperty().bind(imageScroll.widthProperty().subtract(20));
+        previewImage.fitHeightProperty().bind(imageScroll.heightProperty().subtract(20));
+
+        Label resultLabel = new Label();
+        resultLabel.setWrapText(true);
+
+        previewButton.setOnAction(e -> {
+            // Get macro image
+            var imageData = gui.getImageData();
+            if (imageData == null) {
+                resultLabel.setText("No image loaded");
+                resultLabel.setStyle("-fx-text-fill: red;");
+                return;
+            }
+
+            try {
+                // First, get the list of associated images
+                var associatedList = imageData.getServer().getAssociatedImageList();
+                if (associatedList == null || associatedList.isEmpty()) {
+                    resultLabel.setText("No associated images found");
+                    resultLabel.setStyle("-fx-text-fill: red;");
+                    logger.warn("No associated images in the image server");
+                    return;
+                }
+
+                logger.info("Available associated images: {}", associatedList);
+
+                // Find the macro image - try different approaches
+                java.awt.image.BufferedImage macroImage = null;
+                String macroKey = null;
+
+                // Try to find which entry contains "macro"
+                for (String name : associatedList) {
+                    if (name.toLowerCase().contains("macro")) {
+                        macroKey = name;
+                        break;
+                    }
+                }
+
+                if (macroKey != null) {
+                    logger.info("Attempting to retrieve macro image with key: '{}'", macroKey);
+
+                    // Try different ways to get the image
+                    try {
+                        // Try exact name first
+                        macroImage = (java.awt.image.BufferedImage) imageData.getServer().getAssociatedImage(macroKey);
+                    } catch (Exception ex) {
+                        logger.debug("Failed with exact key '{}': {}", macroKey, ex.getMessage());
+                    }
+
+                    // If that didn't work and it's a series format, try just the series part
+                    if (macroImage == null && macroKey.startsWith("Series ")) {
+                        String seriesOnly = macroKey.split("\\s*\\(")[0].trim();
+                        logger.info("Trying series-only key: '{}'", seriesOnly);
+                        try {
+                            macroImage = (java.awt.image.BufferedImage) imageData.getServer().getAssociatedImage(seriesOnly);
+                        } catch (Exception ex) {
+                            logger.debug("Failed with series key '{}': {}", seriesOnly, ex.getMessage());
+                        }
+                    }
+
+                    // Last resort - try just "macro"
+                    if (macroImage == null) {
+                        logger.info("Trying simple 'macro' key");
+                        try {
+                            macroImage = (java.awt.image.BufferedImage) imageData.getServer().getAssociatedImage("macro");
+                        } catch (Exception ex) {
+                            logger.debug("Failed with 'macro' key: {}", ex.getMessage());
+                        }
+                    }
+                }
+
+                if (macroImage != null) {
+                    logger.info("Successfully retrieved macro image: {}x{}",
+                            macroImage.getWidth(), macroImage.getHeight());
+
+                    // Create detection parameters
+                    GreenBoxDetector.DetectionParams params = new GreenBoxDetector.DetectionParams();
+                    params.greenThreshold = greenThresholdSpinner.getValue();
+                    params.saturationMin = saturationSpinner.getValue();
+                    params.brightnessMin = brightnessMinSpinner.getValue();
+                    params.brightnessMax = brightnessMaxSpinner.getValue();
+                    params.edgeThickness = edgeThicknessSpinner.getValue();
+
+                    // Run detection
+                    var result = GreenBoxDetector.detectGreenBox(macroImage, params);
+
+                    if (result != null) {
+                        Image fxImage = SwingFXUtils.toFXImage(result.getDebugImage(), null);
+                        previewImage.setImage(fxImage);
+                        resultLabel.setText(String.format(
+                                "Green box detected at (%.0f, %.0f) size %.0fx%.0f with confidence %.2f",
+                                result.getDetectedBox().getBoundsX(),
+                                result.getDetectedBox().getBoundsY(),
+                                result.getDetectedBox().getBoundsWidth(),
+                                result.getDetectedBox().getBoundsHeight(),
+                                result.getConfidence()
+                        ));
+                        resultLabel.setStyle("-fx-text-fill: green;");
+                    } else {
+                        resultLabel.setText("No green box detected with current parameters");
+                        resultLabel.setStyle("-fx-text-fill: orange;");
+                        // Still show the macro image
+                        Image fxImage = SwingFXUtils.toFXImage(macroImage, null);
+                        previewImage.setImage(fxImage);
+                    }
+                } else {
+                    resultLabel.setText("Could not retrieve macro image. Associated images: " + associatedList);
+                    resultLabel.setStyle("-fx-text-fill: red;");
+                    logger.error("Failed to retrieve macro image from any attempted key");
+                }
+            } catch (Exception ex) {
+                String errorMsg = "Error during green box detection: " + ex.getMessage();
+                resultLabel.setText(errorMsg);
+                resultLabel.setStyle("-fx-text-fill: red;");
+                logger.error("Error in green box preview", ex);
+            }
+        });
+
+        // Layout
+        content.getChildren().addAll(
+                enableGreenBox,
+                new Separator(),
+                paramsGrid,
+                previewButton,
+                resultLabel,
+                imageScroll
+        );
+
+        VBox.setVgrow(imageScroll, Priority.ALWAYS);
+
+        // Store components for retrieval
+        content.setUserData(Map.of(
+                "enable", enableGreenBox,
+                "greenThreshold", greenThresholdSpinner,
+                "saturation", saturationSpinner,
+                "brightnessMin", brightnessMinSpinner,
+                "brightnessMax", brightnessMaxSpinner,
+                "edgeThickness", edgeThicknessSpinner
+        ));
+
+        tab.setContent(content);
+        return tab;
+    }
+
     /**
      * Creates the transform selection tab.
      */
     private static Tab createTransformTab(AffineTransformManager manager,
                                           String currentMicroscope) {
-        Tab tab = new Tab("1. Transform");
+        Tab tab = new Tab();
 
         VBox content = new VBox(10);
         content.setPadding(new Insets(10));
 
         // Radio buttons for transform choice
         ToggleGroup transformGroup = new ToggleGroup();
-        RadioButton useExisting = new RadioButton("Use saved transform");
-        RadioButton createNew = new RadioButton("Create new transform (manual alignment)");
+        RadioButton useExisting = new RadioButton("Refine existing transform");
+        RadioButton createNew = new RadioButton("Create new transform");
         useExisting.setToggleGroup(transformGroup);
         createNew.setToggleGroup(transformGroup);
         createNew.setSelected(true);
@@ -210,28 +461,19 @@ public class MacroImageController {
         });
 
         // Save new transform option
-        CheckBox saveNewTransform = new CheckBox("Save new transform for future use");
+        CheckBox saveNewTransform = new CheckBox("Save transform when complete");
+        saveNewTransform.setSelected(true);
         TextField transformName = new TextField();
-        transformName.setPromptText("Transform preset name");
-        transformName.setDisable(true);
-
-        saveNewTransform.selectedProperty().addListener((obs, old, selected) -> {
-            transformName.setDisable(!selected || useExisting.isSelected());
-        });
-
-        createNew.selectedProperty().addListener((obs, old, selected) -> {
-            saveNewTransform.setDisable(!selected);
-            transformName.setDisable(!selected || !saveNewTransform.isSelected());
-        });
+        transformName.setPromptText("Transform name (e.g., 'Slide_Mount_v1')");
 
         // Layout
         content.getChildren().addAll(
-                new Label("Transform Selection:"),
+                new Label("Transform Mode:"),
+                createNew,
                 useExisting,
                 transformCombo,
                 detailsArea,
                 new Separator(),
-                createNew,
                 saveNewTransform,
                 transformName
         );
@@ -249,10 +491,10 @@ public class MacroImageController {
     }
 
     /**
-     * Creates the threshold configuration tab.
+     * Creates the threshold configuration tab with proper min region size handling.
      */
     private static Tab createThresholdTab(QuPathGUI gui) {
-        Tab tab = new Tab("2. Threshold");
+        Tab tab = new Tab();
 
         VBox content = new VBox(10);
         content.setPadding(new Insets(10));
@@ -260,100 +502,66 @@ public class MacroImageController {
         // Threshold method selection
         ComboBox<MacroImageAnalyzer.ThresholdMethod> methodCombo = new ComboBox<>();
         methodCombo.getItems().addAll(MacroImageAnalyzer.ThresholdMethod.values());
-
+        methodCombo.getSelectionModel().select(MacroImageAnalyzer.ThresholdMethod.COLOR_DECONVOLUTION);
 
         // Method-specific parameters
         GridPane paramsGrid = new GridPane();
         paramsGrid.setHgap(10);
         paramsGrid.setVgap(5);
 
-        // Percentile parameter
+        // Create all parameter controls
         Label percentileLabel = new Label("Percentile:");
         Spinner<Double> percentileSpinner = new Spinner<>(0.0, 1.0, 0.5, 0.05);
         percentileSpinner.setEditable(true);
 
-        // Fixed threshold parameter
         Label fixedLabel = new Label("Threshold:");
         Spinner<Integer> fixedSpinner = new Spinner<>(0, 255, 128);
         fixedSpinner.setEditable(true);
 
-        // H&E Eosin parameters
         Label eosinLabel = new Label("Eosin Sensitivity:");
         Spinner<Double> eosinSpinner = new Spinner<>(0.0, 2.0, 0.3, 0.1);
         eosinSpinner.setEditable(true);
-        eosinSpinner.getValueFactory().setConverter(new StringConverter<Double>() {
-            private final DecimalFormat df = new DecimalFormat("#.####");
-            @Override
-            public String toString(Double value) {
-                return df.format(value);
-            }
-            @Override
-            public Double fromString(String string) {
-                try {
-                    return Double.parseDouble(string);
-                } catch (NumberFormatException e) {
-                    return eosinSpinner.getValue();
-                }
-            }
-        });
 
-        // H&E Hematoxylin parameters
         Label hematoxylinLabel = new Label("Hematoxylin Sensitivity:");
         Spinner<Double> hematoxylinSpinner = new Spinner<>(0.0, 1.0, 0.15, 0.05);
         hematoxylinSpinner.setEditable(true);
 
-        // Saturation threshold
         Label saturationLabel = new Label("Min Saturation:");
         Spinner<Double> saturationSpinner = new Spinner<>(0.0, 1.0, 0.1, 0.05);
         saturationSpinner.setEditable(true);
 
-        // Brightness range
         Label brightnessMinLabel = new Label("Min Brightness:");
-        Spinner<Double> brightnessMinSpinner = new Spinner<>(0.0, 1.0, 0.6, 0.05);
+        Spinner<Double> brightnessMinSpinner = new Spinner<>(0.0, 1.0, 0.2, 0.05);
         brightnessMinSpinner.setEditable(true);
 
         Label brightnessMaxLabel = new Label("Max Brightness:");
         Spinner<Double> brightnessMaxSpinner = new Spinner<>(0.0, 1.0, 0.95, 0.05);
         brightnessMaxSpinner.setEditable(true);
 
+        // Min region size - always visible
         Label minSizeLabel = new Label("Min Region Size (pixels):");
-        Spinner<Integer> minSizeSpinner = new Spinner<>(100, 10000, 1000, 100);
+        Spinner<Integer> minSizeSpinner = new Spinner<>(100, 50000, 1000, 100);
         minSizeSpinner.setEditable(true);
 
-// Add to grid at line ~356:
-        paramsGrid.add(minSizeLabel, 0, 7);
-        paramsGrid.add(minSizeSpinner, 1, 7);
-
-        // Initially hide all parameters
-        percentileLabel.setVisible(false);
-        percentileSpinner.setVisible(false);
-        fixedLabel.setVisible(false);
-        fixedSpinner.setVisible(false);
-        eosinLabel.setVisible(false);
-        eosinSpinner.setVisible(false);
-        hematoxylinLabel.setVisible(false);
-        hematoxylinSpinner.setVisible(false);
-        saturationLabel.setVisible(false);
-        saturationSpinner.setVisible(false);
-        brightnessMinLabel.setVisible(false);
-        brightnessMinSpinner.setVisible(false);
-        brightnessMaxLabel.setVisible(false);
-        brightnessMaxSpinner.setVisible(false);
-
-        paramsGrid.add(percentileLabel, 0, 0);
-        paramsGrid.add(percentileSpinner, 1, 0);
-        paramsGrid.add(fixedLabel, 0, 1);
-        paramsGrid.add(fixedSpinner, 1, 1);
-        paramsGrid.add(eosinLabel, 0, 2);
-        paramsGrid.add(eosinSpinner, 1, 2);
-        paramsGrid.add(hematoxylinLabel, 0, 3);
-        paramsGrid.add(hematoxylinSpinner, 1, 3);
-        paramsGrid.add(saturationLabel, 0, 4);
-        paramsGrid.add(saturationSpinner, 1, 4);
-        paramsGrid.add(brightnessMinLabel, 0, 5);
-        paramsGrid.add(brightnessMinSpinner, 1, 5);
-        paramsGrid.add(brightnessMaxLabel, 0, 6);
-        paramsGrid.add(brightnessMaxSpinner, 1, 6);
+        // Add all to grid
+        int row = 0;
+        paramsGrid.add(percentileLabel, 0, row);
+        paramsGrid.add(percentileSpinner, 1, row++);
+        paramsGrid.add(fixedLabel, 0, row);
+        paramsGrid.add(fixedSpinner, 1, row++);
+        paramsGrid.add(eosinLabel, 0, row);
+        paramsGrid.add(eosinSpinner, 1, row++);
+        paramsGrid.add(hematoxylinLabel, 0, row);
+        paramsGrid.add(hematoxylinSpinner, 1, row++);
+        paramsGrid.add(saturationLabel, 0, row);
+        paramsGrid.add(saturationSpinner, 1, row++);
+        paramsGrid.add(brightnessMinLabel, 0, row);
+        paramsGrid.add(brightnessMinSpinner, 1, row++);
+        paramsGrid.add(brightnessMaxLabel, 0, row);
+        paramsGrid.add(brightnessMaxSpinner, 1, row++);
+        paramsGrid.add(new Separator(), 0, row++, 2, 1);
+        paramsGrid.add(minSizeLabel, 0, row);
+        paramsGrid.add(minSizeSpinner, 1, row++);
 
         // Update parameter visibility based on method
         methodCombo.getSelectionModel().selectedItemProperty().addListener((obs, old, method) -> {
@@ -364,52 +572,38 @@ public class MacroImageController {
                     hematoxylinLabel, hematoxylinSpinner,
                     saturationLabel, saturationSpinner,
                     brightnessMinLabel, brightnessMinSpinner,
-                    brightnessMaxLabel, brightnessMaxSpinner,
-                    minSizeLabel, minSizeSpinner);
+                    brightnessMaxLabel, brightnessMaxSpinner);
         });
-        // Set default selection AFTER the listener is attached, to make sure all options are available
-        methodCombo.getSelectionModel().select(MacroImageAnalyzer.ThresholdMethod.COLOR_DECONVOLUTION);
-        updateThresholdParameterVisibility(MacroImageAnalyzer.ThresholdMethod.COLOR_DECONVOLUTION,
+
+        // Trigger initial visibility update
+        updateThresholdParameterVisibility(methodCombo.getValue(),
                 percentileLabel, percentileSpinner,
                 fixedLabel, fixedSpinner,
                 eosinLabel, eosinSpinner,
                 hematoxylinLabel, hematoxylinSpinner,
                 saturationLabel, saturationSpinner,
                 brightnessMinLabel, brightnessMinSpinner,
-                brightnessMaxLabel, brightnessMaxSpinner,
-                minSizeLabel, minSizeSpinner);
-        Platform.runLater(() -> {
-            MacroImageAnalyzer.ThresholdMethod currentMethod = methodCombo.getValue();
-            if (currentMethod == MacroImageAnalyzer.ThresholdMethod.COLOR_DECONVOLUTION) {
-                brightnessMinLabel.setVisible(true);
-                brightnessMinSpinner.setVisible(true);
-                brightnessMaxLabel.setVisible(true);
-                brightnessMaxSpinner.setVisible(true);
-                minSizeLabel.setVisible(true);
-                minSizeSpinner.setVisible(true);
-            }
-        });
+                brightnessMaxLabel, brightnessMaxSpinner);
 
         // Preview button
-        Button previewButton = new Button("Preview Threshold");
+        Button previewButton = new Button("Preview Tissue Detection");
         ImageView previewImage = new ImageView();
         previewImage.setPreserveRatio(true);
         previewImage.setSmooth(true);
 
-        // Create a scroll pane for the image
         ScrollPane imageScroll = new ScrollPane(previewImage);
-        imageScroll.setPrefViewportHeight(400);
-        imageScroll.setPrefViewportWidth(500);
+        imageScroll.setPrefViewportHeight(300);
         imageScroll.setFitToWidth(true);
         imageScroll.setFitToHeight(true);
         imageScroll.setPannable(true);
 
-        // Bind image size to scroll pane size
         previewImage.fitWidthProperty().bind(imageScroll.widthProperty().subtract(20));
         previewImage.fitHeightProperty().bind(imageScroll.heightProperty().subtract(20));
 
+        Label statsLabel = new Label();
+
         previewButton.setOnAction(e -> {
-            // Run analysis with current settings
+            // Gather current parameters including min size
             Map<String, Object> params = new HashMap<>();
             params.put("percentile", percentileSpinner.getValue());
             params.put("threshold", fixedSpinner.getValue());
@@ -419,6 +613,7 @@ public class MacroImageController {
             params.put("brightnessMin", brightnessMinSpinner.getValue());
             params.put("brightnessMax", brightnessMaxSpinner.getValue());
             params.put("minRegionSize", minSizeSpinner.getValue());
+
             var result = MacroImageAnalyzer.analyzeMacroImage(
                     gui.getImageData(),
                     methodCombo.getValue(),
@@ -429,31 +624,35 @@ public class MacroImageController {
                 Image fxImage = SwingFXUtils.toFXImage(result.getThresholdedImage(), null);
                 previewImage.setImage(fxImage);
 
-                // Force layout update
-                Platform.runLater(() -> {
-                    imageScroll.layout();
-                    previewImage.autosize();
-                });
+                // Update stats
+                statsLabel.setText(String.format(
+                        "Detected %d tissue regions (after %d pixel minimum filter)\nTotal tissue bounds: %.0fx%.0f pixels",
+                        result.getTissueRegions().size(),
+                        minSizeSpinner.getValue(),
+                        result.getTissueBounds().getBoundsWidth(),
+                        result.getTissueBounds().getBoundsHeight()
+                ));
             }
         });
 
         // Layout
         VBox contentBox = new VBox(10);
         contentBox.getChildren().addAll(
-                new Label("Threshold Method:"),
+                new Label("Tissue Detection Method:"),
                 methodCombo,
                 paramsGrid,
                 new Separator(),
                 previewButton,
+                statsLabel,
                 imageScroll
         );
 
-        // Make the VBox grow to fill available space
         VBox.setVgrow(imageScroll, Priority.ALWAYS);
         contentBox.setFillWidth(true);
 
+        // Store data
         contentBox.setUserData(Map.of(
-        "method", methodCombo,
+                "method", methodCombo,
                 "percentile", percentileSpinner,
                 "fixed", fixedSpinner,
                 "eosinThreshold", eosinSpinner,
@@ -462,12 +661,16 @@ public class MacroImageController {
                 "brightnessMin", brightnessMinSpinner,
                 "brightnessMax", brightnessMaxSpinner,
                 "minSize", minSizeSpinner
-
         ));
 
         tab.setContent(contentBox);
         return tab;
     }
+
+    /**
+     * Updates visibility of threshold parameters based on selected method.
+     * Note: Min region size is always visible.
+     */
     private static void updateThresholdParameterVisibility(
             MacroImageAnalyzer.ThresholdMethod method,
             Label percentileLabel, Spinner<Double> percentileSpinner,
@@ -476,8 +679,7 @@ public class MacroImageController {
             Label hematoxylinLabel, Spinner<Double> hematoxylinSpinner,
             Label saturationLabel, Spinner<Double> saturationSpinner,
             Label brightnessMinLabel, Spinner<Double> brightnessMinSpinner,
-            Label brightnessMaxLabel, Spinner<Double> brightnessMaxSpinner,
-            Label minSizeLabel, Spinner<Integer> minSizeSpinner) {
+            Label brightnessMaxLabel, Spinner<Double> brightnessMaxSpinner) {
 
         // Hide all first
         percentileLabel.setVisible(false);
@@ -494,8 +696,6 @@ public class MacroImageController {
         brightnessMinSpinner.setVisible(false);
         brightnessMaxLabel.setVisible(false);
         brightnessMaxSpinner.setVisible(false);
-        minSizeLabel.setVisible(false);
-        minSizeSpinner.setVisible(false);
 
         // Show relevant parameters
         if (method != null) {
@@ -523,8 +723,6 @@ public class MacroImageController {
                     brightnessMinSpinner.setVisible(true);
                     brightnessMaxLabel.setVisible(true);
                     brightnessMaxSpinner.setVisible(true);
-                    minSizeLabel.setVisible(true);
-                    minSizeSpinner.setVisible(true);
                 }
                 case HE_DUAL -> {
                     eosinLabel.setVisible(true);
@@ -541,60 +739,13 @@ public class MacroImageController {
             }
         }
     }
-    /**
-     * Creates the acquisition options tab.
-     */
-    private static Tab createOptionsTab() {
-        Tab tab = new Tab("3. Options");
-
-        VBox content = new VBox(10);
-        content.setPadding(new Insets(10));
-
-        // Region creation options
-        Label regionLabel = new Label("Region Creation:");
-        RadioButton singleBounds = new RadioButton("Single bounding box around all tissue");
-        RadioButton individualRegions = new RadioButton("Individual regions for each tissue area");
-
-        ToggleGroup regionGroup = new ToggleGroup();
-        singleBounds.setToggleGroup(regionGroup);
-        individualRegions.setToggleGroup(regionGroup);
-        singleBounds.setSelected(true);
-
-        // Additional options
-        CheckBox addBuffer = new CheckBox("Add buffer around detected regions");
-        addBuffer.setSelected(true);
-
-        CheckBox autoFocus = new CheckBox("Perform autofocus on first tile");
-        autoFocus.setSelected(false);
-
-        // Layout
-        content.getChildren().addAll(
-                regionLabel,
-                singleBounds,
-                individualRegions,
-                new Separator(),
-                addBuffer,
-                autoFocus
-        );
-
-        // Store components
-        content.setUserData(Map.of(
-                "singleBounds", singleBounds,
-                "addBuffer", addBuffer,
-                "autoFocus", autoFocus
-        ));
-
-        tab.setContent(content);
-        return tab;
-    }
 
     /**
      * Gathers all configuration from the dialog tabs.
      */
     @SuppressWarnings("unchecked")
-    private static WorkflowConfig gatherWorkflowConfig(
-            SampleSetupController.SampleSetupResult sample,
-            Tab transformTab, Tab thresholdTab, Tab optionsTab) {
+    private static AlignmentConfig gatherAlignmentConfig(
+            Tab transformTab, Tab greenBoxTab, Tab thresholdTab) {
 
         // Get transform settings
         var transformData = (Map<String, Object>) transformTab.getContent().getUserData();
@@ -604,6 +755,22 @@ public class MacroImageController {
         CheckBox saveNew = (CheckBox) transformData.get("saveNew");
         TextField nameField = (TextField) transformData.get("transformName");
 
+        // Get green box settings
+        var greenBoxData = (Map<String, Object>) greenBoxTab.getContent().getUserData();
+        CheckBox enableGreenBox = (CheckBox) greenBoxData.get("enable");
+        Spinner<Double> greenThresholdSpinner = (Spinner<Double>) greenBoxData.get("greenThreshold");
+        Spinner<Double> saturationSpinner = (Spinner<Double>) greenBoxData.get("saturation");
+        Spinner<Double> brightnessMinSpinner = (Spinner<Double>) greenBoxData.get("brightnessMin");
+        Spinner<Double> brightnessMaxSpinner = (Spinner<Double>) greenBoxData.get("brightnessMax");
+        Spinner<Integer> edgeThicknessSpinner = (Spinner<Integer>) greenBoxData.get("edgeThickness");
+
+        GreenBoxDetector.DetectionParams greenBoxParams = new GreenBoxDetector.DetectionParams();
+        greenBoxParams.greenThreshold = greenThresholdSpinner.getValue();
+        greenBoxParams.saturationMin = saturationSpinner.getValue();
+        greenBoxParams.brightnessMin = brightnessMinSpinner.getValue();
+        greenBoxParams.brightnessMax = brightnessMaxSpinner.getValue();
+        greenBoxParams.edgeThickness = edgeThicknessSpinner.getValue();
+
         // Get threshold settings
         var thresholdData = (Map<String, Object>) thresholdTab.getContent().getUserData();
         ComboBox<MacroImageAnalyzer.ThresholdMethod> methodCombo =
@@ -612,9 +779,9 @@ public class MacroImageController {
         Spinner<Integer> fixedSpinner = (Spinner<Integer>) thresholdData.get("fixed");
         Spinner<Double> eosinSpinner = (Spinner<Double>) thresholdData.get("eosinThreshold");
         Spinner<Double> hematoxylinSpinner = (Spinner<Double>) thresholdData.get("hematoxylinThreshold");
-        Spinner<Double> saturationSpinner = (Spinner<Double>) thresholdData.get("saturationThreshold");
-        Spinner<Double> brightnessMinSpinner = (Spinner<Double>) thresholdData.get("brightnessMin");
-        Spinner<Double> brightnessMaxSpinner = (Spinner<Double>) thresholdData.get("brightnessMax");
+        Spinner<Double> saturationThresholdSpinner = (Spinner<Double>) thresholdData.get("saturationThreshold");
+        Spinner<Double> brightnessMinThresholdSpinner = (Spinner<Double>) thresholdData.get("brightnessMin");
+        Spinner<Double> brightnessMaxThresholdSpinner = (Spinner<Double>) thresholdData.get("brightnessMax");
         Spinner<Integer> minSizeSpinner = (Spinner<Integer>) thresholdData.get("minSize");
 
         Map<String, Object> thresholdParams = new HashMap<>();
@@ -622,91 +789,20 @@ public class MacroImageController {
         thresholdParams.put("threshold", fixedSpinner.getValue());
         thresholdParams.put("eosinThreshold", eosinSpinner.getValue());
         thresholdParams.put("hematoxylinThreshold", hematoxylinSpinner.getValue());
-        thresholdParams.put("saturationThreshold", saturationSpinner.getValue());
-        thresholdParams.put("brightnessMin", brightnessMinSpinner.getValue());
-        thresholdParams.put("brightnessMax", brightnessMaxSpinner.getValue());
+        thresholdParams.put("saturationThreshold", saturationThresholdSpinner.getValue());
+        thresholdParams.put("brightnessMin", brightnessMinThresholdSpinner.getValue());
+        thresholdParams.put("brightnessMax", brightnessMaxThresholdSpinner.getValue());
         thresholdParams.put("minRegionSize", minSizeSpinner.getValue());
-        // Get options
-        var optionsData = (Map<String, Object>) optionsTab.getContent().getUserData();
-        RadioButton singleBounds = (RadioButton) optionsData.get("singleBounds");
 
-        return new WorkflowConfig(
-                sample,
+        return new AlignmentConfig(
                 useExisting.isSelected(),
                 useExisting.isSelected() ? combo.getValue() : null,
                 saveNew.isSelected(),
                 nameField.getText(),
                 methodCombo.getValue(),
                 thresholdParams,
-                singleBounds.isSelected()
+                greenBoxParams,
+                enableGreenBox.isSelected()
         );
-    }
-
-    /**
-     * Shows dialog to save a new transform preset.
-     */
-    public static CompletableFuture<SaveTransformResult> showSaveTransformDialog(
-            String defaultName) {
-
-        CompletableFuture<SaveTransformResult> future = new CompletableFuture<>();
-
-        Platform.runLater(() -> {
-            Dialog<SaveTransformResult> dialog = new Dialog<>();
-            dialog.setTitle("Save Transform Preset");
-            dialog.setHeaderText("Save this transform for future use");
-
-            GridPane grid = new GridPane();
-            grid.setHgap(10);
-            grid.setVgap(10);
-            grid.setPadding(new Insets(20));
-
-            TextField nameField = new TextField(defaultName);
-            TextField microscopeField = new TextField();
-            TextField mountingField = new TextField();
-            TextArea notesArea = new TextArea();
-            notesArea.setPrefRowCount(3);
-
-            grid.add(new Label("Name:"), 0, 0);
-            grid.add(nameField, 1, 0);
-            grid.add(new Label("Microscope:"), 0, 1);
-            grid.add(microscopeField, 1, 1);
-            grid.add(new Label("Mounting Method:"), 0, 2);
-            grid.add(mountingField, 1, 2);
-            grid.add(new Label("Notes:"), 0, 3);
-            grid.add(notesArea, 1, 3);
-
-            dialog.getDialogPane().setContent(grid);
-
-            ButtonType saveType = new ButtonType("Save", ButtonBar.ButtonData.OK_DONE);
-            ButtonType cancelType = new ButtonType("Cancel", ButtonBar.ButtonData.CANCEL_CLOSE);
-            dialog.getDialogPane().getButtonTypes().addAll(saveType, cancelType);
-
-            // Disable save until required fields are filled
-            Button saveButton = (Button) dialog.getDialogPane().lookupButton(saveType);
-            saveButton.disableProperty().bind(
-                    nameField.textProperty().isEmpty()
-                            .or(microscopeField.textProperty().isEmpty())
-                            .or(mountingField.textProperty().isEmpty())
-            );
-
-            dialog.setResultConverter(button -> {
-                if (button == saveType) {
-                    return new SaveTransformResult(
-                            nameField.getText().trim(),
-                            microscopeField.getText().trim(),
-                            mountingField.getText().trim(),
-                            notesArea.getText().trim()
-                    );
-                }
-                return null;
-            });
-
-            dialog.showAndWait().ifPresentOrElse(
-                    future::complete,
-                    () -> future.complete(null)
-            );
-        });
-
-        return future;
     }
 }

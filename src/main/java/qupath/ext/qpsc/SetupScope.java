@@ -134,7 +134,7 @@ public class SetupScope implements QuPathExtension, GitHubProject {
                     }
                 }
 		);
-// 3) Macro image workflow (only enabled if image has macro)
+		// 3) Microscope alignment workflow (only enabled if image has macro)
 		MenuItem alignmentOption = new MenuItem(res.getString("menu.microscopeAlignment"));
 
 		logger.info("Creating microscope alignment menu item. Config valid: {}", configValid);

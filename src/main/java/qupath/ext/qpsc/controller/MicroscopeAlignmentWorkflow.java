@@ -1,16 +1,12 @@
 package qupath.ext.qpsc.controller;
 
 import javafx.application.Platform;
-import javafx.embed.swing.SwingFXUtils;
-import javafx.scene.control.Alert;
-import javafx.scene.control.ButtonBar;
-import javafx.scene.control.ButtonType;
-import javafx.scene.image.ImageView;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.ui.AffineTransformationController;
 import qupath.ext.qpsc.ui.MacroImageController;
+import qupath.ext.qpsc.ui.SampleSetupController;
 import qupath.ext.qpsc.ui.UIFunctions;
 import qupath.ext.qpsc.utilities.*;
 import qupath.lib.gui.QuPathGUI;
@@ -21,24 +17,29 @@ import qupath.lib.regions.ImagePlane;
 import qupath.lib.roi.ROIs;
 import qupath.lib.roi.interfaces.ROI;
 
-import java.awt.*;
 import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
-import java.util.List;
+import java.io.File;
+import java.io.IOException;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * Workflow for acquiring regions based on macro image analysis with
- * pre-saved affine transforms.
+ * Workflow for creating and saving microscope alignment transforms.
+ * This workflow does NOT perform acquisition - it only creates the transform
+ * that can be used later in the Existing Image workflow.
  *
  * @since 0.3.0
  */
 public class MicroscopeAlignmentWorkflow {
     private static final Logger logger = LoggerFactory.getLogger(MicroscopeAlignmentWorkflow.class);
 
+    // Default macro pixel size if not available from metadata
+    private static final double DEFAULT_MACRO_PIXEL_SIZE = 80.0; // microns
+
     /**
-     * Entry point for the macro-based acquisition workflow.
+     * Entry point for the microscope alignment workflow.
+     * Creates or refines an affine transform between macro and main images.
      */
     public static void run() {
         logger.info("Starting Microscope Alignment Workflow...");
@@ -53,138 +54,95 @@ public class MicroscopeAlignmentWorkflow {
             return;
         }
 
+        // Check for macro image
+        boolean hasMacro = false;
+        try {
+            var associatedImages = gui.getImageData().getServer().getAssociatedImageList();
+            if (associatedImages != null) {
+                hasMacro = associatedImages.stream()
+                        .anyMatch(name -> name.toLowerCase().contains("macro"));
+            }
+        } catch (Exception e) {
+            logger.error("Error checking for macro image", e);
+        }
+
+        if (!hasMacro) {
+            Platform.runLater(() -> UIFunctions.notifyUserOfError(
+                    "This image does not have an associated macro image.\n" +
+                            "The alignment workflow requires a macro image to establish the transform.",
+                    "No Macro Image"));
+            return;
+        }
+
         // Initialize transform manager
         String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
         AffineTransformManager transformManager = new AffineTransformManager(
-                new java.io.File(configPath).getParent());
+                new File(configPath).getParent());
 
         // Get current microscope from config
         MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(configPath);
         String microscopeName = mgr.getString("microscope", "name");
 
-        // Show workflow dialog
-        MacroImageController.showWorkflowDialog(gui, transformManager, microscopeName)
-                .thenAccept(config -> {
-                    if (config == null) {
-                        logger.info("User cancelled macro workflow");
+        // First, show sample setup dialog to get modality
+        SampleSetupController.showDialog()
+                .thenCompose(sampleSetup -> {
+                    if (sampleSetup == null) {
+                        logger.info("User cancelled at sample setup");
+                        return CompletableFuture.completedFuture(null);
+                    }
+
+                    // Now show alignment dialog
+                    return MacroImageController.showAlignmentDialog(gui, transformManager, microscopeName)
+                            .thenApply(alignConfig -> {
+                                if (alignConfig == null) {
+                                    return null;
+                                }
+                                // Package both configs together
+                                return new CombinedConfig(sampleSetup, alignConfig);
+                            });
+                })
+                .thenAccept(combinedConfig -> {
+                    if (combinedConfig == null) {
+                        logger.info("User cancelled alignment workflow");
                         return;
                     }
 
-                    // Process based on user's choice
-                    processWorkflow(gui, config, transformManager);
+                    // Process the alignment with project setup
+                    processAlignmentWithProject(gui, combinedConfig, transformManager);
                 })
                 .exceptionally(ex -> {
-                    logger.error("Macro workflow failed", ex);
+                    logger.error("Alignment workflow failed", ex);
                     Platform.runLater(() -> UIFunctions.notifyUserOfError(
                             "Workflow error: " + ex.getMessage(),
-                            "Macro Workflow Error"));
+                            "Alignment Error"));
                     return null;
                 });
     }
 
     /**
-     * Processes the workflow based on user configuration.
+     * Container for both sample setup and alignment config.
      */
-    private static void processWorkflow(QuPathGUI gui,
-                                        MacroImageController.WorkflowConfig config,
-                                        AffineTransformManager transformManager) {
+    private record CombinedConfig(
+            SampleSetupController.SampleSetupResult sampleSetup,
+            MacroImageController.AlignmentConfig alignmentConfig
+    ) {}
 
-        // 1. First analyze the macro image
-        logger.info("Analyzing macro image before project setup");
+    /**
+     * Processes the alignment with proper project setup.
+     */
+    private static void processAlignmentWithProject(
+            QuPathGUI gui,
+            CombinedConfig config,
+            AffineTransformManager transformManager) {
 
-        MacroImageAnalyzer.MacroAnalysisResult analysis = MacroImageAnalyzer.analyzeMacroImage(
-                gui.getImageData(),
-                config.thresholdMethod(),
-                config.thresholdParams()
-        );
-
-        if (analysis == null) {
-            Platform.runLater(() -> UIFunctions.notifyUserOfError(
-                    "Failed to analyze macro image. Ensure the image has an associated macro.",
-                    "Analysis Error"));
-            return;
-        }
-
-        // 2. Try to detect green box for initial positioning
-        logger.info("Attempting to detect green box in macro image");
-
-        GreenBoxDetector.DetectionParams detectParams = new GreenBoxDetector.DetectionParams();
-        GreenBoxDetector.DetectionResult greenBoxResult =
-                GreenBoxDetector.detectGreenBox(analysis.getMacroImage(), detectParams);
-
-        AffineTransform initialTransform;
-
-        if (greenBoxResult != null && greenBoxResult.getConfidence() > 0.7) {
-            logger.info("Green box detected with confidence {}", greenBoxResult.getConfidence());
-
-            // Calculate initial transform from green box
-            Rectangle mainImageBounds = new Rectangle(
-                    0, 0,
-                    gui.getImageData().getServer().getWidth(),
-                    gui.getImageData().getServer().getHeight()
-            );
-
-            double mainPixelSize = gui.getImageData().getServer()
-                    .getPixelCalibration().getAveragedPixelSizeMicrons();
-
-            initialTransform = GreenBoxDetector.calculateInitialTransform(
-                    greenBoxResult.getDetectedBox(),
-                    mainImageBounds,
-                    analysis.getScaleFactorX() * mainPixelSize, // macro pixel size
-                    mainPixelSize
-            );
-
-            // Show debug image to user
-            Platform.runLater(() -> {
-                // Create a dialog showing the green box detection
-                Alert alert = new Alert(Alert.AlertType.INFORMATION);
-                alert.setTitle("Green Box Detection");
-                alert.setHeaderText("Detected scanned region in macro image");
-
-                ImageView imageView = new ImageView(
-                        SwingFXUtils.toFXImage(greenBoxResult.getDebugImage(), null)
-                );
-                imageView.setPreserveRatio(true);
-                imageView.setFitWidth(600);
-
-                alert.getDialogPane().setContent(imageView);
-                alert.showAndWait();
-            });
-        } else {
-            initialTransform = null;
-            logger.info("Green box not detected or low confidence. Will require manual alignment.");
-        }
-
-        // 3. Create annotations in the main image based on the detected tissue regions
-        if (initialTransform != null) {
-            // We can now correctly place annotations!
-            createAnnotationsFromMacroWithTransform(gui, analysis, config, initialTransform);
-        } else {
-            // Without transform, just mark general area for user guidance
-            Platform.runLater(() -> {
-                Alert alert = new Alert(Alert.AlertType.INFORMATION);
-                alert.setTitle("Manual Annotation Required");
-                alert.setHeaderText("Please create tissue annotations manually");
-                alert.setContentText(
-                        "The green box marking the scanned region was not detected.\n" +
-                                "Please manually create annotations for the tissue regions you want to scan.\n\n" +
-                                "The macro analysis detected " + analysis.getTissueRegions().size() +
-                                " tissue regions, which can guide your annotation placement."
-                );
-                alert.showAndWait();
-            });
-        }
-
-        // 4. Continue with project setup
-        boolean flipX = QPPreferenceDialog.getFlipMacroXProperty();
-        boolean flipY = QPPreferenceDialog.getFlipMacroYProperty();
         Platform.runLater(() -> {
             try {
-                // Log current state
-                logger.info("Current image data before project setup: {}",
-                        gui.getImageData() != null ? "Available" : "NULL");
+                // 1. Create/open project and import image with flips
+                boolean flipX = QPPreferenceDialog.getFlipMacroXProperty();
+                boolean flipY = QPPreferenceDialog.getFlipMacroYProperty();
 
-                // Create/open project and add current image with flips
+                logger.info("Setting up project with flips: X={}, Y={}", flipX, flipY);
+
                 Map<String, Object> projectDetails = QPProjectFunctions.createAndOpenQuPathProject(
                         gui,
                         config.sampleSetup().projectsFolder().getAbsolutePath(),
@@ -199,173 +157,99 @@ public class MicroscopeAlignmentWorkflow {
                 String tempTileDirectory = (String) projectDetails.get("tempTileDirectory");
                 String modeWithIndex = (String) projectDetails.get("imagingModeWithIndex");
 
-                // Wait for image to load and verify it's available
+                // Wait for image to fully load
                 Thread.sleep(1000);
-
-                // Log current state after project setup
-                logger.info("Current image data after project setup: {}",
-                        gui.getImageData() != null ? "Available" : "NULL");
 
                 // Verify image data is loaded
                 if (gui.getImageData() == null) {
-                    logger.error("Image data not available after project setup");
-
-                    // Try to recover by checking if we have a matching image to open
-                    var matchingImage = projectDetails.get("matchingImage");
-                    if (matchingImage instanceof qupath.lib.projects.ProjectImageEntry) {
-                        logger.info("Attempting to open matching image from project");
-                        gui.openImageEntry((qupath.lib.projects.ProjectImageEntry<BufferedImage>) matchingImage);
-                        Thread.sleep(1000);
-
-                        if (gui.getImageData() == null) {
-                            UIFunctions.notifyUserOfError(
-                                    "Failed to load image after project setup. Please try reopening the image manually.",
-                                    "Image Loading Error");
-                            return;
-                        }
-                    } else {
-                        UIFunctions.notifyUserOfError(
-                                "Image data not available after project setup. Please try again.",
-                                "Image Loading Error");
-                        return;
-                    }
-                }
-
-                // 3. Create annotations from macro analysis (already done before project setup)
-                createAnnotationsFromMacro(gui, analysis, config);
-
-                // 4. Get annotations that were just created
-                List<PathObject> annotations = gui.getViewer().getHierarchy()
-                        .getAnnotationObjects().stream()
-                        .filter(a -> a.getPathClass() != null &&
-                                "Tissue".equals(a.getPathClass().getName()))
-                        .toList();
-
-                if (annotations.isEmpty()) {
                     UIFunctions.notifyUserOfError(
-                            "No tissue annotations found after macro analysis.",
-                            "No Annotations");
+                            "Image data not available after project setup.",
+                            "Image Loading Error");
                     return;
                 }
 
-                // 5. Now create tiles for the annotations
-                logger.info("Creating tiles for {} annotations", annotations.size());
-
-                // Get camera parameters from config
-                MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(
-                        QPPreferenceDialog.getMicroscopeConfigFileProperty());
-                double pixelSize = mgr.getDouble("imagingMode", config.sampleSetup().modality(), "pixelSize_um");
-                int cameraWidth = mgr.getInteger("imagingMode", config.sampleSetup().modality(), "detector", "width_px");
-                int cameraHeight = mgr.getInteger("imagingMode", config.sampleSetup().modality(), "detector", "height_px");
-
-                // Get macro pixel size from the original analysis (not from current image which might not have macro)
-                double macroPixelSize = gui.getImageData().getServer()
+                // 2. Get image parameters
+                double mainPixelSize = gui.getImageData().getServer()
                         .getPixelCalibration().getAveragedPixelSizeMicrons();
-
-                double frameWidthMicrons = pixelSize * cameraWidth;
-                double frameHeightMicrons = pixelSize * cameraHeight;
-
-                // Convert to QuPath pixels for tiling
-                double frameWidthQP = frameWidthMicrons / macroPixelSize;
-                double frameHeightQP = frameHeightMicrons / macroPixelSize;
-                double overlapPercent = QPPreferenceDialog.getTileOverlapPercentProperty();
-
                 boolean invertedX = QPPreferenceDialog.getInvertedXProperty();
                 boolean invertedY = QPPreferenceDialog.getInvertedYProperty();
 
-                // Build tiling request
-                TilingRequest request = new TilingRequest.Builder()
-                        .outputFolder(tempTileDirectory)
-                        .modalityName(modeWithIndex)
-                        .frameSize(frameWidthQP, frameHeightQP)
-                        .overlapPercent(overlapPercent)
-                        .annotations(annotations)
-                        .invertAxes(invertedX, invertedY)
-                        .createDetections(true)  // Important: create detection objects
-                        .addBuffer(true)
-                        .build();
+                // 3. Process green box detection if enabled
+                AffineTransform initialTransform = null;
+                if (config.alignmentConfig().useGreenBoxDetection()) {
+                    initialTransform = attemptGreenBoxDetection(gui, config.alignmentConfig());
+                }
 
-                TilingUtilities.createTiles(request);
-                logger.info("Created detection tiles for alignment");
+                // 4. Create tissue annotations
+                createTissueAnnotations(gui, config.alignmentConfig(), initialTransform);
 
-                // 6. Now proceed with alignment
+                // 5. Create tiles for alignment
+                createAlignmentTiles(gui, config.sampleSetup(), tempTileDirectory,
+                        modeWithIndex, invertedX, invertedY);
+
+                // 6. Start alignment process
                 CompletableFuture<AffineTransform> transformFuture;
 
-                if (config.useExistingTransform() && config.selectedTransform() != null) {
-                    // Use existing transform
-                    AffineTransform existing = config.selectedTransform().getTransform();
-                    logger.info("Using existing transform: {}", config.selectedTransform().getName());
-                    transformFuture = CompletableFuture.completedFuture(existing);
+                if (config.alignmentConfig().useExistingTransform() &&
+                        config.alignmentConfig().selectedTransform() != null) {
+                    // Refine existing transform
+                    logger.info("Refining existing transform: {}",
+                            config.alignmentConfig().selectedTransform().getName());
+                    AffineTransform existing = config.alignmentConfig().selectedTransform().getTransform();
+
+                    MicroscopeController.getInstance().setCurrentTransform(existing);
+
+                    transformFuture = AffineTransformationController.setupAffineTransformationAndValidationGUI(
+                            mainPixelSize, invertedX, invertedY);
 
                 } else if (initialTransform != null) {
-                    // Use the green-box derived transform as starting point
-                    logger.info("Using green box-derived initial transform");
+                    // Use green box transform as starting point
+                    logger.info("Using green box detection as initial transform");
 
-                    // Still allow user to refine it
-                    transformFuture = refineInitialTransform(gui, initialTransform, macroPixelSize,
-                            invertedX, invertedY);
+                    MicroscopeController.getInstance().setCurrentTransform(initialTransform);
+
+                    transformFuture = AffineTransformationController.setupAffineTransformationAndValidationGUI(
+                            mainPixelSize, invertedX, invertedY);
+
                 } else {
                     // Full manual alignment
-                    logger.info("Performing full manual alignment");
+                    logger.info("Starting manual alignment from scratch");
+
                     transformFuture = AffineTransformationController.setupAffineTransformationAndValidationGUI(
-                            macroPixelSize, invertedX, invertedY);
+                            mainPixelSize, invertedX, invertedY);
                 }
-                // 7. After transform is ready, save it and update preferences
+
+                // Handle the result
                 transformFuture.thenAccept(transform -> {
                     if (transform == null) {
-                        logger.info("User cancelled transform setup");
+                        logger.info("User cancelled transform creation");
                         return;
                     }
 
-                    // Save transform if requested
-                    if (config.saveTransform()) {
-                        Platform.runLater(() -> {
-                            MacroImageController.showSaveTransformDialog(config.transformName())
-                                    .thenAccept(result -> {
-                                        if (result != null) {
-                                            AffineTransformManager.TransformPreset preset =
-                                                    new AffineTransformManager.TransformPreset(
-                                                            result.name(),
-                                                            result.microscope(),
-                                                            result.mountingMethod(),
-                                                            transform,
-                                                            result.notes()
-                                                    );
-                                            transformManager.saveTransform(preset);
-                                            logger.info("Saved transform preset: {}", preset.getName());
-
-                                            // Update the preference to use this transform
-                                            QPPreferenceDialog.setSavedTransformName(preset.getName());
-
-                                            // Notify user of success
-                                            UIFunctions.notifyUserOfError(
-                                                    "Microscope alignment saved successfully!\n\n" +
-                                                            "Transform: " + preset.getName() + "\n" +
-                                                            "This transform is now available for use in acquisition workflows.",
-                                                    "Alignment Complete");
-                                        } else {
-                                            // Still update the preference if using existing transform
-                                            if (config.useExistingTransform() && config.selectedTransform() != null) {
-                                                QPPreferenceDialog.setSavedTransformName(
-                                                        config.selectedTransform().getName());
-                                            }
-                                        }
-                                    });
-                        });
-                    } else if (config.useExistingTransform() && config.selectedTransform() != null) {
-                        // Update preference to use the selected existing transform
-                        QPPreferenceDialog.setSavedTransformName(config.selectedTransform().getName());
-
-                        Platform.runLater(() -> {
-                            UIFunctions.notifyUserOfError(
-                                    "Microscope alignment verified!\n\n" +
-                                            "Using transform: " + config.selectedTransform().getName(),
-                                    "Alignment Complete");
-                        });
+                    // Save the transform if requested
+                    if (config.alignmentConfig().saveTransform()) {
+                        saveTransform(transform, config.alignmentConfig(), transformManager);
                     }
 
-                    // Set the transform in the microscope controller for immediate use
-                    MicroscopeController.getInstance().setCurrentTransform(transform);
+                    // Update preferences to use this transform
+                    if (config.alignmentConfig().saveTransform() &&
+                            config.alignmentConfig().transformName() != null &&
+                            !config.alignmentConfig().transformName().isEmpty()) {
+                        QPPreferenceDialog.setSavedTransformName(config.alignmentConfig().transformName());
+                    }
+
+                    // Notify user of success
+                    Platform.runLater(() -> {
+                        javafx.scene.control.Alert alert = new javafx.scene.control.Alert(
+                                javafx.scene.control.Alert.AlertType.INFORMATION);
+                        alert.setTitle("Alignment Complete");
+                        alert.setHeaderText("Microscope alignment completed successfully!");
+                        alert.setContentText(
+                                "The transform is now available for use in the 'Existing Image' workflow.\n\n" +
+                                        (config.alignmentConfig().saveTransform() ?
+                                                "Transform saved as: " + config.alignmentConfig().transformName() : ""));
+                        alert.showAndWait();
+                    });
 
                     logger.info("Microscope alignment workflow completed successfully");
                 });
@@ -378,375 +262,280 @@ public class MicroscopeAlignmentWorkflow {
             }
         });
     }
+
     /**
-     * Validates that a transform produces reasonable stage coordinates.
+     * Attempts green box detection and returns initial transform.
      */
-    private static boolean validateTransformForCurrentSetup(AffineTransform transform,
-                                                            QuPathGUI gui,
-                                                            MacroImageAnalyzer.MacroAnalysisResult analysis) {
+    private static AffineTransform attemptGreenBoxDetection(
+            QuPathGUI gui,
+            MacroImageController.AlignmentConfig config) {
+
         try {
-            // Get stage bounds from config
-            String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
-            MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(configPath);
+            // Get macro image
+            java.awt.image.BufferedImage macroImage = retrieveMacroImage(gui);
 
-            var xlimits = mgr.getSection("stage", "xlimit");
-            var ylimits = mgr.getSection("stage", "ylimit");
-
-            if (xlimits == null || ylimits == null) {
-                logger.error("Stage limits not found in config");
-                return false;
+            if (macroImage == null) {
+                logger.warn("Could not retrieve macro image for green box detection");
+                return null;
             }
 
-            double xMin = ((Number) xlimits.get("low")).doubleValue();
-            double xMax = ((Number) xlimits.get("high")).doubleValue();
-            double yMin = ((Number) ylimits.get("low")).doubleValue();
-            double yMax = ((Number) ylimits.get("high")).doubleValue();
+            // Run green box detection
+            var greenBoxResult = GreenBoxDetector.detectGreenBox(macroImage, config.greenBoxParams());
 
-            // Get image dimensions
-            var server = gui.getImageData().getServer();
+            if (greenBoxResult != null && greenBoxResult.getConfidence() > 0.7) {
+                logger.info("Green box detected with confidence {}", greenBoxResult.getConfidence());
 
-            return AffineTransformManager.validateTransform(
-                    transform, server.getWidth(), server.getHeight(),
-                    xMin, xMax, yMin, yMax);
+                // The green box should match the full image bounds
+                int mainWidth = gui.getImageData().getServer().getWidth();
+                int mainHeight = gui.getImageData().getServer().getHeight();
+                double mainPixelSize = gui.getImageData().getServer()
+                        .getPixelCalibration().getAveragedPixelSizeMicrons();
+
+                // Calculate transform that maps green box to full image
+                AffineTransform transform = GreenBoxDetector.calculateInitialTransform(
+                        greenBoxResult.getDetectedBox(),
+                        mainWidth,
+                        mainHeight,
+                        DEFAULT_MACRO_PIXEL_SIZE,  // Use the hardcoded 80 microns
+                        mainPixelSize
+                );
+
+                logger.info("Green box detection successful, created initial transform");
+
+                return transform;
+            }
 
         } catch (Exception e) {
-            logger.error("Error validating transform", e);
-            return false;
+            logger.error("Error during green box detection", e);
         }
+
+        return null;
     }
 
     /**
-     * Requests manual alignment from the user.
+     * Retrieves the macro image from the image server.
      */
-    private static CompletableFuture<AffineTransform> requestManualAlignment(
-            QuPathGUI gui,
-            MacroImageAnalyzer.MacroAnalysisResult analysis) {
+    private static java.awt.image.BufferedImage retrieveMacroImage(QuPathGUI gui) {
+        try {
+            var imageData = gui.getImageData();
+            if (imageData == null) return null;
 
-        // Create temporary annotation to show tissue bounds
-        ROI mainImageBounds = analysis.scaleToMainImage(analysis.getTissueBounds());
-        PathObject tempAnnotation = PathObjects.createAnnotationObject(mainImageBounds);
-        tempAnnotation.setName("Macro Tissue Bounds (Temporary)");
+            var associatedList = imageData.getServer().getAssociatedImageList();
+            if (associatedList == null) return null;
 
-
-        Platform.runLater(() -> {
-            gui.getViewer().getHierarchy().addObject(tempAnnotation);
-            gui.getViewer().repaint();
-        });
-
-        // Get pixel size
-        double pixelSize = gui.getImageData().getServer()
-                .getPixelCalibration().getAveragedPixelSizeMicrons();
-        boolean invertX = QPPreferenceDialog.getInvertedXProperty();
-        boolean invertY = QPPreferenceDialog.getInvertedYProperty();
-
-        // Use existing alignment workflow
-        return AffineTransformationController.setupAffineTransformationAndValidationGUI(
-                        pixelSize, invertX, invertY)
-                .whenComplete((transform, ex) -> {
-                    // Remove temporary annotation
-                    Platform.runLater(() -> {
-                        gui.getViewer().getHierarchy().removeObject(tempAnnotation, true);
-                        gui.getViewer().repaint();
-                    });
-                });
-    }
-
-    /**
-     * Saves a new transform preset.
-     */
-    private static void saveNewTransform(AffineTransform transform,
-                                         MacroImageController.WorkflowConfig config,
-                                         AffineTransformManager manager) {
-        Platform.runLater(() -> {
-            MacroImageController.showSaveTransformDialog(config.transformName())
-                    .thenAccept(result -> {
-                        if (result != null) {
-                            AffineTransformManager.TransformPreset preset =
-                                    new AffineTransformManager.TransformPreset(
-                                            result.name(),
-                                            result.microscope(),
-                                            result.mountingMethod(),
-                                            transform,
-                                            result.notes()
-                                    );
-                            manager.saveTransform(preset);
-                            logger.info("Saved transform preset: {}", preset.getName());
-                        }
-                    });
-        });
-    }
-
-    /**
-     * Creates annotations in QuPath from macro analysis results.
-     */
-    private static void createAnnotationsFromMacro(QuPathGUI gui,
-                                                   MacroImageAnalyzer.MacroAnalysisResult analysis,
-                                                   MacroImageController.WorkflowConfig config) {
-        Platform.runLater(() -> {
-            var hierarchy = gui.getViewer().getHierarchy();
-
-            if (config.createSingleBounds()) {
-                // Create single bounding box annotation
-                ROI bounds = analysis.scaleToMainImage(analysis.getTissueBounds());
-                PathObject annotation = PathObjects.createAnnotationObject(bounds);
-                annotation.setName("Macro Tissue Bounds");
-                annotation.setClassification("Tissue");
-
-                hierarchy.addObject(annotation);
-
-                logger.info("Created single bounds annotation");
-
-            } else {
-                // Create individual region annotations
-                List<ROI> regions = analysis.getTissueRegions();
-                int count = 0;
-
-                for (ROI macroROI : regions) {
-                    ROI mainROI = analysis.scaleToMainImage(macroROI);
-
-                    // Skip very small regions
-                    if (mainROI.getBoundsWidth() < 100 || mainROI.getBoundsHeight() < 100) {
-                        continue;
-                    }
-
-                    PathObject annotation = PathObjects.createAnnotationObject(mainROI);
-                    annotation.setName("Macro Region " + (++count));
-                    annotation.setClassification("Tissue");
-                    hierarchy.addObject(annotation);
+            // Find macro image key
+            String macroKey = null;
+            for (String name : associatedList) {
+                if (name.toLowerCase().contains("macro")) {
+                    macroKey = name;
+                    break;
                 }
-
-                logger.info("Created {} region annotations", count);
             }
 
-            gui.getViewer().repaint();
-        });
+            if (macroKey == null) return null;
+
+            // Try to retrieve it
+            Object image = imageData.getServer().getAssociatedImage(macroKey);
+            if (image instanceof java.awt.image.BufferedImage) {
+                return (java.awt.image.BufferedImage) image;
+            }
+
+            // Try variations
+            if (macroKey.startsWith("Series ")) {
+                String seriesOnly = macroKey.split("\\s*\\(")[0].trim();
+                image = imageData.getServer().getAssociatedImage(seriesOnly);
+                if (image instanceof java.awt.image.BufferedImage) {
+                    return (java.awt.image.BufferedImage) image;
+                }
+            }
+
+            // Try simple "macro"
+            image = imageData.getServer().getAssociatedImage("macro");
+            if (image instanceof java.awt.image.BufferedImage) {
+                return (java.awt.image.BufferedImage) image;
+            }
+
+        } catch (Exception e) {
+            logger.error("Error retrieving macro image", e);
+        }
+
+        return null;
     }
 
     /**
-     * Continues with the acquisition workflow using the validated transform.
+     * Creates tissue annotations based on macro analysis or green box.
      */
-    private static void continueWithAcquisition(QuPathGUI gui,
-                                                AffineTransform transform,
-                                                MacroImageController.WorkflowConfig config) {
-        // Set the transform in the microscope controller
-        MicroscopeController.getInstance().setCurrentTransform(transform);
+    private static void createTissueAnnotations(
+            QuPathGUI gui,
+            MacroImageController.AlignmentConfig config,
+            AffineTransform greenBoxTransform) {
 
-        // Get sample info from config
-        var sample = config.sampleSetup();
+        // Clear existing tissue annotations
+        var toRemove = gui.getViewer().getHierarchy().getAnnotationObjects().stream()
+                .filter(a -> a.getPathClass() != null &&
+                        "Tissue".equals(a.getPathClass().getName()))
+                .toList();
 
-        // Get annotations marked as "Tissue"
-        List<PathObject> annotations = gui.getViewer().getHierarchy()
-                .getAnnotationObjects().stream()
+        for (var annotation : toRemove) {
+            gui.getViewer().getHierarchy().removeObject(annotation, true);
+        }
+
+        if (greenBoxTransform != null) {
+            // Create annotation for the entire image area when green box is detected
+            int width = gui.getImageData().getServer().getWidth();
+            int height = gui.getImageData().getServer().getHeight();
+
+            ROI roi = ROIs.createRectangleROI(0, 0, width, height, ImagePlane.getDefaultPlane());
+
+            PathObject annotation = PathObjects.createAnnotationObject(roi);
+            annotation.setName("Full Image Area (from green box)");
+            annotation.setPathClass(gui.getAvailablePathClasses().stream()
+                    .filter(pc -> "Tissue".equals(pc.getName()))
+                    .findFirst()
+                    .orElse(null));
+
+            gui.getViewer().getHierarchy().addObject(annotation);
+            logger.info("Created full image annotation from green box detection");
+
+        } else {
+            // Run tissue analysis on macro
+            var analysis = MacroImageAnalyzer.analyzeMacroImage(
+                    gui.getImageData(),
+                    config.thresholdMethod(),
+                    config.thresholdParams()
+            );
+
+            if (analysis != null) {
+                // Scale tissue bounds to main image
+                // Note: This is approximate since we don't have the exact transform yet
+                ROI tissueBounds = analysis.scaleToMainImage(analysis.getTissueBounds());
+
+                PathObject annotation = PathObjects.createAnnotationObject(tissueBounds);
+                annotation.setName("Tissue Region (from macro analysis)");
+                annotation.setPathClass(gui.getAvailablePathClasses().stream()
+                        .filter(pc -> "Tissue".equals(pc.getName()))
+                        .findFirst()
+                        .orElse(null));
+
+                gui.getViewer().getHierarchy().addObject(annotation);
+                logger.info("Created tissue annotation from macro analysis");
+            } else {
+                // Create default annotation
+                createDefaultTissueAnnotation(gui);
+            }
+        }
+
+        gui.getViewer().repaint();
+    }
+
+    /**
+     * Creates a default tissue annotation when analysis fails.
+     */
+    private static void createDefaultTissueAnnotation(QuPathGUI gui) {
+        double imageWidth = gui.getImageData().getServer().getWidth();
+        double imageHeight = gui.getImageData().getServer().getHeight();
+
+        double margin = Math.min(imageWidth, imageHeight) * 0.1;
+        ROI roi = ROIs.createRectangleROI(
+                margin, margin,
+                imageWidth - 2 * margin,
+                imageHeight - 2 * margin,
+                ImagePlane.getDefaultPlane()
+        );
+
+        PathObject annotation = PathObjects.createAnnotationObject(roi);
+        annotation.setName("Tissue Region (adjust as needed)");
+        annotation.setPathClass(gui.getAvailablePathClasses().stream()
+                .filter(pc -> "Tissue".equals(pc.getName()))
+                .findFirst()
+                .orElse(null));
+
+        gui.getViewer().getHierarchy().addObject(annotation);
+        logger.info("Created default tissue annotation");
+    }
+
+    /**
+     * Creates detection tiles for alignment based on selected modality.
+     */
+    private static void createAlignmentTiles(
+            QuPathGUI gui,
+            SampleSetupController.SampleSetupResult sampleSetup,
+            String tempTileDirectory,
+            String modeWithIndex,
+            boolean invertedX,
+            boolean invertedY) throws IOException {
+
+        // Get annotations
+        var annotations = gui.getViewer().getHierarchy().getAnnotationObjects().stream()
                 .filter(a -> a.getPathClass() != null &&
                         "Tissue".equals(a.getPathClass().getName()))
                 .toList();
 
         if (annotations.isEmpty()) {
-            Platform.runLater(() -> UIFunctions.notifyUserOfError(
-                    "No tissue annotations found. Please verify annotations were created correctly.",
-                    "No Annotations"));
+            logger.warn("No tissue annotations found for tiling");
             return;
         }
 
-        logger.info("Continuing acquisition with {} annotations", annotations.size());
+        // Get camera parameters from config
+        MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(
+                QPPreferenceDialog.getMicroscopeConfigFileProperty());
 
-        // The rest follows the existing workflow...
-        // This would connect to the existing ExistingImageWorkflow logic
-        // but skip the manual alignment step since we already have the transform
+        double pixelSize = mgr.getDouble("imagingMode", sampleSetup.modality(), "pixelSize_um");
+        int cameraWidth = mgr.getInteger("imagingMode", sampleSetup.modality(), "detector", "width_px");
+        int cameraHeight = mgr.getInteger("imagingMode", sampleSetup.modality(), "detector", "height_px");
 
-        Platform.runLater(() -> {
-            qupath.fx.dialogs.Dialogs.showInfoNotification(
-                    "Ready for Acquisition",
-                    String.format("Ready to acquire %d regions using %s transform",
-                            annotations.size(),
-                            config.useExistingTransform() ? "saved" : "new"));
-        });
+        double mainPixelSize = gui.getImageData().getServer()
+                .getPixelCalibration().getAveragedPixelSizeMicrons();
+
+        double frameWidthMicrons = pixelSize * cameraWidth;
+        double frameHeightMicrons = pixelSize * cameraHeight;
+
+        // Convert to QuPath pixels
+        double frameWidthQP = frameWidthMicrons / mainPixelSize;
+        double frameHeightQP = frameHeightMicrons / mainPixelSize;
+        double overlapPercent = QPPreferenceDialog.getTileOverlapPercentProperty();
+
+        logger.info("Creating tiles: frame size {}x{} QP pixels ({}x{} µm) for modality {}",
+                frameWidthQP, frameHeightQP, frameWidthMicrons, frameHeightMicrons, sampleSetup.modality());
+
+        // Build tiling request
+        TilingRequest request = new TilingRequest.Builder()
+                .outputFolder(tempTileDirectory)
+                .modalityName(modeWithIndex)
+                .frameSize(frameWidthQP, frameHeightQP)
+                .overlapPercent(overlapPercent)
+                .annotations(annotations)
+                .invertAxes(invertedX, invertedY)
+                .createDetections(true)  // Important for alignment
+                .addBuffer(true)
+                .build();
+
+        TilingUtilities.createTiles(request);
+        logger.info("Created detection tiles for alignment");
     }
+
     /**
-     * Creates annotations using the detected transform from green box
+     * Saves the transform to the manager.
      */
-    private static void createAnnotationsFromMacroWithTransform(
-            QuPathGUI gui,
-            MacroImageAnalyzer.MacroAnalysisResult analysis,
-            MacroImageController.WorkflowConfig config,
-            AffineTransform macroToMain) {
+    private static void saveTransform(
+            AffineTransform transform,
+            MacroImageController.AlignmentConfig config,
+            AffineTransformManager transformManager) {
 
-        Platform.runLater(() -> {
-            var hierarchy = gui.getViewer().getHierarchy();
+        String microscopeName = MicroscopeConfigManager.getInstance(
+                QPPreferenceDialog.getMicroscopeConfigFileProperty()
+        ).getString("microscope", "name");
 
-            if (config.createSingleBounds()) {
-                // Transform the tissue bounds from macro to main image
-                ROI macroBounds = analysis.getTissueBounds();
-
-                // Transform the corners
-                double[] topLeft = {macroBounds.getBoundsX(), macroBounds.getBoundsY()};
-                double[] bottomRight = {
-                        macroBounds.getBoundsX() + macroBounds.getBoundsWidth(),
-                        macroBounds.getBoundsY() + macroBounds.getBoundsHeight()
-                };
-
-                macroToMain.transform(topLeft, 0, topLeft, 0, 1);
-                macroToMain.transform(bottomRight, 0, bottomRight, 0, 1);
-
-                // Create annotation in main image coordinates
-                ROI mainBounds = ROIs.createRectangleROI(
-                        topLeft[0], topLeft[1],
-                        bottomRight[0] - topLeft[0],
-                        bottomRight[1] - topLeft[1],
-                        ImagePlane.getDefaultPlane()
+        AffineTransformManager.TransformPreset preset =
+                new AffineTransformManager.TransformPreset(
+                        config.transformName(),
+                        microscopeName,
+                        "Standard",
+                        transform,
+                        "Created via alignment workflow"
                 );
 
-                // Clip to image bounds
-                Rectangle imageBounds = new Rectangle(
-                        0, 0,
-                        gui.getImageData().getServer().getWidth(),
-                        gui.getImageData().getServer().getHeight()
-                );
-
-                ROI clippedBounds = clipROIToImage(mainBounds, imageBounds);
-
-                if (clippedBounds != null) {
-                    PathObject annotation = PathObjects.createAnnotationObject(clippedBounds);
-                    annotation.setName("Tissue Region (from macro)");
-                    annotation.setPathClass(gui.getAvailablePathClasses().stream()
-                            .filter(pc -> "Tissue".equals(pc.getName()))
-                            .findFirst()
-                            .orElse(null));
-
-                    hierarchy.addObject(annotation);
-                    logger.info("Created tissue annotation at ({}, {}, {}, {})",
-                            clippedBounds.getBoundsX(), clippedBounds.getBoundsY(),
-                            clippedBounds.getBoundsWidth(), clippedBounds.getBoundsHeight());
-                }
-            } else {
-                // Transform individual regions
-                int count = 0;
-                for (ROI macroROI : analysis.getTissueRegions()) {
-                    // Transform region bounds
-                    double[] topLeft = {macroROI.getBoundsX(), macroROI.getBoundsY()};
-                    double[] bottomRight = {
-                            macroROI.getBoundsX() + macroROI.getBoundsWidth(),
-                            macroROI.getBoundsY() + macroROI.getBoundsHeight()
-                    };
-
-                    macroToMain.transform(topLeft, 0, topLeft, 0, 1);
-                    macroToMain.transform(bottomRight, 0, bottomRight, 0, 1);
-
-                    ROI mainROI = ROIs.createRectangleROI(
-                            topLeft[0], topLeft[1],
-                            bottomRight[0] - topLeft[0],
-                            bottomRight[1] - topLeft[1],
-                            ImagePlane.getDefaultPlane()
-                    );
-
-                    // Clip and validate
-                    Rectangle imageBounds = new Rectangle(
-                            0, 0,
-                            gui.getImageData().getServer().getWidth(),
-                            gui.getImageData().getServer().getHeight()
-                    );
-
-                    ROI clippedROI = clipROIToImage(mainROI, imageBounds);
-
-                    if (clippedROI != null &&
-                            clippedROI.getBoundsWidth() > 100 &&
-                            clippedROI.getBoundsHeight() > 100) {
-
-                        PathObject annotation = PathObjects.createAnnotationObject(clippedROI);
-                        annotation.setName("Tissue Region " + (++count));
-                        annotation.setPathClass(gui.getAvailablePathClasses().stream()
-                                .filter(pc -> "Tissue".equals(pc.getName()))
-                                .findFirst()
-                                .orElse(null));
-                        hierarchy.addObject(annotation);
-                    }
-                }
-                logger.info("Created {} tissue region annotations", count);
-            }
-
-            gui.getViewer().repaint();
-        });
-    }
-    /**
-     * Allows user to refine the initial transform derived from green box
-     */
-    private static CompletableFuture<AffineTransform> refineInitialTransform(
-            QuPathGUI gui,
-            AffineTransform initialTransform,
-            double macroPixelSize,
-            boolean invertedX,
-            boolean invertedY) {
-
-        CompletableFuture<AffineTransform> future = new CompletableFuture<>();
-
-        Platform.runLater(() -> {
-            Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
-            alert.setTitle("Refine Alignment");
-            alert.setHeaderText("Initial alignment detected from macro image");
-            alert.setContentText(
-                    "An initial alignment was established using the green box in the macro image.\n\n" +
-                            "Would you like to:\n" +
-                            "• Use this alignment as-is\n" +
-                            "• Refine it with manual tile selection\n" +
-                            "• Start over with full manual alignment"
-            );
-
-            ButtonType useAsIs = new ButtonType("Use As-Is");
-            ButtonType refine = new ButtonType("Refine");
-            ButtonType startOver = new ButtonType("Start Over");
-            ButtonType cancel = new ButtonType("Cancel", ButtonBar.ButtonData.CANCEL_CLOSE);
-
-            alert.getButtonTypes().setAll(useAsIs, refine, startOver, cancel);
-
-            alert.showAndWait().ifPresent(response -> {
-                if (response == useAsIs) {
-                    future.complete(initialTransform);
-                } else if (response == refine) {
-                    // Set the initial transform in the controller
-                    MicroscopeController.getInstance().setCurrentTransform(initialTransform);
-
-                    // Run refinement process (simplified tile selection)
-                    AffineTransformationController.setupAffineTransformationAndValidationGUI(
-                                    macroPixelSize, invertedX, invertedY)
-                            .thenAccept(future::complete)
-                            .exceptionally(ex -> {
-                                future.completeExceptionally(ex);
-                                return null;
-                            });
-                } else if (response == startOver) {
-                    // Full manual alignment
-                    AffineTransformationController.setupAffineTransformationAndValidationGUI(
-                                    macroPixelSize, invertedX, invertedY)
-                            .thenAccept(future::complete)
-                            .exceptionally(ex -> {
-                                future.completeExceptionally(ex);
-                                return null;
-                            });
-                } else {
-                    future.complete(null);
-                }
-            });
-        });
-
-        return future;
-    }
-
-    /**
-     * Clips a ROI to image bounds
-     */
-    private static ROI clipROIToImage(ROI roi, Rectangle imageBounds) {
-        double x1 = Math.max(roi.getBoundsX(), imageBounds.x);
-        double y1 = Math.max(roi.getBoundsY(), imageBounds.y);
-        double x2 = Math.min(roi.getBoundsX() + roi.getBoundsWidth(),
-                imageBounds.x + imageBounds.width);
-        double y2 = Math.min(roi.getBoundsY() + roi.getBoundsHeight(),
-                imageBounds.y + imageBounds.height);
-
-        if (x2 > x1 && y2 > y1) {
-            return ROIs.createRectangleROI(x1, y1, x2 - x1, y2 - y1,
-                    ImagePlane.getDefaultPlane());
-        }
-
-        return null;
+        transformManager.saveTransform(preset);
+        logger.info("Saved transform preset: {}", preset.getName());
     }
 }
