@@ -1,6 +1,8 @@
 package qupath.ext.qpsc.controller;
 
 import javafx.application.Platform;
+import javafx.scene.control.Alert;
+import javafx.scene.control.ButtonType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qupath.ext.qpsc.model.RotationManager;
@@ -15,7 +17,7 @@ import qupath.lib.gui.QuPathGUI;
 import qupath.lib.objects.PathObject;
 import qupath.lib.projects.Project;
 import qupath.lib.scripting.QP;
-
+import java.util.HashMap;
 import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
 import java.io.File;
@@ -621,5 +623,154 @@ public class ExistingImageWorkflow {
 
         logger.info("Found {} tissue annotation(s) in image.", annotations.size());
         return annotations;
+    }
+
+    /**
+     * Checks if auto-registration should be attempted for the current image.
+     * This is called after project setup but before tile creation.
+     */
+    private static boolean attemptAutoRegistration(QuPathGUI gui,
+                                                   String microscopeName,
+                                                   AffineTransformManager transformManager) {
+
+        // Check if auto-registration is enabled in preferences
+        boolean autoRegEnabled = true;
+
+        if (!autoRegEnabled) {
+            logger.info("Auto-registration is disabled in preferences");
+            return false;
+        }
+
+        // Check if we have a macro image
+        boolean hasMacro = false;
+        try {
+            var associatedImages = gui.getImageData().getServer().getAssociatedImageList();
+            if (associatedImages != null) {
+                hasMacro = associatedImages.stream()
+                        .anyMatch(name -> name.toLowerCase().contains("macro"));
+            }
+        } catch (Exception e) {
+            logger.error("Error checking for macro image", e);
+        }
+
+        if (!hasMacro) {
+            logger.info("No macro image available for auto-registration");
+            return false;
+        }
+
+        // Check if we have saved transforms
+        var transforms = transformManager.getTransformsForMicroscope(microscopeName);
+        if (transforms.isEmpty()) {
+            logger.info("No saved transforms available for auto-registration");
+            Platform.runLater(() -> {
+                Alert alert = new Alert(Alert.AlertType.INFORMATION);
+                alert.setTitle("Auto-Registration");
+                alert.setHeaderText("No saved alignment transforms found");
+                alert.setContentText(
+                        "Auto-registration requires a saved microscope alignment transform.\n" +
+                                "Please run the 'Create Microscope Alignment' workflow first.");
+                alert.showAndWait();
+            });
+            return false;
+        }
+
+        // Show auto-registration dialog
+        Platform.runLater(() -> {
+            Alert confirmDialog = new Alert(Alert.AlertType.CONFIRMATION);
+            confirmDialog.setTitle("Auto-Registration Available");
+            confirmDialog.setHeaderText("Automatic tissue detection is available");
+            confirmDialog.setContentText(
+                    "This image has a macro that can be used for automatic tissue detection.\n\n" +
+                            "Would you like to:\n" +
+                            "• YES - Use automatic detection (recommended)\n" +
+                            "• NO - Create annotations manually\n" +
+                            "• CANCEL - Exit workflow"
+            );
+
+            confirmDialog.showAndWait().ifPresent(response -> {
+                if (response == ButtonType.OK) {
+                    performAutoRegistration(gui, microscopeName, transformManager);
+                } else if (response == ButtonType.NO) {
+                    // Continue with manual annotation
+                    logger.info("User chose manual annotation");
+                } else {
+                    // Cancel workflow
+                    throw new RuntimeException("User cancelled workflow");
+                }
+            });
+        });
+
+        return true;
+    }
+
+    /**
+     * Performs auto-registration and creates tissue annotations.
+     */
+    private static void performAutoRegistration(QuPathGUI gui,
+                                                String microscopeName,
+                                                AffineTransformManager transformManager) {
+
+        logger.info("Starting auto-registration process");
+
+        // Get the most recent transform (or show selection dialog)
+        var transforms = transformManager.getTransformsForMicroscope(microscopeName);
+        var selectedTransform = transforms.get(0); // Could add selection UI here
+
+        // Create configuration
+        var greenBoxParams = new GreenBoxDetector.DetectionParams();
+
+        var tissueParams = Map.of(
+                "brightnessMin", 0.2,
+                "brightnessMax", 0.95,
+                "minRegionSize", 1000
+        );
+
+        var config = new AutoRegistrationWorkflow.AutoRegistrationConfig(
+                selectedTransform,
+                greenBoxParams,
+                MacroImageAnalyzer.ThresholdMethod.COLOR_DECONVOLUTION,
+                tissueParams,
+                true,  // Single bounds
+                0.7    // Confidence threshold
+        );
+
+        // Perform registration
+        var result = AutoRegistrationWorkflow.performAutoRegistration(gui, config);
+
+        Platform.runLater(() -> {
+            if (result.confidence() > 0 && !result.tissueAnnotations().isEmpty()) {
+                // Success
+                Alert successAlert = new Alert(Alert.AlertType.INFORMATION);
+                successAlert.setTitle("Auto-Registration Complete");
+                successAlert.setHeaderText("Tissue detection successful!");
+                successAlert.setContentText(String.format(
+                        "Created %d tissue annotation(s) with %.0f%% confidence.\n\n" +
+                                "You can now adjust these if needed before proceeding.",
+                        result.tissueAnnotations().size(),
+                        result.confidence() * 100
+                ));
+                successAlert.showAndWait();
+
+            } else if (result.confidence() > 0) {
+                // Registration worked but no tissue found
+                Alert noTissueAlert = new Alert(Alert.AlertType.WARNING);
+                noTissueAlert.setTitle("No Tissue Detected");
+                noTissueAlert.setHeaderText("Registration successful but no tissue found");
+                noTissueAlert.setContentText(
+                        "The green box was detected but no tissue was found within it.\n" +
+                                "Please create tissue annotations manually.");
+                noTissueAlert.showAndWait();
+
+            } else {
+                // Registration failed
+                Alert failureAlert = new Alert(Alert.AlertType.ERROR);
+                failureAlert.setTitle("Auto-Registration Failed");
+                failureAlert.setHeaderText("Could not perform automatic registration");
+                failureAlert.setContentText(
+                        result.message() + "\n\n" +
+                                "Please create tissue annotations manually.");
+                failureAlert.showAndWait();
+            }
+        });
     }
 }

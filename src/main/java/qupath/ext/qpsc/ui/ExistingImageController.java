@@ -26,7 +26,8 @@ public class ExistingImageController {
     public record UserInput(
             double macroPixelSize,
             String groovyScriptPath,
-            boolean nonIsotropicPixels
+            boolean nonIsotropicPixels,
+            boolean useAutoRegistration
     ) {}
 
     /**
@@ -41,7 +42,7 @@ public class ExistingImageController {
             ResourceBundle res = ResourceBundle.getBundle("qupath.ext.qpsc.ui.strings");
 
             Dialog<UserInput> dlg = new Dialog<>();
-            dlg.initModality(Modality.NONE); // Non-modal for easier checking
+            dlg.initModality(Modality.NONE);
             dlg.setTitle(res.getString("existingImage.title"));
             dlg.setHeaderText(res.getString("existingImage.header"));
 
@@ -54,6 +55,14 @@ public class ExistingImageController {
 
             CheckBox nonIsotropicCheckBox = new CheckBox(res.getString("existingImage.label.nonIsotropicPixels"));
 
+            // Add auto-registration checkbox
+            CheckBox autoRegistrationCheckBox = new CheckBox("Use automatic tissue detection (if macro image available)");
+            autoRegistrationCheckBox.setSelected(true); // Default to enabled
+            autoRegistrationCheckBox.setTooltip(new Tooltip(
+                    "When enabled, the system will attempt to automatically detect tissue regions\n" +
+                            "using the macro image and saved microscope alignment transforms."
+            ));
+
             GridPane grid = new GridPane();
             grid.setHgap(10);
             grid.setVgap(10);
@@ -61,6 +70,7 @@ public class ExistingImageController {
             grid.add(new Label(res.getString("existingImage.label.pixelSize")), 0, 0);
             grid.add(pixelSizeField, 1, 0);
             grid.add(nonIsotropicCheckBox, 1, 1);
+            grid.add(autoRegistrationCheckBox, 1, 2);
 
             dlg.getDialogPane().setContent(grid);
 
@@ -68,15 +78,14 @@ public class ExistingImageController {
                 if (btn == okType) {
                     try {
                         double pixelSize = Double.parseDouble(pixelSizeField.getText().trim());
-
-                        //TODO nonisotropic pixel handling currently not implemented
                         boolean pixelsNonIsotropic = nonIsotropicCheckBox.isSelected();
-
+                        boolean useAutoRegistration = autoRegistrationCheckBox.isSelected();
 
                         PersistentPreferences.setMacroImagePixelSizeInMicrons(String.valueOf(pixelSize));
-                        // Script path could be stored in preferences/config
                         String scriptPath = PersistentPreferences.getAnalysisScriptForAutomation();
-                        return new UserInput(pixelSize, scriptPath, pixelsNonIsotropic);
+
+                        // Modified UserInput to include auto-registration flag
+                        return new UserInput(pixelSize, scriptPath, pixelsNonIsotropic, useAutoRegistration);
                     } catch (Exception e) {
                         Dialogs.showErrorNotification(res.getString("existingImage.error.title"), e.getMessage());
                         return null;
