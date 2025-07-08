@@ -171,7 +171,7 @@ public class AutoRegistrationWorkflow {
             if (transformedBounds != null && isValidROI(transformedBounds, gui)) {
                 PathObject annotation = PathObjects.createAnnotationObject(transformedBounds);
                 annotation.setName("Tissue Region (auto-detected)");
-                annotation.setPathClass(getOrCreateTissueClass(gui));
+                annotation.setClassification("Tissue");
                 annotations.add(annotation);
             }
         } else {
@@ -182,7 +182,7 @@ public class AutoRegistrationWorkflow {
                 if (transformedROI != null && isValidROI(transformedROI, gui)) {
                     PathObject annotation = PathObjects.createAnnotationObject(transformedROI);
                     annotation.setName("Tissue Region " + (++count) + " (auto-detected)");
-                    annotation.setPathClass(getOrCreateTissueClass(gui));
+                    annotation.setClassification("Tissue");
                     annotations.add(annotation);
                 }
             }
@@ -243,15 +243,7 @@ public class AutoRegistrationWorkflow {
         return intersectsImage && hasMinSize;
     }
 
-    /**
-     * Gets or creates the Tissue PathClass.
-     */
-    private static qupath.lib.objects.classes.PathClass getOrCreateTissueClass(QuPathGUI gui) {
-        return gui.getAvailablePathClasses().stream()
-                .filter(pc -> "Tissue".equals(pc.getName()))
-                .findFirst()
-                .orElse(PathObjects.createPathClass("Tissue"));
-    }
+
 
     /**
      * Retrieves the macro image from the current image server.
