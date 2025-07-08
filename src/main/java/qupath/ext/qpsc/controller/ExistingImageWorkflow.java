@@ -52,171 +52,192 @@ public class ExistingImageWorkflow {
 
         QuPathGUI qupathGUI = QuPathGUI.getInstance();
 
-        // 1. Prompt for sample/project info
-        SampleSetupController.showDialog().thenAccept(sample -> {
-            if (sample == null) {
-                logger.info("Sample setup cancelled.");
-                return;
-            }
-            logger.info("Sample info received: {}", sample);
-
-            // 2. Import current image into a QuPath project
-            boolean flippedX = QPPreferenceDialog.getFlipMacroXProperty();
-            boolean flippedY = QPPreferenceDialog.getFlipMacroYProperty();
-            logger.info("Importing image to project: flippedX={}, flippedY={}", flippedX, flippedY);
-
-            // Check if we have an image open first
-            var currentImageData = qupathGUI.getImageData();
-            if (currentImageData == null) {
-                Platform.runLater(() -> UIFunctions.notifyUserOfError(
-                        "No image is currently open. Please open an image first.",
-                        "No Image"));
+        // First show the existing image dialog to get user preferences
+        ExistingImageController.showDialog().thenAccept(userInput -> {
+            if (userInput == null) {
+                logger.info("Existing image dialog cancelled.");
                 return;
             }
 
-            // Handle project creation/opening synchronously on FX thread
-            Platform.runLater(() -> {
-                try {
-                    Map<String, Object> projectDetails;
+            // Store auto-registration preference
+            boolean useAutoRegistration = userInput.useAutoRegistration();
+            logger.info("User selected auto-registration: {}", useAutoRegistration);
 
-                    if (qupathGUI.getProject() == null) {
-                        logger.info("Creating new project and importing image");
-
-                        // Extract the current image path before creating project
-                        var serverPathFull = currentImageData.getServerPath();
-                        logger.info(serverPathFull);
-                        String imagePath = MinorFunctions.extractFilePath(serverPathFull);
-
-                        if (imagePath == null) {
-                            UIFunctions.notifyUserOfError(
-                                    "Cannot extract image path from current image.",
-                                    "Import Error");
-                            return;
-                        }
-
-                        // Create the project first
-                        Project<BufferedImage> project = QPProjectFunctions.createProject(
-                                sample.projectsFolder().getAbsolutePath(),
-                                sample.sampleName()
-                        );
-
-                        if (project == null) {
-                            UIFunctions.notifyUserOfError(
-                                    "Failed to create project.",
-                                    "Project Error");
-                            return;
-                        }
-
-                        // Add the image with flips
-                        QPProjectFunctions.addImageToProject(
-                                new File(imagePath),
-                                project,
-                                flippedX,
-                                flippedY
-                        );
-
-                        // Set the project in QuPath
-                        qupathGUI.setProject(project);
-
-                        // Find and open the newly added image
-                        var entries = project.getImageList();
-                        var imageEntry = entries.stream()
-                                .filter(e -> e.getImageName().equals(new File(imagePath).getName()))
-                                .findFirst()
-                                .orElse(null);
-
-                        if (imageEntry != null) {
-                            qupathGUI.openImageEntry(imageEntry);
-                            logger.info("Opened flipped image in project");
-                        } else {
-                            UIFunctions.notifyUserOfError(
-                                    "Failed to find image in project after import.",
-                                    "Import Error");
-                            return;
-                        }
-
-                        // Get project details
-                        projectDetails = QPProjectFunctions.getCurrentProjectInformation(
-                                sample.projectsFolder().getAbsolutePath(),
-                                sample.sampleName(),
-                                sample.modality()
-                        );
-
-                    } else {
-                        logger.info("Project exists, checking if image needs to be added");
-
-                        // Check if current image is in the project
-                        var project = qupathGUI.getProject();
-                        var projectEntry = project.getEntry(currentImageData);
-
-                        if (projectEntry == null) {
-                            // Image not in project - add it with flips
-                            logger.info("Adding current image to existing project with flips");
-                            String imagePath = MinorFunctions.extractFilePath(currentImageData.getServerPath());
-                            if (imagePath != null) {
-                                QPProjectFunctions.addImageToProject(
-                                        new File(imagePath),
-                                        project,
-                                        flippedX,
-                                        flippedY
-                                );
-
-                                // Refresh and reopen the image to apply flips
-                                qupathGUI.refreshProject();
-
-                                // Find and open the newly added entry
-                                var entries = project.getImageList();
-                                var newEntry = entries.stream()
-                                        .filter(e -> e.getImageName().equals(new File(imagePath).getName()))
-                                        .findFirst()
-                                        .orElse(null);
-
-                                if (newEntry != null) {
-                                    qupathGUI.openImageEntry(newEntry);
-                                    logger.info("Reopened image with flips applied");
-                                }
-                            }
-                        } else {
-                            logger.info("Image already in project");
-                        }
-
-                        // Get project information for existing project
-                        projectDetails = QPProjectFunctions.getCurrentProjectInformation(
-                                sample.projectsFolder().getAbsolutePath(),
-                                sample.sampleName(),
-                                sample.modality()
-                        );
-                    }
-
-                    // Wait a moment for the image to fully load and display
-                    Thread.sleep(500);
-
-                    // Verify we have a properly loaded image before continuing
-                    if (qupathGUI.getImageData() == null) {
-                        UIFunctions.notifyUserOfError(
-                                "No image data available after project setup. Workflow cannot continue.",
-                                "Image Error");
-                        return;
-                    }
-
-                    logger.info("Project setup complete, continuing workflow");
-                    boolean invertedX = QPPreferenceDialog.getInvertedXProperty();
-                    boolean invertedY = QPPreferenceDialog.getInvertedYProperty();
-                    // Continue with the rest of the workflow
-                    continueWorkflowAfterProjectSetup(qupathGUI, projectDetails, sample, invertedX, invertedY);
-
-                } catch (Exception e) {
-                    logger.error("Failed during project setup", e);
-                    UIFunctions.notifyUserOfError(
-                            "Failed to create/open project: " + e.getMessage(),
-                            "Project Error");
+            // Continue with sample setup
+            SampleSetupController.showDialog().thenAccept(sample -> {
+                if (sample == null) {
+                    logger.info("Sample setup cancelled.");
+                    return;
                 }
+                logger.info("Sample info received: {}", sample);
+
+                // Import current image into a QuPath project
+                boolean flippedX = QPPreferenceDialog.getFlipMacroXProperty();
+                boolean flippedY = QPPreferenceDialog.getFlipMacroYProperty();
+                logger.info("Importing image to project: flippedX={}, flippedY={}", flippedX, flippedY);
+
+                // Check if we have an image open first
+                var currentImageData = qupathGUI.getImageData();
+                if (currentImageData == null) {
+                    Platform.runLater(() -> UIFunctions.notifyUserOfError(
+                            "No image is currently open. Please open an image first.",
+                            "No Image"));
+                    return;
+                }
+
+                // Handle project creation/opening synchronously on FX thread
+                Platform.runLater(() -> {
+                    try {
+                        Map<String, Object> projectDetails;
+
+                        if (qupathGUI.getProject() == null) {
+                            logger.info("Creating new project and importing image");
+
+                            // Extract the current image path before creating project
+                            var serverPathFull = currentImageData.getServerPath();
+                            logger.info(serverPathFull);
+                            String imagePath = MinorFunctions.extractFilePath(serverPathFull);
+
+                            if (imagePath == null) {
+                                UIFunctions.notifyUserOfError(
+                                        "Cannot extract image path from current image.",
+                                        "Import Error");
+                                return;
+                            }
+
+                            // Create the project first
+                            Project<BufferedImage> project = QPProjectFunctions.createProject(
+                                    sample.projectsFolder().getAbsolutePath(),
+                                    sample.sampleName()
+                            );
+
+                            if (project == null) {
+                                UIFunctions.notifyUserOfError(
+                                        "Failed to create project.",
+                                        "Project Error");
+                                return;
+                            }
+
+                            // Add the image with flips
+                            QPProjectFunctions.addImageToProject(
+                                    new File(imagePath),
+                                    project,
+                                    flippedX,
+                                    flippedY
+                            );
+
+                            // Set the project in QuPath
+                            qupathGUI.setProject(project);
+
+                            // Find and open the newly added image
+                            var entries = project.getImageList();
+                            var imageEntry = entries.stream()
+                                    .filter(e -> e.getImageName().equals(new File(imagePath).getName()))
+                                    .findFirst()
+                                    .orElse(null);
+
+                            if (imageEntry != null) {
+                                qupathGUI.openImageEntry(imageEntry);
+                                logger.info("Opened flipped image in project");
+                            } else {
+                                UIFunctions.notifyUserOfError(
+                                        "Failed to find image in project after import.",
+                                        "Import Error");
+                                return;
+                            }
+
+                            // Get project details
+                            projectDetails = QPProjectFunctions.getCurrentProjectInformation(
+                                    sample.projectsFolder().getAbsolutePath(),
+                                    sample.sampleName(),
+                                    sample.modality()
+                            );
+
+                        } else {
+                            logger.info("Project exists, checking if image needs to be added");
+
+                            // Check if current image is in the project
+                            var project = qupathGUI.getProject();
+                            var projectEntry = project.getEntry(currentImageData);
+
+                            if (projectEntry == null) {
+                                // Image not in project - add it with flips
+                                logger.info("Adding current image to existing project with flips");
+                                String imagePath = MinorFunctions.extractFilePath(currentImageData.getServerPath());
+                                if (imagePath != null) {
+                                    QPProjectFunctions.addImageToProject(
+                                            new File(imagePath),
+                                            project,
+                                            flippedX,
+                                            flippedY
+                                    );
+
+                                    // Refresh and reopen the image to apply flips
+                                    qupathGUI.refreshProject();
+
+                                    // Find and open the newly added entry
+                                    var entries = project.getImageList();
+                                    var newEntry = entries.stream()
+                                            .filter(e -> e.getImageName().equals(new File(imagePath).getName()))
+                                            .findFirst()
+                                            .orElse(null);
+
+                                    if (newEntry != null) {
+                                        qupathGUI.openImageEntry(newEntry);
+                                        logger.info("Reopened image with flips applied");
+                                    }
+                                }
+                            } else {
+                                logger.info("Image already in project");
+                            }
+
+                            // Get project information for existing project
+                            projectDetails = QPProjectFunctions.getCurrentProjectInformation(
+                                    sample.projectsFolder().getAbsolutePath(),
+                                    sample.sampleName(),
+                                    sample.modality()
+                            );
+                        }
+
+                        // Wait a moment for the image to fully load and display
+                        Thread.sleep(500);
+
+                        // Verify we have a properly loaded image before continuing
+                        if (qupathGUI.getImageData() == null) {
+                            UIFunctions.notifyUserOfError(
+                                    "No image data available after project setup. Workflow cannot continue.",
+                                    "Image Error");
+                            return;
+                        }
+
+                        logger.info("Project setup complete, continuing workflow");
+                        boolean invertedX = QPPreferenceDialog.getInvertedXProperty();
+                        boolean invertedY = QPPreferenceDialog.getInvertedYProperty();
+                        // Continue with the rest of the workflow
+                        continueWorkflowAfterProjectSetup(qupathGUI, projectDetails, sample,
+                                invertedX, invertedY, useAutoRegistration, userInput.macroPixelSize());
+
+                    } catch (Exception e) {
+                        logger.error("Failed during project setup", e);
+                        UIFunctions.notifyUserOfError(
+                                "Failed to create/open project: " + e.getMessage(),
+                                "Project Error");
+                    }
+                });
+            }).exceptionally(ex -> {
+                logger.info("Sample setup failed: {}", ex.getMessage());
+                return null;
             });
         }).exceptionally(ex -> {
-            logger.info("Sample setup failed: {}", ex.getMessage());
+            logger.info("Existing image dialog failed: {}", ex.getMessage());
             return null;
         });
     }
+
+    /**
+     * Simple result holder for auto-registration attempt.
+     */
+    private record AutoRegResult(boolean success, String message, AffineTransform transform) {}
 
     /**
      * Continues the workflow after project setup and image import is complete.
@@ -227,151 +248,85 @@ public class ExistingImageWorkflow {
             Map<String, Object> projectDetails,
             SampleSetupController.SampleSetupResult sample,
             boolean invertedX,
-            boolean invertedY) {
+            boolean invertedY,
+            boolean useAutoRegistration,
+            double initialPixelSize) {
 
         @SuppressWarnings("unchecked")
         Project<BufferedImage> project = (Project<BufferedImage>) projectDetails.get("currentQuPathProject");
         String tempTileDirectory = (String) projectDetails.get("tempTileDirectory");
         String modeWithIndex = (String) projectDetails.get("imagingModeWithIndex");
 
-        // 3. Get macro image pixel size
-        getMacroPixelSizeOrPrompt(qupathGUI)
-                .thenAccept(macroPixelSize -> {
+        // Get macro image pixel size (use initial value if valid)
+        CompletableFuture<Double> pixelSizeFuture;
+        if (initialPixelSize > 0 && initialPixelSize <= 10) {
+            pixelSizeFuture = CompletableFuture.completedFuture(initialPixelSize);
+        } else {
+            pixelSizeFuture = getMacroPixelSizeOrPrompt(qupathGUI);
+        }
+
+        pixelSizeFuture.thenAccept(macroPixelSize -> {
                     if (macroPixelSize == null || macroPixelSize <= 0) {
                         logger.warn("Invalid pixel size. Aborting workflow.");
                         return;
                     }
                     logger.info("Final macro pixel size: {} µm", macroPixelSize);
 
-                    // 4. Detect/confirm annotations
-                    List<PathObject> annotations = collectOrCreateAnnotations(qupathGUI, macroPixelSize);
+                    // Check if we should attempt auto-registration
+                    if (useAutoRegistration && shouldAttemptAutoRegistration(qupathGUI)) {
+                        // Try auto-registration first
+                        tryAutoRegistration(qupathGUI, sample.modality())
+                                .thenAccept(autoRegResult -> {
+                                    if (autoRegResult != null && autoRegResult.success()) {
+                                        logger.info("Auto-registration successful: {}", autoRegResult.message());
 
-                    // 5. Show annotation check dialog
-                    CompletableFuture<Boolean> annotationCheckFuture = new CompletableFuture<>();
-                    UIFunctions.checkValidAnnotationsGUI(
-                            List.of("Tissue"),
-                            annotationCheckFuture::complete
-                    );
+                                        // Check if we have annotations after auto-registration
+                                        List<PathObject> annotations = qupathGUI.getViewer().getHierarchy()
+                                                .getAnnotationObjects().stream()
+                                                .filter(o -> o.getPathClass() != null &&
+                                                        "Tissue".equals(o.getPathClass().getName()))
+                                                .collect(Collectors.toList());
 
-                    annotationCheckFuture.thenAccept(proceed -> {
-                        if (!proceed) {
-                            logger.info("User cancelled at annotation verification step.");
-                            return;
-                        }
+                                        if (!annotations.isEmpty()) {
+                                            // Use the transform from auto-registration
+                                            MicroscopeController.getInstance().setCurrentTransform(autoRegResult.transform());
 
-                        // Refresh annotations to get the current state after user modifications
-                        List<PathObject> currentAnnotations = qupathGUI.getViewer().getHierarchy().getAnnotationObjects().stream()
-                                .filter(o -> o.getPathClass() != null && "Tissue".equals(o.getPathClass().getName()))
-                                .collect(Collectors.toList());
-
-                        if (currentAnnotations.isEmpty()) {
-                            logger.warn("No valid annotations found after user confirmation. Aborting workflow.");
-                            Platform.runLater(() -> UIFunctions.notifyUserOfError(
-                                    "No valid tissue annotations found. Please create at least one annotation with 'Tissue' classification.",
-                                    "No Annotations"));
-                            return;
-                        }
-
-                        logger.info("Using {} annotation(s) after user confirmation", currentAnnotations.size());
-
-                        // 6. Get camera parameters from config
-                        MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(
-                                QPPreferenceDialog.getMicroscopeConfigFileProperty());
-                        double pixelSize = mgr.getDouble("imagingMode", sample.modality(), "pixelSize_um");
-                        int cameraWidth = mgr.getInteger("imagingMode", sample.modality(), "detector", "width_px");
-                        int cameraHeight = mgr.getInteger("imagingMode", sample.modality(), "detector", "height_px");
-
-                        double frameWidthMicrons = pixelSize * cameraWidth;
-                        double frameHeightMicrons = pixelSize * cameraHeight;
-
-                        // Convert to QuPath pixels for tiling
-                        double frameWidthQP = frameWidthMicrons / macroPixelSize;
-                        double frameHeightQP = frameHeightMicrons / macroPixelSize;
-                        double overlapPercent = QPPreferenceDialog.getTileOverlapPercentProperty();
-
-                        try {
-                            // 7. Remove existing tiles and create new ones
-                            String modalityBase = sample.modality().replaceAll("(_\\d+)$", "");
-                            QP.getDetectionObjects().stream()
-                                    .filter(o -> o.getPathClass() != null &&
-                                            o.getPathClass().toString().contains(modalityBase))
-                                    .forEach(QP::removeObject);
-                            QP.fireHierarchyUpdate();
-                            logger.info("Existing tiles should be removed at this point");
-                            // Build tiling request with CURRENT annotations
-                            TilingRequest request = new TilingRequest.Builder()
-                                    .outputFolder(tempTileDirectory)
-                                    .modalityName(modeWithIndex)
-                                    .frameSize(frameWidthQP, frameHeightQP)
-                                    .overlapPercent(overlapPercent)
-                                    .annotations(currentAnnotations)  // <- USE CURRENT ANNOTATIONS
-                                    .invertAxes(invertedX, invertedY)
-                                    .createDetections(true)
-                                    .addBuffer(true)
-                                    .build();
-
-                            TilingUtilities.createTiles(request);
-                            logger.info("Created tiles for {} annotations", currentAnnotations.size());
-
-                        } catch (IOException e) {
-                            Platform.runLater(() -> UIFunctions.notifyUserOfError(
-                                    "Failed to create tile configurations: " + e.getMessage(),
-                                    "Tiling Error"));
-                            return;
-                        }
-// 8. Check for saved transform first
-                        AffineTransform savedTransform = AffineTransformManager.loadSavedTransformFromPreferences();
-                        if (savedTransform != null) {
-                            logger.info("Using saved microscope alignment, skipping manual alignment");
-
-                            // Transform tile configurations
-                            try {
-                                List<String> modifiedDirs = TransformationFunctions.transformTileConfiguration(
-                                        tempTileDirectory, savedTransform);
-                                logger.info("Transformed tile configurations for directories: {}", modifiedDirs);
-                            } catch (IOException e) {
-                                logger.error("Failed to transform tile configurations", e);
-                                Platform.runLater(() -> UIFunctions.notifyUserOfError(
-                                        "Failed to transform tile coordinates: " + e.getMessage(),
-                                        "Transform Error"));
-                                return;
-                            }
-
-                            // Continue with rotation and acquisition
-                            proceedWithRotationAndAcquisition(currentAnnotations, savedTransform, sample,
-                                    project, tempTileDirectory, modeWithIndex, pixelSize, qupathGUI);
-
-                        } else {
-                            // No saved transform - do manual alignment
-                            logger.info("No saved transform found, proceeding with manual alignment");
-
-                            AffineTransformationController.setupAffineTransformationAndValidationGUI(
-                                            macroPixelSize, invertedX, invertedY)
-                                    .thenAccept(transform -> {
-                                        if (transform == null) {
-                                            logger.info("User cancelled affine transform step.");
-                                            return;
+                                            // Continue with annotation check
+                                            proceedWithAnnotationCheck(qupathGUI, projectDetails, sample,
+                                                    macroPixelSize, invertedX, invertedY, annotations, autoRegResult.transform());
+                                        } else {
+                                            // Auto-registration succeeded but no tissue found
+                                            logger.warn("Auto-registration successful but no tissue detected");
+                                            Platform.runLater(() -> {
+                                                Alert alert = new Alert(Alert.AlertType.INFORMATION);
+                                                alert.setTitle("No Tissue Detected");
+                                                alert.setHeaderText("Auto-registration successful but no tissue found");
+                                                alert.setContentText("Please create tissue annotations manually.");
+                                                alert.showAndWait();
+                                            });
+                                            proceedWithManualAnnotations(qupathGUI, projectDetails, sample,
+                                                    macroPixelSize, invertedX, invertedY);
                                         }
-
-                                        // Transform tile configurations
-                                        try {
-                                            List<String> modifiedDirs = TransformationFunctions.transformTileConfiguration(
-                                                    tempTileDirectory, transform);
-                                            logger.info("Transformed tile configurations for directories: {}", modifiedDirs);
-                                        } catch (IOException e) {
-                                            logger.error("Failed to transform tile configurations", e);
-                                            Platform.runLater(() -> UIFunctions.notifyUserOfError(
-                                                    "Failed to transform tile coordinates: " + e.getMessage(),
-                                                    "Transform Error"));
-                                            return;
-                                        }
-
-                                        // Continue with rotation and acquisition
-                                        proceedWithRotationAndAcquisition(currentAnnotations, transform, sample,
-                                                project, tempTileDirectory, modeWithIndex, pixelSize, qupathGUI);
-                                    });
-                        }
-                    });
+                                    } else {
+                                        // Auto-registration failed
+                                        logger.info("Auto-registration failed or was skipped: {}",
+                                                autoRegResult != null ? autoRegResult.message() : "null result");
+                                        proceedWithManualAnnotations(qupathGUI, projectDetails, sample,
+                                                macroPixelSize, invertedX, invertedY);
+                                    }
+                                })
+                                .exceptionally(ex -> {
+                                    logger.error("Error during auto-registration", ex);
+                                    proceedWithManualAnnotations(qupathGUI, projectDetails, sample,
+                                            macroPixelSize, invertedX, invertedY);
+                                    return null;
+                                });
+                    } else {
+                        // Skip auto-registration
+                        logger.info("Auto-registration disabled or not available");
+                        proceedWithManualAnnotations(qupathGUI, projectDetails, sample,
+                                macroPixelSize, invertedX, invertedY);
+                    }
                 })
                 .exceptionally(ex -> {
                     Platform.runLater(() -> UIFunctions.notifyUserOfError(
@@ -379,6 +334,392 @@ public class ExistingImageWorkflow {
                     logger.error("Workflow failed", ex);
                     return null;
                 });
+    }
+
+    /**
+     * Checks if auto-registration should be attempted based on image capabilities.
+     */
+    private static boolean shouldAttemptAutoRegistration(QuPathGUI gui) {
+        try {
+            var associatedImages = gui.getImageData().getServer().getAssociatedImageList();
+            if (associatedImages != null) {
+                boolean hasMacro = associatedImages.stream()
+                        .anyMatch(name -> name.toLowerCase().contains("macro"));
+                logger.info("Checking for macro image: {}", hasMacro ? "found" : "not found");
+                return hasMacro;
+            }
+        } catch (Exception e) {
+            logger.error("Error checking for macro image", e);
+        }
+        return false;
+    }
+
+    /**
+     * Attempts auto-registration and returns the result.
+     */
+    private static CompletableFuture<AutoRegResult> tryAutoRegistration(
+            QuPathGUI gui, String modality) {
+
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                // Get microscope name from config
+                String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
+                MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(configPath);
+                String microscopeName = mgr.getString("microscope", "name");
+
+                // Get transform manager
+                AffineTransformManager transformManager = new AffineTransformManager(
+                        new File(configPath).getParent());
+
+                // Check for saved transforms
+                var transforms = transformManager.getTransformsForMicroscope(microscopeName);
+                if (transforms.isEmpty()) {
+                    logger.info("No saved transforms available for auto-registration");
+                    return new AutoRegResult(false, "No saved transforms available", null);
+                }
+
+                // Get the most recent transform
+                var selectedTransform = transforms.get(0);
+                logger.info("Using saved transform: {}", selectedTransform.getName());
+
+                // Create auto-registration config
+                var greenBoxParams = new GreenBoxDetector.DetectionParams();
+
+                Map<String, Object> tissueParams = new HashMap<>();
+                tissueParams.put("brightnessMin", 0.2);
+                tissueParams.put("brightnessMax", 0.95);
+                tissueParams.put("minRegionSize", 1000);
+
+                var config = new AutoRegistrationWorkflow.AutoRegistrationConfig(
+                        selectedTransform,
+                        greenBoxParams,
+                        MacroImageAnalyzer.ThresholdMethod.COLOR_DECONVOLUTION,
+                        tissueParams,
+                        true,  // Single bounds
+                        0.7    // Confidence threshold
+                );
+
+                // Perform auto-registration
+                var result = AutoRegistrationWorkflow.performAutoRegistration(gui, config);
+
+                if (result.confidence() > 0.7 && !result.tissueAnnotations().isEmpty()) {
+                    logger.info("Auto-registration successful with confidence {}", result.confidence());
+                    return new AutoRegResult(true, result.message(), result.compositeTransform());
+                } else {
+                    logger.info("Auto-registration confidence too low or no annotations created");
+                    return new AutoRegResult(false, result.message(), null);
+                }
+
+            } catch (Exception e) {
+                logger.error("Auto-registration failed", e);
+                return new AutoRegResult(false, "Error: " + e.getMessage(), null);
+            }
+        });
+    }
+
+    /**
+     * Proceeds with manual annotation creation.
+     */
+    private static void proceedWithManualAnnotations(
+            QuPathGUI qupathGUI,
+            Map<String, Object> projectDetails,
+            SampleSetupController.SampleSetupResult sample,
+            double macroPixelSize,
+            boolean invertedX,
+            boolean invertedY) {
+
+        // This is the existing workflow - create or detect annotations manually
+        List<PathObject> annotations = collectOrCreateAnnotations(qupathGUI, macroPixelSize);
+
+        // Need to get transform manually since auto-registration wasn't used
+        proceedWithManualTransformAndAnnotationCheck(qupathGUI, projectDetails, sample,
+                macroPixelSize, invertedX, invertedY, annotations);
+    }
+
+    /**
+     * Proceeds with manual transform setup and annotation check.
+     */
+    private static void proceedWithManualTransformAndAnnotationCheck(
+            QuPathGUI qupathGUI,
+            Map<String, Object> projectDetails,
+            SampleSetupController.SampleSetupResult sample,
+            double macroPixelSize,
+            boolean invertedX,
+            boolean invertedY,
+            List<PathObject> annotations) {
+
+        // Show annotation check dialog first
+        CompletableFuture<Boolean> annotationCheckFuture = new CompletableFuture<>();
+        UIFunctions.checkValidAnnotationsGUI(
+                List.of("Tissue"),
+                annotationCheckFuture::complete
+        );
+
+        annotationCheckFuture.thenAccept(proceed -> {
+            if (!proceed) {
+                logger.info("User cancelled at annotation verification step.");
+                return;
+            }
+
+            // Refresh annotations to get the current state after user modifications
+            List<PathObject> currentAnnotations = qupathGUI.getViewer().getHierarchy().getAnnotationObjects().stream()
+                    .filter(o -> o.getPathClass() != null && "Tissue".equals(o.getPathClass().getName()))
+                    .collect(Collectors.toList());
+
+            if (currentAnnotations.isEmpty()) {
+                logger.warn("No valid annotations found after user confirmation. Aborting workflow.");
+                Platform.runLater(() -> UIFunctions.notifyUserOfError(
+                        "No valid tissue annotations found. Please create at least one annotation with 'Tissue' classification.",
+                        "No Annotations"));
+                return;
+            }
+
+            logger.info("Using {} annotation(s) after user confirmation", currentAnnotations.size());
+
+            // Continue with tile creation and manual transform setup
+            createTilesAndSetupTransform(qupathGUI, projectDetails, sample,
+                    macroPixelSize, invertedX, invertedY, currentAnnotations);
+        });
+    }
+
+    /**
+     * Common workflow continuation after annotations are established and transform is known.
+     */
+    private static void proceedWithAnnotationCheck(
+            QuPathGUI qupathGUI,
+            Map<String, Object> projectDetails,
+            SampleSetupController.SampleSetupResult sample,
+            double macroPixelSize,
+            boolean invertedX,
+            boolean invertedY,
+            List<PathObject> annotations,
+            AffineTransform transform) {
+
+        // Show annotation check dialog
+        CompletableFuture<Boolean> annotationCheckFuture = new CompletableFuture<>();
+        UIFunctions.checkValidAnnotationsGUI(
+                List.of("Tissue"),
+                annotationCheckFuture::complete
+        );
+
+        annotationCheckFuture.thenAccept(proceed -> {
+            if (!proceed) {
+                logger.info("User cancelled at annotation verification step.");
+                return;
+            }
+
+            // Refresh annotations to get the current state after user modifications
+            List<PathObject> currentAnnotations = qupathGUI.getViewer().getHierarchy().getAnnotationObjects().stream()
+                    .filter(o -> o.getPathClass() != null && "Tissue".equals(o.getPathClass().getName()))
+                    .collect(Collectors.toList());
+
+            if (currentAnnotations.isEmpty()) {
+                logger.warn("No valid annotations found after user confirmation. Aborting workflow.");
+                Platform.runLater(() -> UIFunctions.notifyUserOfError(
+                        "No valid tissue annotations found. Please create at least one annotation with 'Tissue' classification.",
+                        "No Annotations"));
+                return;
+            }
+
+            logger.info("Using {} annotation(s) after user confirmation", currentAnnotations.size());
+
+            // Continue with tile creation using the existing transform
+            createTilesWithKnownTransform(qupathGUI, projectDetails, sample,
+                    macroPixelSize, invertedX, invertedY, currentAnnotations, transform);
+        });
+    }
+
+    /**
+     * Creates tiles and sets up transform manually (no auto-registration).
+     */
+    private static void createTilesAndSetupTransform(
+            QuPathGUI qupathGUI,
+            Map<String, Object> projectDetails,
+            SampleSetupController.SampleSetupResult sample,
+            double macroPixelSize,
+            boolean invertedX,
+            boolean invertedY,
+            List<PathObject> currentAnnotations) {
+
+        @SuppressWarnings("unchecked")
+        Project<BufferedImage> project = (Project<BufferedImage>) projectDetails.get("currentQuPathProject");
+        String tempTileDirectory = (String) projectDetails.get("tempTileDirectory");
+        String modeWithIndex = (String) projectDetails.get("imagingModeWithIndex");
+
+        // Get camera parameters from config
+        MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(
+                QPPreferenceDialog.getMicroscopeConfigFileProperty());
+        double pixelSize = mgr.getDouble("imagingMode", sample.modality(), "pixelSize_um");
+        int cameraWidth = mgr.getInteger("imagingMode", sample.modality(), "detector", "width_px");
+        int cameraHeight = mgr.getInteger("imagingMode", sample.modality(), "detector", "height_px");
+
+        double frameWidthMicrons = pixelSize * cameraWidth;
+        double frameHeightMicrons = pixelSize * cameraHeight;
+
+        // Convert to QuPath pixels for tiling
+        double frameWidthQP = frameWidthMicrons / macroPixelSize;
+        double frameHeightQP = frameHeightMicrons / macroPixelSize;
+        double overlapPercent = QPPreferenceDialog.getTileOverlapPercentProperty();
+
+        try {
+            // Remove existing tiles and create new ones
+            String modalityBase = sample.modality().replaceAll("(_\\d+)$", "");
+            QP.getDetectionObjects().stream()
+                    .filter(o -> o.getPathClass() != null &&
+                            o.getPathClass().toString().contains(modalityBase))
+                    .forEach(QP::removeObject);
+            QP.fireHierarchyUpdate();
+            logger.info("Existing tiles should be removed at this point");
+
+            // Build tiling request with CURRENT annotations
+            TilingRequest request = new TilingRequest.Builder()
+                    .outputFolder(tempTileDirectory)
+                    .modalityName(modeWithIndex)
+                    .frameSize(frameWidthQP, frameHeightQP)
+                    .overlapPercent(overlapPercent)
+                    .annotations(currentAnnotations)
+                    .invertAxes(invertedX, invertedY)
+                    .createDetections(true)
+                    .addBuffer(true)
+                    .build();
+
+            TilingUtilities.createTiles(request);
+            logger.info("Created tiles for {} annotations", currentAnnotations.size());
+
+        } catch (IOException e) {
+            Platform.runLater(() -> UIFunctions.notifyUserOfError(
+                    "Failed to create tile configurations: " + e.getMessage(),
+                    "Tiling Error"));
+            return;
+        }
+
+        // Check for saved transform first
+        AffineTransform savedTransform = AffineTransformManager.loadSavedTransformFromPreferences();
+        if (savedTransform != null) {
+            logger.info("Using saved microscope alignment, skipping manual alignment");
+
+            // Transform tile configurations
+            try {
+                List<String> modifiedDirs = TransformationFunctions.transformTileConfiguration(
+                        tempTileDirectory, savedTransform);
+                logger.info("Transformed tile configurations for directories: {}", modifiedDirs);
+            } catch (IOException e) {
+                logger.error("Failed to transform tile configurations", e);
+                Platform.runLater(() -> UIFunctions.notifyUserOfError(
+                        "Failed to transform tile coordinates: " + e.getMessage(),
+                        "Transform Error"));
+                return;
+            }
+
+            // Continue with rotation and acquisition
+            proceedWithRotationAndAcquisition(currentAnnotations, savedTransform, sample,
+                    project, tempTileDirectory, modeWithIndex, pixelSize, qupathGUI);
+
+        } else {
+            // No saved transform - do manual alignment
+            logger.info("No saved transform found, proceeding with manual alignment");
+
+            AffineTransformationController.setupAffineTransformationAndValidationGUI(
+                            macroPixelSize, invertedX, invertedY)
+                    .thenAccept(transform -> {
+                        if (transform == null) {
+                            logger.info("User cancelled affine transform step.");
+                            return;
+                        }
+
+                        // Transform tile configurations
+                        try {
+                            List<String> modifiedDirs = TransformationFunctions.transformTileConfiguration(
+                                    tempTileDirectory, transform);
+                            logger.info("Transformed tile configurations for directories: {}", modifiedDirs);
+                        } catch (IOException e) {
+                            logger.error("Failed to transform tile configurations", e);
+                            Platform.runLater(() -> UIFunctions.notifyUserOfError(
+                                    "Failed to transform tile coordinates: " + e.getMessage(),
+                                    "Transform Error"));
+                            return;
+                        }
+
+                        // Continue with rotation and acquisition
+                        proceedWithRotationAndAcquisition(currentAnnotations, transform, sample,
+                                project, tempTileDirectory, modeWithIndex, pixelSize, qupathGUI);
+                    });
+        }
+    }
+
+    /**
+     * Creates tiles when transform is already known (from auto-registration).
+     */
+    private static void createTilesWithKnownTransform(
+            QuPathGUI qupathGUI,
+            Map<String, Object> projectDetails,
+            SampleSetupController.SampleSetupResult sample,
+            double macroPixelSize,
+            boolean invertedX,
+            boolean invertedY,
+            List<PathObject> currentAnnotations,
+            AffineTransform transform) {
+
+        @SuppressWarnings("unchecked")
+        Project<BufferedImage> project = (Project<BufferedImage>) projectDetails.get("currentQuPathProject");
+        String tempTileDirectory = (String) projectDetails.get("tempTileDirectory");
+        String modeWithIndex = (String) projectDetails.get("imagingModeWithIndex");
+
+        // Get camera parameters from config
+        MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(
+                QPPreferenceDialog.getMicroscopeConfigFileProperty());
+        double pixelSize = mgr.getDouble("imagingMode", sample.modality(), "pixelSize_um");
+        int cameraWidth = mgr.getInteger("imagingMode", sample.modality(), "detector", "width_px");
+        int cameraHeight = mgr.getInteger("imagingMode", sample.modality(), "detector", "height_px");
+
+        double frameWidthMicrons = pixelSize * cameraWidth;
+        double frameHeightMicrons = pixelSize * cameraHeight;
+
+        // Convert to QuPath pixels for tiling
+        double frameWidthQP = frameWidthMicrons / macroPixelSize;
+        double frameHeightQP = frameHeightMicrons / macroPixelSize;
+        double overlapPercent = QPPreferenceDialog.getTileOverlapPercentProperty();
+
+        try {
+            // Remove existing tiles and create new ones
+            String modalityBase = sample.modality().replaceAll("(_\\d+)$", "");
+            QP.getDetectionObjects().stream()
+                    .filter(o -> o.getPathClass() != null &&
+                            o.getPathClass().toString().contains(modalityBase))
+                    .forEach(QP::removeObject);
+            QP.fireHierarchyUpdate();
+            logger.info("Existing tiles should be removed at this point");
+
+            // Build tiling request with CURRENT annotations
+            TilingRequest request = new TilingRequest.Builder()
+                    .outputFolder(tempTileDirectory)
+                    .modalityName(modeWithIndex)
+                    .frameSize(frameWidthQP, frameHeightQP)
+                    .overlapPercent(overlapPercent)
+                    .annotations(currentAnnotations)
+                    .invertAxes(invertedX, invertedY)
+                    .createDetections(true)
+                    .addBuffer(true)
+                    .build();
+
+            TilingUtilities.createTiles(request);
+            logger.info("Created tiles for {} annotations", currentAnnotations.size());
+
+            // Transform tile configurations with known transform
+            List<String> modifiedDirs = TransformationFunctions.transformTileConfiguration(
+                    tempTileDirectory, transform);
+            logger.info("Transformed tile configurations for directories: {}", modifiedDirs);
+
+        } catch (IOException e) {
+            Platform.runLater(() -> UIFunctions.notifyUserOfError(
+                    "Failed to create or transform tile configurations: " + e.getMessage(),
+                    "Tiling Error"));
+            return;
+        }
+
+        // Continue with rotation and acquisition using the known transform
+        proceedWithRotationAndAcquisition(currentAnnotations, transform, sample,
+                project, tempTileDirectory, modeWithIndex, pixelSize, qupathGUI);
     }
 
     private static void proceedWithRotationAndAcquisition(
@@ -391,7 +732,7 @@ public class ExistingImageWorkflow {
             double pixelSize,
             QuPathGUI qupathGUI) {
 
-        // 9. Get rotation angles based on modality
+        // Get rotation angles based on modality
         logger.info("Checking rotation requirements for modality: {}", sample.modality());
         RotationManager rotationManager = new RotationManager(sample.modality());
 
@@ -409,6 +750,7 @@ public class ExistingImageWorkflow {
                     return null;
                 });
     }
+
     /**
      * Process all annotations: transform tiles, acquire, and queue stitching.
      * This version handles rotation by processing each angle separately.
@@ -623,154 +965,5 @@ public class ExistingImageWorkflow {
 
         logger.info("Found {} tissue annotation(s) in image.", annotations.size());
         return annotations;
-    }
-
-    /**
-     * Checks if auto-registration should be attempted for the current image.
-     * This is called after project setup but before tile creation.
-     */
-    private static boolean attemptAutoRegistration(QuPathGUI gui,
-                                                   String microscopeName,
-                                                   AffineTransformManager transformManager) {
-
-        // Check if auto-registration is enabled in preferences
-        boolean autoRegEnabled = true;
-
-        if (!autoRegEnabled) {
-            logger.info("Auto-registration is disabled in preferences");
-            return false;
-        }
-
-        // Check if we have a macro image
-        boolean hasMacro = false;
-        try {
-            var associatedImages = gui.getImageData().getServer().getAssociatedImageList();
-            if (associatedImages != null) {
-                hasMacro = associatedImages.stream()
-                        .anyMatch(name -> name.toLowerCase().contains("macro"));
-            }
-        } catch (Exception e) {
-            logger.error("Error checking for macro image", e);
-        }
-
-        if (!hasMacro) {
-            logger.info("No macro image available for auto-registration");
-            return false;
-        }
-
-        // Check if we have saved transforms
-        var transforms = transformManager.getTransformsForMicroscope(microscopeName);
-        if (transforms.isEmpty()) {
-            logger.info("No saved transforms available for auto-registration");
-            Platform.runLater(() -> {
-                Alert alert = new Alert(Alert.AlertType.INFORMATION);
-                alert.setTitle("Auto-Registration");
-                alert.setHeaderText("No saved alignment transforms found");
-                alert.setContentText(
-                        "Auto-registration requires a saved microscope alignment transform.\n" +
-                                "Please run the 'Create Microscope Alignment' workflow first.");
-                alert.showAndWait();
-            });
-            return false;
-        }
-
-        // Show auto-registration dialog
-        Platform.runLater(() -> {
-            Alert confirmDialog = new Alert(Alert.AlertType.CONFIRMATION);
-            confirmDialog.setTitle("Auto-Registration Available");
-            confirmDialog.setHeaderText("Automatic tissue detection is available");
-            confirmDialog.setContentText(
-                    "This image has a macro that can be used for automatic tissue detection.\n\n" +
-                            "Would you like to:\n" +
-                            "• YES - Use automatic detection (recommended)\n" +
-                            "• NO - Create annotations manually\n" +
-                            "• CANCEL - Exit workflow"
-            );
-
-            confirmDialog.showAndWait().ifPresent(response -> {
-                if (response == ButtonType.OK) {
-                    performAutoRegistration(gui, microscopeName, transformManager);
-                } else if (response == ButtonType.NO) {
-                    // Continue with manual annotation
-                    logger.info("User chose manual annotation");
-                } else {
-                    // Cancel workflow
-                    throw new RuntimeException("User cancelled workflow");
-                }
-            });
-        });
-
-        return true;
-    }
-
-    /**
-     * Performs auto-registration and creates tissue annotations.
-     */
-    private static void performAutoRegistration(QuPathGUI gui,
-                                                String microscopeName,
-                                                AffineTransformManager transformManager) {
-
-        logger.info("Starting auto-registration process");
-
-        // Get the most recent transform (or show selection dialog)
-        var transforms = transformManager.getTransformsForMicroscope(microscopeName);
-        var selectedTransform = transforms.get(0); // Could add selection UI here
-
-        // Create configuration
-        var greenBoxParams = new GreenBoxDetector.DetectionParams();
-
-        var tissueParams = Map.of(
-                "brightnessMin", 0.2,
-                "brightnessMax", 0.95,
-                "minRegionSize", 1000
-        );
-
-        var config = new AutoRegistrationWorkflow.AutoRegistrationConfig(
-                selectedTransform,
-                greenBoxParams,
-                MacroImageAnalyzer.ThresholdMethod.COLOR_DECONVOLUTION,
-                tissueParams,
-                true,  // Single bounds
-                0.7    // Confidence threshold
-        );
-
-        // Perform registration
-        var result = AutoRegistrationWorkflow.performAutoRegistration(gui, config);
-
-        Platform.runLater(() -> {
-            if (result.confidence() > 0 && !result.tissueAnnotations().isEmpty()) {
-                // Success
-                Alert successAlert = new Alert(Alert.AlertType.INFORMATION);
-                successAlert.setTitle("Auto-Registration Complete");
-                successAlert.setHeaderText("Tissue detection successful!");
-                successAlert.setContentText(String.format(
-                        "Created %d tissue annotation(s) with %.0f%% confidence.\n\n" +
-                                "You can now adjust these if needed before proceeding.",
-                        result.tissueAnnotations().size(),
-                        result.confidence() * 100
-                ));
-                successAlert.showAndWait();
-
-            } else if (result.confidence() > 0) {
-                // Registration worked but no tissue found
-                Alert noTissueAlert = new Alert(Alert.AlertType.WARNING);
-                noTissueAlert.setTitle("No Tissue Detected");
-                noTissueAlert.setHeaderText("Registration successful but no tissue found");
-                noTissueAlert.setContentText(
-                        "The green box was detected but no tissue was found within it.\n" +
-                                "Please create tissue annotations manually.");
-                noTissueAlert.showAndWait();
-
-            } else {
-                // Registration failed
-                Alert failureAlert = new Alert(Alert.AlertType.ERROR);
-                failureAlert.setTitle("Auto-Registration Failed");
-                failureAlert.setHeaderText("Could not perform automatic registration");
-                failureAlert.setContentText(
-                        result.message() + "\n\n" +
-                                "Please create tissue annotations manually.");
-                failureAlert.showAndWait();
-            }
-        });
     }
 }
