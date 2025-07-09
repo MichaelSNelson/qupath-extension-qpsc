@@ -6,9 +6,12 @@ import javafx.geometry.Insets;
 import javafx.scene.control.*;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
 import javafx.stage.DirectoryChooser;
 import javafx.stage.Modality;
 import javafx.stage.Window;
+import qupath.ext.qpsc.preferences.PersistentPreferences;
 import qupath.ext.qpsc.utilities.MicroscopeConfigManager;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.lib.gui.QuPathGUI;
@@ -19,7 +22,16 @@ import java.util.ResourceBundle;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * Controller for sample setup dialog that collects project information.
+ * Supports both new project creation and adding to existing projects.
+ */
 public class SampleSetupController {
+    private static final Logger logger = LoggerFactory.getLogger(SampleSetupController.class);
+
     /** Holds the user's last entries from the "sample setup" dialog. */
     private static SampleSetupResult lastSampleSetup;
 
@@ -29,17 +41,9 @@ public class SampleSetupController {
     }
 
     /**
-     * Show a dialog to collect:
-     *  - Sample name (text)
-     *  - Projects folder (directory chooser, default from prefs)
-     *  - Modality (combo box, keys from microscope YAML imagingMode section)
-     *
-     * @return a CompletableFuture that completes with the user's entries,
-     *         or is cancelled if the user hits "Cancel."
-     */
-    /**
      * Show a dialog to collect sample/project information.
      * If a project is already open, adapts to only ask for modality.
+     * All fields are populated with last used values from persistent preferences.
      *
      * @return a CompletableFuture that completes with the user's entries,
      *         or is cancelled if the user hits "Cancel."
@@ -61,6 +65,8 @@ public class SampleSetupController {
                 File projectFile = gui.getProject().getPath().toFile();
                 existingProjectFolder = projectFile.getParentFile();
                 existingProjectName = existingProjectFolder.getName();
+                logger.info("Found open project: {} in {}", existingProjectName,
+                        existingProjectFolder.getParent());
             }
 
             Dialog<SampleSetupResult> dlg = new Dialog<>();
@@ -75,40 +81,81 @@ public class SampleSetupController {
                 dlg.setHeaderText(res.getString("sampleSetup.header"));
             }
 
-            ButtonType okType     = new ButtonType(res.getString("sampleSetup.button.ok"), ButtonBar.ButtonData.OK_DONE);
-            ButtonType cancelType = new ButtonType(res.getString("sampleSetup.button.cancel"), ButtonBar.ButtonData.CANCEL_CLOSE);
+            ButtonType okType = new ButtonType(res.getString("sampleSetup.button.ok"),
+                    ButtonBar.ButtonData.OK_DONE);
+            ButtonType cancelType = new ButtonType(res.getString("sampleSetup.button.cancel"),
+                    ButtonBar.ButtonData.CANCEL_CLOSE);
             dlg.getDialogPane().getButtonTypes().addAll(okType, cancelType);
 
             // --- Fields ---
             TextField sampleNameField = new TextField();
             sampleNameField.setPromptText(res.getString("sampleSetup.prompt.sampleName"));
 
+            // Initialize with last used sample name if no project is open
+            if (!hasOpenProject) {
+                String lastSampleName = PersistentPreferences.getLastSampleName();
+                if (!lastSampleName.isEmpty()) {
+                    sampleNameField.setText(lastSampleName);
+                    logger.debug("Loaded last sample name: {}", lastSampleName);
+                }
+            }
+
             TextField folderField = new TextField();
             folderField.setPrefColumnCount(30);
-            folderField.setText(QPPreferenceDialog.getProjectsFolderProperty());
+
+            // Initialize folder from preferences
+            String savedFolder = PersistentPreferences.getProjectsFolder();
+            if (savedFolder != null && !savedFolder.isEmpty()) {
+                folderField.setText(savedFolder);
+            } else {
+                // Fallback to QPPreferenceDialog if PersistentPreferences is empty
+                folderField.setText(QPPreferenceDialog.getProjectsFolderProperty());
+            }
 
             Button browseBtn = new Button(res.getString("sampleSetup.button.browse"));
             browseBtn.setOnAction(e -> {
                 Window win = dlg.getDialogPane().getScene().getWindow();
                 DirectoryChooser chooser = new DirectoryChooser();
                 chooser.setTitle(res.getString("sampleSetup.title.directorychooser"));
+
                 File currentFolder = new File(folderField.getText());
                 if (currentFolder.exists() && currentFolder.isDirectory()) {
                     chooser.setInitialDirectory(currentFolder);
+                } else {
+                    // Try parent directory
+                    File parent = currentFolder.getParentFile();
+                    if (parent != null && parent.exists() && parent.isDirectory()) {
+                        chooser.setInitialDirectory(parent);
+                    }
                 }
-                File chosen = chooser.showDialog(win);
-                if (chosen != null) folderField.setText(chosen.getAbsolutePath());
-            });
-            HBox folderBox = new HBox(5, folderField, browseBtn);
 
+                File chosen = chooser.showDialog(win);
+                if (chosen != null) {
+                    folderField.setText(chosen.getAbsolutePath());
+                    logger.debug("User selected projects folder: {}", chosen.getAbsolutePath());
+                }
+            });
+
+            HBox folderBox = new HBox(5, folderField, browseBtn);
+            HBox.setHgrow(folderField, Priority.ALWAYS);
+
+            // Load modalities from config
             Set<String> modalities = MicroscopeConfigManager
                     .getInstance(QPPreferenceDialog.getMicroscopeConfigFileProperty())
                     .getSection("imagingMode")
                     .keySet();
+
             ComboBox<String> modalityBox = new ComboBox<>(
                     FXCollections.observableArrayList(modalities)
             );
-            if (!modalities.isEmpty()) {
+
+            // Set last used modality if available
+            String lastModality = PersistentPreferences.getLastModality();
+            if (!lastModality.isEmpty() && modalities.contains(lastModality)) {
+                modalityBox.setValue(lastModality);
+                logger.debug("Set modality to last used: {}", lastModality);
+            } else if (!modalities.isEmpty()) {
+                // Default to first if no saved preference or saved one not in list
                 modalityBox.setValue(modalities.iterator().next());
             }
 
@@ -117,6 +164,12 @@ public class SampleSetupController {
             errorLabel.setStyle("-fx-text-fill: red; -fx-font-size: 12px;");
             errorLabel.setWrapText(true);
             errorLabel.setVisible(false);
+
+            // --- Info label for existing project ---
+            Label infoLabel = new Label();
+            infoLabel.setStyle("-fx-text-fill: blue; -fx-font-size: 11px; -fx-font-style: italic;");
+            infoLabel.setWrapText(true);
+            infoLabel.setVisible(false);
 
             // --- Layout ---
             GridPane grid = new GridPane();
@@ -135,12 +188,25 @@ public class SampleSetupController {
                 grid.add(new Label(res.getString("sampleSetup.label.projectsFolder")), 0, row);
                 grid.add(folderBox, 1, row);
                 row++;
+
+                // Add info about what will happen
+                infoLabel.setText("A new project will be created in: " +
+                        folderField.getText() + File.separator + "[Sample Name]");
+                infoLabel.setVisible(true);
+                grid.add(infoLabel, 0, row, 2, 1);
+                row++;
             } else {
                 // Show existing project info as non-editable
                 grid.add(new Label("Project:"), 0, row);
                 Label projectLabel = new Label(existingProjectName);
                 projectLabel.setStyle("-fx-font-weight: bold;");
                 grid.add(projectLabel, 1, row);
+                row++;
+
+                grid.add(new Label("Location:"), 0, row);
+                Label locationLabel = new Label(existingProjectFolder.getParent());
+                locationLabel.setStyle("-fx-font-size: 11px;");
+                grid.add(locationLabel, 1, row);
                 row++;
 
                 // Pre-fill hidden fields with existing values
@@ -153,15 +219,34 @@ public class SampleSetupController {
             row++;
 
             grid.add(errorLabel, 0, row, 2, 1);
+
             dlg.getDialogPane().setContent(grid);
+            dlg.getDialogPane().setPrefWidth(500);
+
+            // Update info label when sample name changes
+            if (!hasOpenProject) {
+                sampleNameField.textProperty().addListener((obs, old, newVal) -> {
+                    if (!newVal.trim().isEmpty()) {
+                        infoLabel.setText("A new project will be created in: " +
+                                folderField.getText() + File.separator + newVal.trim());
+                    }
+                });
+
+                folderField.textProperty().addListener((obs, old, newVal) -> {
+                    if (!sampleNameField.getText().trim().isEmpty()) {
+                        infoLabel.setText("A new project will be created in: " +
+                                newVal + File.separator + sampleNameField.getText().trim());
+                    }
+                });
+            }
 
             // Prevent dialog from closing on OK if validation fails
             Button okButton = (Button) dlg.getDialogPane().lookupButton(okType);
             okButton.addEventFilter(javafx.event.ActionEvent.ACTION, event -> {
                 // Validate inputs
-                String name   = sampleNameField.getText().trim();
-                File   folder = new File(folderField.getText().trim());
-                String mod    = modalityBox.getValue();
+                String name = sampleNameField.getText().trim();
+                File folder = new File(folderField.getText().trim());
+                String mod = modalityBox.getValue();
 
                 // Build validation error message
                 StringBuilder errors = new StringBuilder();
@@ -169,10 +254,15 @@ public class SampleSetupController {
                 if (!hasOpenProject && name.isEmpty()) {
                     errors.append("• Sample name cannot be empty\n");
                 }
-                if (!hasOpenProject && (!folder.exists() || !folder.isDirectory())) {
 
+                if (!hasOpenProject && !name.isEmpty() && !name.matches("[a-zA-Z0-9_\\-]+")) {
+                    errors.append("• Sample name should only contain letters, numbers, _ and -\n");
+                }
+
+                if (!hasOpenProject && (!folder.exists() || !folder.isDirectory())) {
                     errors.append("• Projects folder must be a valid directory\n");
                 }
+
                 if (mod == null || mod.isEmpty()) {
                     errors.append("• Please select a modality\n");
                 }
@@ -184,26 +274,34 @@ public class SampleSetupController {
                     event.consume();
 
                     // Focus the first problematic field
-
                     if (!hasOpenProject && name.isEmpty()) {
                         sampleNameField.requestFocus();
                     } else if (!hasOpenProject && (!folder.exists() || !folder.isDirectory())) {
-
                         folderField.requestFocus();
                     } else {
                         modalityBox.requestFocus();
                     }
                 } else {
-                    // Valid input - hide error label
+                    // Valid input - hide error label and save preferences
                     errorLabel.setVisible(false);
+
+                    // Save to persistent preferences for next time
+                    if (!hasOpenProject) {
+                        PersistentPreferences.setLastSampleName(name);
+                        PersistentPreferences.setProjectsFolder(folder.getAbsolutePath());
+                    }
+                    PersistentPreferences.setLastModality(mod);
+
+                    logger.info("Saved sample setup preferences - name: {}, folder: {}, modality: {}",
+                            name, folder.getAbsolutePath(), mod);
                 }
             });
 
             dlg.setResultConverter(button -> {
                 if (button == okType) {
-                    String name   = sampleNameField.getText().trim();
-                    File   folder = new File(folderField.getText().trim());
-                    String mod    = modalityBox.getValue();
+                    String name = sampleNameField.getText().trim();
+                    File folder = new File(folderField.getText().trim());
+                    String mod = modalityBox.getValue();
 
                     return new SampleSetupResult(name, folder, mod);
                 }
@@ -215,7 +313,11 @@ public class SampleSetupController {
                 if (hasOpenProject) {
                     modalityBox.requestFocus();
                 } else {
-                    sampleNameField.requestFocus();
+                    if (sampleNameField.getText().isEmpty()) {
+                        sampleNameField.requestFocus();
+                    } else {
+                        modalityBox.requestFocus();
+                    }
                 }
             });
 

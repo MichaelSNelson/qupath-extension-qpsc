@@ -32,43 +32,12 @@ import java.util.stream.Collectors;
 public class MinorFunctions {
     private static final Logger logger = LoggerFactory.getLogger(MinorFunctions.class);
 
-    /** Converts any list of objects into a List<Double>, skipping unparseable entries. */
-    public static List<Double> convertListToDouble(List<?> list) {
-        List<Double> result = new ArrayList<>();
-        for (Object o : list) {
-            try {
-                result.add(Double.parseDouble(o.toString()));
-            } catch (NumberFormatException e) {
-                logger.warn("Skipping unconvertible element '{}'", o);
-            }
-        }
-        return result;
-    }
-    public static double[] convertListToPrimitiveArray(List<?> list) {
-        List<Double> doubles = convertListToDouble(list);
-        double[] out = new double[doubles.size()];
-        for (int i = 0; i < doubles.size(); i++) {
-            out[i] = doubles.get(i);
-        }
-        return out;
-    }
-
     /**
      * @return true if running on Windows, false otherwise
      */
     public static boolean isWindows() {
         String os = System.getProperty("os.name");
         return os != null && os.toLowerCase().contains("win");
-    }
-    /**
-     * Reads a JSON file via Gson into a nested Map.
-     * @throws IOException if file access fails
-     */
-    public static Map<String,Object> readJsonFileToMapWithGson(String filePath) throws IOException {
-        String content = Files.readString(Paths.get(filePath), StandardCharsets.UTF_8);
-        Gson gson = new Gson();
-        Type type = new TypeToken<Map<String,Object>>(){}.getType();
-        return gson.fromJson(content, type);
     }
 
     /**
