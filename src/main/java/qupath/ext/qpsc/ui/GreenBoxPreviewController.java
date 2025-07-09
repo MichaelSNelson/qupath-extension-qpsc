@@ -22,11 +22,13 @@ import java.util.concurrent.CompletableFuture;
 public class GreenBoxPreviewController {
 
     /**
-     * Shows a preview of green box detection and allows user to confirm or adjust.
+     * Shows a preview dialog for green box detection allowing user to confirm or adjust parameters.
+     * Displays the macro image with detected green box overlay and allows real-time parameter adjustment.
      *
-     * @param macroImage The macro image
-     * @param savedParams Previously saved detection parameters (can be null)
-     * @return CompletableFuture with confirmed detection result or null if cancelled
+     * @param macroImage The macro image to analyze
+     * @param savedParams Previously saved detection parameters, or null to use defaults
+     * @return CompletableFuture with confirmed detection result containing the detected box,
+     *         confidence score, and debug image, or null if cancelled
      */
     public static CompletableFuture<GreenBoxDetector.DetectionResult> showPreviewDialog(
             BufferedImage macroImage,

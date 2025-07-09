@@ -266,11 +266,14 @@ public class MicroscopeAlignmentWorkflow {
     }
 
     /**
-     * Attempts green box detection and returns initial transform.
-     * Also stores the successful detection parameters in the config.
-     */
-    /**
-     * Attempts green box detection and returns initial transform.
+     * Attempts green box detection on the macro image and returns an initial transform.
+     * Uses the detection parameters from the alignment configuration to find the green
+     * bounding box that indicates the scanned region.
+     *
+     * @param gui The QuPath GUI instance
+     * @param config The alignment configuration containing green box detection parameters
+     * @return AffineTransform mapping macro coordinates to main image coordinates based on
+     *         the detected green box, or null if detection fails or confidence is too low
      */
     private static AffineTransform attemptGreenBoxDetection(
             QuPathGUI gui,
@@ -470,7 +473,12 @@ public class MicroscopeAlignmentWorkflow {
     }
 
     /**
-     * Saves the transform to the manager.
+     * Saves the alignment transform along with associated metadata to the transform manager.
+     * Includes the green box detection parameters used during alignment for future reuse.
+     *
+     * @param transform The affine transform to save
+     * @param config The alignment configuration containing transform name and parameters
+     * @param transformManager The transform manager instance for persistence
      */
     private static void saveTransform(
             AffineTransform transform,
@@ -495,7 +503,7 @@ public class MicroscopeAlignmentWorkflow {
                         greenBoxParams
                 );
 
-        transformManager.saveTransform(preset);
+        transformManager.savePreset(preset);
         logger.info("Saved transform preset: {}", preset.getName());
     }
 }

@@ -25,9 +25,11 @@ public class MacroImageUtility {
 
     /**
      * Retrieves the macro image from the current QuPath image data.
+     * Searches through associated images for entries containing "macro" and handles
+     * various naming formats used by different scanner vendors.
      *
      * @param gui The QuPath GUI instance
-     * @return The macro image, or null if not available
+     * @return The macro image as BufferedImage, or null if not available or retrieval fails
      */
     public static BufferedImage retrieveMacroImage(QuPathGUI gui) {
         try {
@@ -78,9 +80,10 @@ public class MacroImageUtility {
 
     /**
      * Checks if a macro image is available without actually retrieving it.
+     * Useful for enabling/disabling UI elements based on macro availability.
      *
      * @param gui The QuPath GUI instance
-     * @return true if a macro image exists
+     * @return true if a macro image exists in the associated images list, false otherwise
      */
     public static boolean isMacroImageAvailable(QuPathGUI gui) {
         if (gui.getImageData() == null) {
