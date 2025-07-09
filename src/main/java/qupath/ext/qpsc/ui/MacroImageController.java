@@ -44,7 +44,7 @@ public class MacroImageController {
             String transformName,
             MacroImageAnalyzer.ThresholdMethod thresholdMethod,
             Map<String, Object> thresholdParams,
-            GreenBoxDetector.DetectionParams greenBoxParams,
+            GreenBoxDetector.DetectionParams greenBoxParams,  // Already exists
             boolean useGreenBoxDetection
     ) {}
 

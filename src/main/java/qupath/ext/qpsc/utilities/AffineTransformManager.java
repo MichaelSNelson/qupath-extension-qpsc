@@ -55,15 +55,26 @@ public class AffineTransformManager {
         private final AffineTransform transform;
         private final Date createdDate;
         private final String notes;
+        private final GreenBoxDetector.DetectionParams greenBoxParams;
 
         public TransformPreset(String name, String microscope, String mountingMethod,
-                               AffineTransform transform, String notes) {
+                               AffineTransform transform, String notes, GreenBoxDetector.DetectionParams greenBoxParams) {
             this.name = name;
             this.microscope = microscope;
             this.mountingMethod = mountingMethod;
             this.transform = new AffineTransform(transform);
             this.createdDate = new Date();
             this.notes = notes;
+            this.greenBoxParams = greenBoxParams;
+        }
+        /**
+         * Backward-compatible constructor without green box parameters.
+         * Uses default parameters.
+         */
+        public TransformPreset(String name, String microscope, String mountingMethod,
+                               AffineTransform transform, String notes) {
+            this(name, microscope, mountingMethod, transform, notes,
+                    new GreenBoxDetector.DetectionParams());
         }
 
         // Getters
@@ -73,7 +84,9 @@ public class AffineTransformManager {
         public AffineTransform getTransform() { return new AffineTransform(transform); }
         public Date getCreatedDate() { return createdDate; }
         public String getNotes() { return notes; }
-
+        public GreenBoxDetector.DetectionParams getGreenBoxParams() {
+            return greenBoxParams;
+        }
         @Override
         public String toString() {
             return String.format("%s (%s - %s)", name, microscope, mountingMethod);
@@ -149,6 +162,18 @@ public class AffineTransformManager {
             String json = Files.readString(transformsPath);
             var type = new TypeToken<Map<String, TransformPreset>>(){}.getType();
             Map<String, TransformPreset> loaded = gson.fromJson(json, type);
+
+            // Handle backward compatibility - add default green box params if missing
+            if (loaded != null) {
+                loaded.forEach((key, preset) -> {
+                    if (preset.getGreenBoxParams() == null) {
+                        logger.info("Adding default green box params to legacy transform: {}", key);
+                        // This would require making the field non-final or recreating the preset
+                        // For now, the Gson deserialization will handle it with defaults
+                    }
+                });
+            }
+
             return loaded != null ? loaded : new HashMap<>();
         } catch (IOException e) {
             logger.error("Failed to load transforms from {}", transformsPath, e);

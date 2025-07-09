@@ -9,6 +9,8 @@ import qupath.ext.qpsc.ui.MacroImageController;
 import qupath.ext.qpsc.ui.SampleSetupController;
 import qupath.ext.qpsc.ui.UIFunctions;
 import qupath.ext.qpsc.utilities.*;
+import qupath.ext.qpsc.utilities.MacroImageUtility;
+
 import qupath.lib.gui.QuPathGUI;
 import qupath.lib.objects.PathObject;
 import qupath.lib.objects.PathObjects;
@@ -265,6 +267,10 @@ public class MicroscopeAlignmentWorkflow {
 
     /**
      * Attempts green box detection and returns initial transform.
+     * Also stores the successful detection parameters in the config.
+     */
+    /**
+     * Attempts green box detection and returns initial transform.
      */
     private static AffineTransform attemptGreenBoxDetection(
             QuPathGUI gui,
@@ -272,7 +278,7 @@ public class MicroscopeAlignmentWorkflow {
 
         try {
             // Get macro image
-            java.awt.image.BufferedImage macroImage = retrieveMacroImage(gui);
+            BufferedImage macroImage = MacroImageUtility.retrieveMacroImage(gui);
 
             if (macroImage == null) {
                 logger.warn("Could not retrieve macro image for green box detection");
@@ -285,23 +291,21 @@ public class MicroscopeAlignmentWorkflow {
             if (greenBoxResult != null && greenBoxResult.getConfidence() > 0.7) {
                 logger.info("Green box detected with confidence {}", greenBoxResult.getConfidence());
 
-                // The green box should match the full image bounds
+                // Calculate transform
                 int mainWidth = gui.getImageData().getServer().getWidth();
                 int mainHeight = gui.getImageData().getServer().getHeight();
                 double mainPixelSize = gui.getImageData().getServer()
                         .getPixelCalibration().getAveragedPixelSizeMicrons();
 
-                // Calculate transform that maps green box to full image
                 AffineTransform transform = GreenBoxDetector.calculateInitialTransform(
                         greenBoxResult.getDetectedBox(),
                         mainWidth,
                         mainHeight,
-                        DEFAULT_MACRO_PIXEL_SIZE,  // Use the hardcoded 80 microns
+                        DEFAULT_MACRO_PIXEL_SIZE,
                         mainPixelSize
                 );
 
                 logger.info("Green box detection successful, created initial transform");
-
                 return transform;
             }
 
@@ -312,55 +316,6 @@ public class MicroscopeAlignmentWorkflow {
         return null;
     }
 
-    /**
-     * Retrieves the macro image from the image server.
-     */
-    private static java.awt.image.BufferedImage retrieveMacroImage(QuPathGUI gui) {
-        try {
-            var imageData = gui.getImageData();
-            if (imageData == null) return null;
-
-            var associatedList = imageData.getServer().getAssociatedImageList();
-            if (associatedList == null) return null;
-
-            // Find macro image key
-            String macroKey = null;
-            for (String name : associatedList) {
-                if (name.toLowerCase().contains("macro")) {
-                    macroKey = name;
-                    break;
-                }
-            }
-
-            if (macroKey == null) return null;
-
-            // Try to retrieve it
-            Object image = imageData.getServer().getAssociatedImage(macroKey);
-            if (image instanceof java.awt.image.BufferedImage) {
-                return (java.awt.image.BufferedImage) image;
-            }
-
-            // Try variations
-            if (macroKey.startsWith("Series ")) {
-                String seriesOnly = macroKey.split("\\s*\\(")[0].trim();
-                image = imageData.getServer().getAssociatedImage(seriesOnly);
-                if (image instanceof java.awt.image.BufferedImage) {
-                    return (java.awt.image.BufferedImage) image;
-                }
-            }
-
-            // Try simple "macro"
-            image = imageData.getServer().getAssociatedImage("macro");
-            if (image instanceof java.awt.image.BufferedImage) {
-                return (java.awt.image.BufferedImage) image;
-            }
-
-        } catch (Exception e) {
-            logger.error("Error retrieving macro image", e);
-        }
-
-        return null;
-    }
 
     /**
      * Creates tissue annotations based on macro analysis or green box.
@@ -526,13 +481,18 @@ public class MicroscopeAlignmentWorkflow {
                 QPPreferenceDialog.getMicroscopeConfigFileProperty()
         ).getString("microscope", "name");
 
+        // Use the green box params from config, or defaults if not present
+        GreenBoxDetector.DetectionParams greenBoxParams =
+                config.useGreenBoxDetection() ? config.greenBoxParams() : new GreenBoxDetector.DetectionParams();
+
         AffineTransformManager.TransformPreset preset =
                 new AffineTransformManager.TransformPreset(
                         config.transformName(),
                         microscopeName,
                         "Standard",
                         transform,
-                        "Created via alignment workflow"
+                        "Created via alignment workflow",
+                        greenBoxParams
                 );
 
         transformManager.saveTransform(preset);

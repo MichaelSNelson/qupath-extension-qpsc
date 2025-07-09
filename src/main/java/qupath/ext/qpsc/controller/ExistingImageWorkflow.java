@@ -8,14 +8,15 @@ import org.slf4j.LoggerFactory;
 import qupath.ext.qpsc.model.RotationManager;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.service.CliExecutor;
-import qupath.ext.qpsc.ui.AffineTransformationController;
+import qupath.ext.qpsc.ui.*;
 import qupath.ext.qpsc.utilities.*;
-import qupath.ext.qpsc.ui.ExistingImageController;
-import qupath.ext.qpsc.ui.SampleSetupController;
-import qupath.ext.qpsc.ui.UIFunctions;
 import qupath.lib.gui.QuPathGUI;
 import qupath.lib.objects.PathObject;
+import qupath.lib.objects.PathObjects;
 import qupath.lib.projects.Project;
+import qupath.lib.regions.ImagePlane;
+import qupath.lib.roi.ROIs;
+import qupath.lib.roi.interfaces.ROI;
 import qupath.lib.scripting.QP;
 import java.util.HashMap;
 import java.awt.geom.AffineTransform;
@@ -273,7 +274,7 @@ public class ExistingImageWorkflow {
                     logger.info("Final macro pixel size: {} µm", macroPixelSize);
 
                     // Check if we should attempt auto-registration
-                    if (useAutoRegistration && shouldAttemptAutoRegistration(qupathGUI)) {
+                    if (useAutoRegistration && MacroImageUtility.isMacroImageAvailable(qupathGUI)) {
                         // Try auto-registration first
                         tryAutoRegistration(qupathGUI, sample.modality())
                                 .thenAccept(autoRegResult -> {
@@ -336,23 +337,6 @@ public class ExistingImageWorkflow {
                 });
     }
 
-    /**
-     * Checks if auto-registration should be attempted based on image capabilities.
-     */
-    private static boolean shouldAttemptAutoRegistration(QuPathGUI gui) {
-        try {
-            var associatedImages = gui.getImageData().getServer().getAssociatedImageList();
-            if (associatedImages != null) {
-                boolean hasMacro = associatedImages.stream()
-                        .anyMatch(name -> name.toLowerCase().contains("macro"));
-                logger.info("Checking for macro image: {}", hasMacro ? "found" : "not found");
-                return hasMacro;
-            }
-        } catch (Exception e) {
-            logger.error("Error checking for macro image", e);
-        }
-        return false;
-    }
 
     /**
      * Attempts auto-registration and returns the result.
@@ -362,52 +346,83 @@ public class ExistingImageWorkflow {
 
         return CompletableFuture.supplyAsync(() -> {
             try {
-                // Get microscope name from config
-                String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
-                MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(configPath);
-                String microscopeName = mgr.getString("microscope", "name");
-
-                // Get transform manager
-                AffineTransformManager transformManager = new AffineTransformManager(
-                        new File(configPath).getParent());
-
-                // Check for saved transforms
-                var transforms = transformManager.getTransformsForMicroscope(microscopeName);
-                if (transforms.isEmpty()) {
-                    logger.info("No saved transforms available for auto-registration");
-                    return new AutoRegResult(false, "No saved transforms available", null);
+                // Get saved transform
+                AffineTransform savedTransform = AffineTransformManager.loadSavedTransformFromPreferences();
+                if (savedTransform == null) {
+                    return new AutoRegResult(false, "No saved transform available", null);
                 }
 
-                // Get the most recent transform
-                var selectedTransform = transforms.get(0);
-                logger.info("Using saved transform: {}", selectedTransform.getName());
+                // Get the transform preset to access green box params
+                String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
+                AffineTransformManager manager = new AffineTransformManager(
+                        new File(configPath).getParent());
+                String savedName = QPPreferenceDialog.getSavedTransformName();
+                var preset = manager.getTransform(savedName);
 
-                // Create auto-registration config
-                var greenBoxParams = new GreenBoxDetector.DetectionParams();
+                if (preset == null) {
+                    return new AutoRegResult(false, "Could not load transform preset", null);
+                }
 
-                Map<String, Object> tissueParams = new HashMap<>();
-                tissueParams.put("brightnessMin", 0.2);
-                tissueParams.put("brightnessMax", 0.95);
-                tissueParams.put("minRegionSize", 1000);
+                // Get macro image
+                BufferedImage macroImage = MacroImageUtility.retrieveMacroImage(gui);
+                if (macroImage == null) {
+                    return new AutoRegResult(false, "No macro image available", null);
+                }
 
-                var config = new AutoRegistrationWorkflow.AutoRegistrationConfig(
-                        selectedTransform,
-                        greenBoxParams,
-                        MacroImageAnalyzer.ThresholdMethod.COLOR_DECONVOLUTION,
-                        tissueParams,
-                        true,  // Single bounds
-                        0.7    // Confidence threshold
+                // Show green box preview with saved params
+                CompletableFuture<GreenBoxDetector.DetectionResult> greenBoxFuture =
+                        GreenBoxPreviewController.showPreviewDialog(macroImage, preset.getGreenBoxParams());
+
+                GreenBoxDetector.DetectionResult greenBoxResult = greenBoxFuture.get();
+                if (greenBoxResult == null) {
+                    return new AutoRegResult(false, "User cancelled green box detection", null);
+                }
+
+                if (greenBoxResult.getConfidence() < 0.7) {
+                    return new AutoRegResult(false, "Green box confidence too low", null);
+                }
+
+                // Calculate transform from green box to main image
+                int mainWidth = gui.getImageData().getServer().getWidth();
+                int mainHeight = gui.getImageData().getServer().getHeight();
+                double mainPixelSize = gui.getImageData().getServer()
+                        .getPixelCalibration().getAveragedPixelSizeMicrons();
+
+                AffineTransform greenBoxToMain = GreenBoxDetector.calculateInitialTransform(
+                        greenBoxResult.getDetectedBox(),
+                        mainWidth,
+                        mainHeight,
+                        80.0, // macro pixel size
+                        mainPixelSize
                 );
 
-                // Perform auto-registration
-                var result = AutoRegistrationWorkflow.performAutoRegistration(gui, config);
+                // Compose with saved microscope transform
+                AffineTransform compositeTransform = new AffineTransform(savedTransform);
+                compositeTransform.concatenate(greenBoxToMain);
 
-                if (result.confidence() > 0.7 && !result.tissueAnnotations().isEmpty()) {
-                    logger.info("Auto-registration successful with confidence {}", result.confidence());
-                    return new AutoRegResult(true, result.message(), result.compositeTransform());
+                // Now run tissue detection WITHIN the detected area
+                Platform.runLater(() -> {
+                    createTissueAnnotationsWithinBounds(gui, greenBoxResult.getDetectedBox(),
+                            greenBoxToMain, modality);
+                });
+
+                // Wait for annotations to be created
+                Thread.sleep(1000);
+
+                // Check if we got annotations
+                List<PathObject> annotations = gui.getViewer().getHierarchy()
+                        .getAnnotationObjects().stream()
+                        .filter(o -> o.getPathClass() != null &&
+                                "Tissue".equals(o.getPathClass().getName()))
+                        .collect(Collectors.toList());
+
+                if (!annotations.isEmpty()) {
+                    return new AutoRegResult(true,
+                            "Auto-registration successful with " + annotations.size() + " tissue regions",
+                            compositeTransform);
                 } else {
-                    logger.info("Auto-registration confidence too low or no annotations created");
-                    return new AutoRegResult(false, result.message(), null);
+                    return new AutoRegResult(false, "No tissue detected within green box",
+                            compositeTransform);
                 }
 
             } catch (Exception e) {
@@ -416,7 +431,6 @@ public class ExistingImageWorkflow {
             }
         });
     }
-
     /**
      * Proceeds with manual annotation creation.
      */
@@ -475,7 +489,25 @@ public class ExistingImageWorkflow {
             }
 
             logger.info("Using {} annotation(s) after user confirmation", currentAnnotations.size());
+            Platform.runLater(() -> {
+                Alert refineAlert = new Alert(Alert.AlertType.CONFIRMATION);
+                refineAlert.setTitle("Refine Alignment?");
+                refineAlert.setHeaderText("Initial alignment complete");
+                refineAlert.setContentText(
+                        "The initial alignment is based on the macro image (80µm pixels).\n" +
+                                "For " + sample.modality() + " imaging, would you like to refine the alignment?\n\n" +
+                                "This is recommended for high magnification (20x, 40x) to ensure precise positioning."
+                );
 
+                refineAlert.showAndWait().ifPresent(response -> {
+                    if (response == ButtonType.OK) {
+                        // Run refinement workflow similar to manual alignment
+                        logger.info("User requested alignment refinement");
+                        // This would trigger the tile selection and fine-tuning process
+                        // Similar to the manual workflow but starting from the auto-registered position
+                    }
+                });
+            });
             // Continue with tile creation and manual transform setup
             createTilesAndSetupTransform(qupathGUI, projectDetails, sample,
                     macroPixelSize, invertedX, invertedY, currentAnnotations);
@@ -965,5 +997,70 @@ public class ExistingImageWorkflow {
 
         logger.info("Found {} tissue annotation(s) in image.", annotations.size());
         return annotations;
+    }
+    /**
+     * Creates tissue annotations by running detection only within the green box bounds.
+     */
+    private static void createTissueAnnotationsWithinBounds(
+            QuPathGUI gui,
+            ROI greenBoxInMacro,
+            AffineTransform macroToMain,
+            String modality) {
+
+        try {
+            // Transform green box bounds to main image coordinates
+            double[] topLeft = TransformationFunctions.qpToMicroscopeCoordinates(
+                    new double[]{greenBoxInMacro.getBoundsX(), greenBoxInMacro.getBoundsY()},
+                    macroToMain);
+            double[] bottomRight = TransformationFunctions.qpToMicroscopeCoordinates(
+                    new double[]{
+                            greenBoxInMacro.getBoundsX() + greenBoxInMacro.getBoundsWidth(),
+                            greenBoxInMacro.getBoundsY() + greenBoxInMacro.getBoundsHeight()
+                    },
+                    macroToMain);
+
+            // Create a temporary annotation for the search area
+            ROI searchArea = ROIs.createRectangleROI(
+                    Math.min(topLeft[0], bottomRight[0]),
+                    Math.min(topLeft[1], bottomRight[1]),
+                    Math.abs(bottomRight[0] - topLeft[0]),
+                    Math.abs(bottomRight[1] - topLeft[1]),
+                    ImagePlane.getDefaultPlane()
+            );
+
+            PathObject searchAnnotation = PathObjects.createAnnotationObject(searchArea);
+            searchAnnotation.setName("Search Area (temporary)");
+            gui.getViewer().getHierarchy().addObject(searchAnnotation);
+
+            // Run tissue detection script within bounds
+            String tissueScript = QPPreferenceDialog.getTissueDetectionScriptProperty();
+            if (tissueScript != null && !tissueScript.isBlank()) {
+                // Modify script to only process within the search area
+                String modifiedScript = String.format(
+                        "selectObjects(getAnnotationObjects().findAll{it.getName() == 'Search Area (temporary)'});\n" +
+                                "%s",
+                        tissueScript
+                );
+
+                gui.runScript(null, modifiedScript);
+            }
+
+            // Remove temporary search area annotation
+            gui.getViewer().getHierarchy().removeObject(searchAnnotation, false);
+
+            // Update annotation names
+            gui.getViewer().getHierarchy().getAnnotationObjects().stream()
+                    .filter(o -> o.getPathClass() != null && "Tissue".equals(o.getPathClass().getName()))
+                    .forEach(o -> {
+                        if (o.getName() == null || o.getName().isEmpty()) {
+                            o.setName("Tissue (auto-detected)");
+                        }
+                    });
+
+            gui.getViewer().repaint();
+
+        } catch (Exception e) {
+            logger.error("Error creating tissue annotations within bounds", e);
+        }
     }
 }

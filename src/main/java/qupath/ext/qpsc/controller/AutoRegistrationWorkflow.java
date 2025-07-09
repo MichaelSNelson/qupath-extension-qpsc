@@ -6,6 +6,8 @@ import org.slf4j.LoggerFactory;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.ui.UIFunctions;
 import qupath.ext.qpsc.utilities.*;
+import qupath.ext.qpsc.utilities.MacroImageUtility;
+
 import qupath.lib.gui.QuPathGUI;
 import qupath.lib.objects.PathObject;
 import qupath.lib.objects.PathObjects;
@@ -71,7 +73,7 @@ public class AutoRegistrationWorkflow {
 
         try {
             // 1. Get the macro image
-            BufferedImage macroImage = retrieveMacroImage(gui);
+            BufferedImage macroImage = MacroImageUtility.retrieveMacroImage(gui);
             if (macroImage == null) {
                 return new RegistrationResult(null, null, 0.0,
                         "No macro image found - manual registration required");
@@ -243,51 +245,6 @@ public class AutoRegistrationWorkflow {
         return intersectsImage && hasMinSize;
     }
 
-
-
-    /**
-     * Retrieves the macro image from the current image server.
-     */
-    private static BufferedImage retrieveMacroImage(QuPathGUI gui) {
-        try {
-            var imageData = gui.getImageData();
-            if (imageData == null) return null;
-
-            var associatedList = imageData.getServer().getAssociatedImageList();
-            if (associatedList == null) return null;
-
-            // Find macro image key
-            String macroKey = null;
-            for (String name : associatedList) {
-                if (name.toLowerCase().contains("macro")) {
-                    macroKey = name;
-                    break;
-                }
-            }
-
-            if (macroKey == null) return null;
-
-            // Try to retrieve it
-            Object image = imageData.getServer().getAssociatedImage(macroKey);
-            if (image instanceof BufferedImage) {
-                return (BufferedImage) image;
-            }
-
-            // Try variations if needed
-            if (macroKey.startsWith("Series ")) {
-                String seriesOnly = macroKey.split("\\s*\\(")[0].trim();
-                image = imageData.getServer().getAssociatedImage(seriesOnly);
-                if (image instanceof BufferedImage) {
-                    return (BufferedImage) image;
-                }
-            }
-
-        } catch (Exception e) {
-            logger.error("Error retrieving macro image", e);
-        }
-
-        return null;
-    }
 
     /**
      * Shows a dialog for configuring auto-registration settings.
