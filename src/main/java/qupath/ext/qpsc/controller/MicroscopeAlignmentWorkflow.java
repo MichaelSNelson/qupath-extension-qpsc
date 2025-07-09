@@ -384,6 +384,12 @@ public class MicroscopeAlignmentWorkflow {
         }
 
         gui.getViewer().repaint();
+        //save data
+        try {
+            QPProjectFunctions.saveCurrentImageData();
+        } catch (IOException e) {
+            logger.warn("Failed to save annotations: {}", e.getMessage());
+        }
     }
 
     /**
@@ -488,22 +494,45 @@ public class MicroscopeAlignmentWorkflow {
         String microscopeName = MicroscopeConfigManager.getInstance(
                 QPPreferenceDialog.getMicroscopeConfigFileProperty()
         ).getString("microscope", "name");
+        // Get stage limits from config for validation
+        MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(
+                QPPreferenceDialog.getMicroscopeConfigFileProperty());
 
-        // Use the green box params from config, or defaults if not present
-        GreenBoxDetector.DetectionParams greenBoxParams =
-                config.useGreenBoxDetection() ? config.greenBoxParams() : new GreenBoxDetector.DetectionParams();
+        var xlimits = mgr.getSection("stage", "xlimit");
+        var ylimits = mgr.getSection("stage", "ylimit");
 
-        AffineTransformManager.TransformPreset preset =
-                new AffineTransformManager.TransformPreset(
-                        config.transformName(),
-                        microscopeName,
-                        "Standard",
+        if (xlimits != null && ylimits != null) {
+            double xMin = ((Number) xlimits.get("low")).doubleValue();
+            double xMax = ((Number) xlimits.get("high")).doubleValue();
+            double yMin = ((Number) ylimits.get("low")).doubleValue();
+            double yMax = ((Number) ylimits.get("high")).doubleValue();
+            // Get image dimensions from QuPath
+            var gui = QuPathGUI.getInstance();
+            if (gui.getImageData() != null) {
+                // Use the green box params from config, or defaults if not present
+                GreenBoxDetector.DetectionParams greenBoxParams =
+                        config.useGreenBoxDetection() ? config.greenBoxParams() : new GreenBoxDetector.DetectionParams();
+
+                AffineTransformManager.TransformPreset preset =
+                        new AffineTransformManager.TransformPreset(
+                                config.transformName(),
+                                microscopeName,
+                                "Standard",
+                                transform,
+                                "Created via alignment workflow",
+                                greenBoxParams
+                        );
+                if (!AffineTransformManager.validateTransform(
                         transform,
-                        "Created via alignment workflow",
-                        greenBoxParams
-                );
-
-        transformManager.savePreset(preset);
-        logger.info("Saved transform preset: {}", preset.getName());
+                        gui.getImageData().getServer().getWidth(),
+                        gui.getImageData().getServer().getHeight(),
+                        xMin, xMax, yMin, yMax)) {
+                    logger.warn("Transform validation failed - saving anyway");
+                    // Could show warning dialog here
+                }
+                transformManager.savePreset(preset);
+                logger.info("Saved transform preset: {}", preset.getName());
+            }
+        }
     }
 }

@@ -225,42 +225,7 @@ public class TransformationFunctions {
         return at;
     }
 
-    /**
-     * Applies an offset to a vector of coordinates, either for sending to the stage
-     * (adding the offset) or for retrieving from the stage (subtracting the offset).
-     *
-     * <p>For example, if your QuPath derived stage coordinates are [x, y] and you need
-     * to compensate by an offset [dx, dy], then calling
-     * {@code applyOffset(List.of(x, y), List.of(dx, dy), true)} will yield
-     * {@code new double[]{ x + dx, y + dy }}.</p>
-     *
-     * @param input       a List of Double representing the original coordinates;
-     *                    must be non-null and of length N.
-     * @param offset      a List of Double of the same length N, representing the
-     *                    values to add (or subtract) for each coordinate.
-     * @param sendToStage if true, the returned array is {@code input[i] + offset[i]};
-     *                    if false, it is {@code input[i] - offset[i]}.
-     * @return a new {@code double[]} of length N containing the adjusted coordinates.
-     * @throws IllegalArgumentException if {@code input.size() != offset.size()}.
-     */
-    public static double[] applyOffset(
-            double[] input,
-            double[] offset,
-            boolean sendToStage) {
 
-        if (input == null || offset == null || input.length != offset.length) {
-            throw new IllegalArgumentException("Input array and offset list must be non-null and the same length");
-        }
-
-        double[] result = new double[input.length];
-        for (int i = 0; i < input.length; i++) {
-            double off = offset[i];
-            result[i] = sendToStage
-                    ? input[i] + off
-                    : input[i] - off;
-        }
-        return result;
-    }
 
     /**
      * Placeholder for computing a transform from a previous low-res to new high-res image.

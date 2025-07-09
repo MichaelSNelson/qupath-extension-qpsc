@@ -242,7 +242,16 @@ public class ExistingImageWorkflow {
 
     /**
      * Continues the workflow after project setup and image import is complete.
+     * Handles the decision between auto-registration and manual annotation/alignment.
      * This method should be called on the JavaFX thread.
+     *
+     * @param qupathGUI The QuPath GUI instance
+     * @param projectDetails Map containing project information from setup
+     * @param sample Sample setup configuration including name, folder, and modality
+     * @param invertedX Whether X axis is inverted for stage coordinates
+     * @param invertedY Whether Y axis is inverted for stage coordinates
+     * @param useAutoRegistration Whether to attempt automatic registration
+     * @param initialPixelSize Initial pixel size estimate for the macro image
      */
     private static void continueWorkflowAfterProjectSetup(
             QuPathGUI qupathGUI,
@@ -339,13 +348,26 @@ public class ExistingImageWorkflow {
 
 
     /**
-     * Attempts auto-registration and returns the result.
+     * Attempts automatic registration using saved transforms and green box detection.
+     * Combines green box detection with pre-saved microscope alignment to automatically
+     * position annotations without manual intervention.
+     *
+     * @param gui QuPath GUI instance
+     * @param modality The imaging modality being used
+     * @return CompletableFuture with AutoRegResult containing success status, message,
+     *         and the composite transform if successful
      */
     private static CompletableFuture<AutoRegResult> tryAutoRegistration(
             QuPathGUI gui, String modality) {
 
         return CompletableFuture.supplyAsync(() -> {
             try {
+                if (!AffineTransformManager.hasSavedTransform()) {
+                    logger.info("No saved transform available for auto-registration");
+                    return new AutoRegResult(false,
+                            "No saved microscope alignment found. Please run Microscope Alignment first.",
+                            null);
+                }
                 // Get saved transform
                 AffineTransform savedTransform = AffineTransformManager.loadSavedTransformFromPreferences();
                 if (savedTransform == null) {
@@ -489,6 +511,13 @@ public class ExistingImageWorkflow {
             }
 
             logger.info("Using {} annotation(s) after user confirmation", currentAnnotations.size());
+            //saving data
+            try {
+                QPProjectFunctions.saveCurrentImageData();
+            } catch (IOException e) {
+                logger.warn("Failed to save image data: {}", e.getMessage());
+            }
+
             Platform.runLater(() -> {
                 Alert refineAlert = new Alert(Alert.AlertType.CONFIRMATION);
                 refineAlert.setTitle("Refine Alignment?");
@@ -998,8 +1027,16 @@ public class ExistingImageWorkflow {
         logger.info("Found {} tissue annotation(s) in image.", annotations.size());
         return annotations;
     }
+
     /**
      * Creates tissue annotations by running detection only within the green box bounds.
+     * Transforms the green box coordinates to main image space and runs tissue detection
+     * script within that region to avoid detecting tissue outside the scanned area.
+     *
+     * @param gui The QuPath GUI instance
+     * @param greenBoxInMacro The detected green box ROI in macro image coordinates
+     * @param macroToMain The affine transform from macro to main image coordinates
+     * @param modality The imaging modality being used
      */
     private static void createTissueAnnotationsWithinBounds(
             QuPathGUI gui,

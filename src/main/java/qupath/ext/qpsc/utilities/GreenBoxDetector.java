@@ -2,6 +2,7 @@ package qupath.ext.qpsc.utilities;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import qupath.ext.qpsc.preferences.PersistentPreferences;
 import qupath.lib.regions.ImagePlane;
 import qupath.lib.roi.ROIs;
 import qupath.lib.roi.interfaces.ROI;
@@ -25,14 +26,73 @@ public class GreenBoxDetector {
      * Parameters for green box detection.
      */
     public static class DetectionParams {
-        public double greenThreshold = 0.4;     // How much green vs other channels
-        public double saturationMin = 0.3;      // Minimum saturation for green
-        public double brightnessMin = 0.3;      // Minimum brightness
-        public double brightnessMax = 0.9;      // Maximum brightness
-        public int minBoxWidth = 100;           // Minimum box width in pixels
-        public int minBoxHeight = 100;          // Minimum box height in pixels
-        public int edgeThickness = 3;          // Expected thickness of box edges
+        public double greenThreshold;     // How much green vs other channels
+        public double saturationMin;      // Minimum saturation for green
+        public double brightnessMin;      // Minimum brightness
+        public double brightnessMax;      // Maximum brightness
+        public int minBoxWidth;           // Minimum box width in pixels
+        public int minBoxHeight;          // Minimum box height in pixels
+        public int edgeThickness;        // Expected thickness of box edges
         public boolean requireRectangle = true; // Only accept rectangular shapes
+
+        /**
+         * Default constructor - loads from persistent preferences or uses defaults.
+         */
+        public DetectionParams() {
+            try {
+                this.greenThreshold = PersistentPreferences.getGreenThreshold();
+                this.saturationMin = PersistentPreferences.getGreenSaturationMin();
+                this.brightnessMin = PersistentPreferences.getGreenBrightnessMin();
+                this.brightnessMax = PersistentPreferences.getGreenBrightnessMax();
+                this.edgeThickness = PersistentPreferences.getGreenEdgeThickness();
+                this.minBoxWidth = PersistentPreferences.getGreenMinBoxWidth();
+                this.minBoxHeight = PersistentPreferences.getGreenMinBoxHeight();
+            } catch (Exception e) {
+                // If preferences fail to load, use defaults
+                loadDefaults();
+            }
+        }
+
+        /**
+         * Constructor with all parameters specified.
+         */
+        public DetectionParams(double greenThreshold, double saturationMin,
+                               double brightnessMin, double brightnessMax,
+                               int minBoxWidth, int minBoxHeight, int edgeThickness) {
+            this.greenThreshold = greenThreshold;
+            this.saturationMin = saturationMin;
+            this.brightnessMin = brightnessMin;
+            this.brightnessMax = brightnessMax;
+            this.minBoxWidth = minBoxWidth;
+            this.minBoxHeight = minBoxHeight;
+            this.edgeThickness = edgeThickness;
+        }
+
+        /**
+         * Loads default values.
+         */
+        private void loadDefaults() {
+            this.greenThreshold = 0.4;
+            this.saturationMin = 0.3;
+            this.brightnessMin = 0.3;
+            this.brightnessMax = 0.9;
+            this.minBoxWidth = 100;
+            this.minBoxHeight = 100;
+            this.edgeThickness = 3;
+        }
+
+        /**
+         * Saves current parameters to persistent preferences.
+         */
+        public void saveToPreferences() {
+            PersistentPreferences.setGreenThreshold(greenThreshold);
+            PersistentPreferences.setGreenSaturationMin(saturationMin);
+            PersistentPreferences.setGreenBrightnessMin(brightnessMin);
+            PersistentPreferences.setGreenBrightnessMax(brightnessMax);
+            PersistentPreferences.setGreenEdgeThickness(edgeThickness);
+            PersistentPreferences.setGreenMinBoxWidth(minBoxWidth);
+            PersistentPreferences.setGreenMinBoxHeight(minBoxHeight);
+        }
     }
 
     /**
@@ -55,11 +115,13 @@ public class GreenBoxDetector {
     }
 
     /**
-     * Detects green bounding box in the macro image.
+     * Detects green bounding box in the macro image that indicates the scanned region.
+     * These boxes are commonly added by slide scanners to show which area was digitized.
      *
      * @param macroImage The macro image to analyze
-     * @param params Detection parameters
-     * @return Detection result with the found box, or null if not found
+     * @param params Detection parameters controlling color thresholds and size constraints
+     * @return Detection result containing the found box ROI, debug visualization, and confidence score,
+     *         or null if no suitable green box is found
      */
     public static DetectionResult detectGreenBox(BufferedImage macroImage, DetectionParams params) {
         logger.info("Starting green box detection on {}x{} image",
@@ -338,12 +400,13 @@ public class GreenBoxDetector {
 
     /**
      * Calculates initial affine transform based on green box detection.
-     * The green box in the macro represents the exact area of the main image.
+     * The green box in the macro image represents the exact area of the main image,
+     * so this creates a transform that maps macro pixel coordinates to main image pixels.
      *
-     * @param greenBoxInMacro The detected green box in macro coordinates (pixels)
+     * @param greenBoxInMacro The detected green box ROI in macro coordinates (pixels)
      * @param mainImageWidth Width of the main image in pixels
      * @param mainImageHeight Height of the main image in pixels
-     * @param macroPixelSize Pixel size of the macro image in microns (default ~80)
+     * @param macroPixelSize Pixel size of the macro image in microns (typically ~80)
      * @param mainPixelSize Pixel size of the main image in microns
      * @return Initial affine transform from macro to main image coordinates
      */

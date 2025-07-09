@@ -195,16 +195,29 @@ public class AffineTransformManager {
     }
 
     /**
-     * Saves a new transform preset.
+     * Saves a transform preset to persistent storage.
+     * The preset will be immediately written to the JSON file.
      *
      * @param preset The transform preset to save
      */
-    public void saveTransform(TransformPreset preset) {
+    public void savePreset(TransformPreset preset) {
         transforms.put(preset.getName(), preset);
-        saveTransforms();
+        persistTransforms(); // renamed from saveTransforms
         logger.info("Saved transform preset: {}", preset.getName());
     }
-
+    /**
+     * Writes all transforms to the JSON file.
+     * This is called automatically when presets are added or removed.
+     */
+    private void persistTransforms() {  // renamed from saveTransforms
+        try {
+            String json = gson.toJson(transforms);
+            Files.writeString(transformsPath, json);
+            logger.debug("Persisted {} transforms to {}", transforms.size(), transformsPath);
+        } catch (IOException e) {
+            logger.error("Failed to persist transforms to {}", transformsPath, e);
+        }
+    }
     /**
      * Gets a transform preset by name.
      *
@@ -294,10 +307,14 @@ public class AffineTransformManager {
         logger.info("Transform validation passed for all test points");
         return true;
     }
+
     /**
-     * Loads and applies a saved transform from preferences.
+     * Loads and applies a saved transform from preferences if available.
+     * Retrieves the transform name from preferences, loads it from the transform manager,
+     * and applies it to the microscope controller for immediate use.
      *
-     * @return The loaded transform, or null if no saved transform exists or cannot be loaded
+     * @return The loaded AffineTransform if successful, or null if no saved transform exists
+     *         or cannot be loaded
      */
     public static AffineTransform loadSavedTransformFromPreferences() {
         String savedTransformName = QPPreferenceDialog.getSavedTransformName();
@@ -333,8 +350,9 @@ public class AffineTransformManager {
 
     /**
      * Checks if a valid saved transform exists in preferences.
+     * Verifies both that a transform name is saved and that it can be loaded.
      *
-     * @return true if a transform is saved and can be loaded
+     * @return true if a transform is saved and can be successfully loaded, false otherwise
      */
     public static boolean hasSavedTransform() {
         String savedName = QPPreferenceDialog.getSavedTransformName();
@@ -351,4 +369,5 @@ public class AffineTransformManager {
             return false;
         }
     }
+
 }

@@ -19,10 +19,11 @@ public class PPMAngleSelectionController {
 
     /**
      * Shows a dialog for selecting PPM acquisition angles.
+     * Allows users to choose which polarization angles to acquire from the configured range.
      *
-     * @param plusAngle The positive rotation angle from config
-     * @param minusAngle The negative rotation angle from config
-     * @return CompletableFuture with list of selected angles
+     * @param plusAngle The positive rotation angle from config (in degrees)
+     * @param minusAngle The negative rotation angle from config (in degrees)
+     * @return CompletableFuture with list of selected angles in degrees, or cancelled if user cancels
      */
     public static CompletableFuture<List<Double>> showDialog(double plusAngle, double minusAngle) {
         CompletableFuture<List<Double>> future = new CompletableFuture<>();
