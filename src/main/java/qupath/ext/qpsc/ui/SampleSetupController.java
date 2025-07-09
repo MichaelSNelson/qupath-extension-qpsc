@@ -103,14 +103,10 @@ public class SampleSetupController {
             TextField folderField = new TextField();
             folderField.setPrefColumnCount(30);
 
-            // Initialize folder from preferences
-            String savedFolder = PersistentPreferences.getProjectsFolder();
-            if (savedFolder != null && !savedFolder.isEmpty()) {
-                folderField.setText(savedFolder);
-            } else {
-                // Fallback to QPPreferenceDialog if PersistentPreferences is empty
-                folderField.setText(QPPreferenceDialog.getProjectsFolderProperty());
-            }
+            String projectsFolder = QPPreferenceDialog.getProjectsFolderProperty();
+            folderField.setText(projectsFolder);
+            logger.debug("Loaded projects folder from QPPreferenceDialog: {}", projectsFolder);
+
 
             Button browseBtn = new Button(res.getString("sampleSetup.button.browse"));
             browseBtn.setOnAction(e -> {
@@ -288,7 +284,8 @@ public class SampleSetupController {
                     // Save to persistent preferences for next time
                     if (!hasOpenProject) {
                         PersistentPreferences.setLastSampleName(name);
-                        PersistentPreferences.setProjectsFolder(folder.getAbsolutePath());
+
+                        //TODO maybe set QPPPreferenceDialog to new folder if that changed?
                     }
                     PersistentPreferences.setLastModality(mod);
 
@@ -302,6 +299,16 @@ public class SampleSetupController {
                     String name = sampleNameField.getText().trim();
                     File folder = new File(folderField.getText().trim());
                     String mod = modalityBox.getValue();
+
+                    // Save to persistent preferences for next time
+                    if (!hasOpenProject) {
+                        PersistentPreferences.setLastSampleName(name);
+                        // DO NOT save projects folder - it comes from QPPreferenceDialog
+                    }
+                    PersistentPreferences.setLastModality(mod);
+
+                    logger.info("Saved sample setup preferences - name: {}, modality: {}",
+                            name, mod);
 
                     return new SampleSetupResult(name, folder, mod);
                 }

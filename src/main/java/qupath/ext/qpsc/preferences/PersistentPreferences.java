@@ -278,9 +278,6 @@ public class PersistentPreferences {
     private static final StringProperty lastModalitySaved =
             PathPrefs.createPersistentPreference("LastModality", "");
 
-    private static final StringProperty projectsFolderSaved =
-            PathPrefs.createPersistentPreference("ProjectsFolder", "F:/QPScopeExtension/data/slides");
-
     public static String getLastSampleName() {
         return lastSampleNameSaved.getValue();
     }
@@ -297,13 +294,6 @@ public class PersistentPreferences {
         lastModalitySaved.setValue(modality);
     }
 
-    public static String getProjectsFolder() {
-        return projectsFolderSaved.getValue();
-    }
-
-    public static void setProjectsFolder(final String folder) {
-        projectsFolderSaved.setValue(folder);
-    }
 
     // ================== TRANSFORM SETTINGS ==================
     private static final StringProperty saveTransformDefaultSaved =

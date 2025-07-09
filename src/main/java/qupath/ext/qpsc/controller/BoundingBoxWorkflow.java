@@ -136,6 +136,26 @@ public class BoundingBoxWorkflow {
                     RotationManager rotationManager = new RotationManager(sample.modality());
 
                     rotationManager.getRotationAngles(sample.modality())
+                            .thenApply(angles -> {
+                                // Check if we have angle overrides from the dialog
+                                if (bb.angleOverrides() != null && !bb.angleOverrides().isEmpty()) {
+                                    logger.info("Using user-specified PPM angles: plus={}, minus={}",
+                                            bb.angleOverrides().get("plus"),
+                                            bb.angleOverrides().get("minus"));
+
+                                    // Replace with overridden angles
+                                    List<Double> overriddenAngles = new ArrayList<>();
+                                    if (bb.angleOverrides().containsKey("minus")) {
+                                        overriddenAngles.add(bb.angleOverrides().get("minus"));
+                                    }
+                                    overriddenAngles.add(0.0); // Always include 0
+                                    if (bb.angleOverrides().containsKey("plus")) {
+                                        overriddenAngles.add(bb.angleOverrides().get("plus"));
+                                    }
+                                    return overriddenAngles;
+                                }
+                                return angles;
+                            })
                             .thenAccept(rotationAngles -> {
                                 logger.info("Rotation angles for {}: {}", sample.modality(), rotationAngles);
 
@@ -154,9 +174,11 @@ public class BoundingBoxWorkflow {
 
                                 // Add angles parameter if rotation is needed
                                 if (rotationAngles != null && !rotationAngles.isEmpty()) {
-                                    cliArgs.addAll(rotationAngles.stream()
+                                    // Format as parenthesized string like ExistingImageWorkflow
+                                    String anglesStr = rotationAngles.stream()
                                             .map(String::valueOf)
-                                            .toList());
+                                            .collect(Collectors.joining(" ", "(", ")"));
+                                    cliArgs.add(anglesStr);
                                 }
 
                                 logger.info("Starting acquisition with args: {}", cliArgs);
@@ -164,8 +186,14 @@ public class BoundingBoxWorkflow {
                                 // Run acquisition ONCE with all angles
                                 CompletableFuture.runAsync(() -> {
                                     try {
+                                        // Calculate proper timeout - 60 seconds base + 60 per angle
+                                        int timeoutSeconds = 60;
+                                        if (rotationAngles != null && !rotationAngles.isEmpty()) {
+                                            timeoutSeconds = 60 * rotationAngles.size();
+                                        }
+
                                         CliExecutor.ExecResult scanRes = CliExecutor.execComplexCommand(
-                                                60 * (rotationAngles != null ? rotationAngles.size() : 1), // Adjust timeout for multiple angles
+                                                timeoutSeconds,
                                                 res.getString("acquisition.cli.progressRegex"),
                                                 cliArgs.toArray(new String[0])
                                         );

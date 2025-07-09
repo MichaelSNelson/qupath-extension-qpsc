@@ -28,38 +28,61 @@ public class RotationManager {
     }
 
     private void initializeStrategies(String modality) {
-        // Try to read PPM angles from config
         MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(
                 QPPreferenceDialog.getMicroscopeConfigFileProperty()
         );
 
-        // Check for new structured format first
-        Map<String, Object> ppmPlus = mgr.getSection("imagingMode", modality, "ppm_plus");
-        Map<String, Object> ppmMinus = mgr.getSection("imagingMode", modality, "ppm_minus");
+        // Check if this is a PPM modality by name
+        boolean isPPMModality = modality != null && modality.startsWith("PPM_");
 
-        Double plusAngle = null;
-        Double minusAngle = null;
+        if (isPPMModality) {
+            // Get PPM config from global section
+            Map<String, Object> ppmConfig = mgr.getPPMConfig();
 
-        if (ppmPlus != null && ppmPlus.containsKey("degrees")) {
-            plusAngle = ((Number) ppmPlus.get("degrees")).doubleValue();
-        } else {
-            // Fall back to old format
-            plusAngle = mgr.getDouble("imagingMode", modality, "ppm_plus");
-        }
+            Double plusAngle = null;
+            Double minusAngle = null;
 
-        if (ppmMinus != null && ppmMinus.containsKey("degrees")) {
-            minusAngle = ((Number) ppmMinus.get("degrees")).doubleValue();
-        } else {
-            // Fall back to old format
-            minusAngle = mgr.getDouble("imagingMode", modality, "ppm_minus");
-        }
+            // Read from global PPM section
+            Map<String, Object> ppmPlus = (Map<String, Object>) ppmConfig.get("ppm_plus");
+            Map<String, Object> ppmMinus = (Map<String, Object>) ppmConfig.get("ppm_minus");
 
-        // Add strategies in priority order
-        if (plusAngle != null && minusAngle != null) {
+            if (ppmPlus != null && ppmPlus.containsKey("degrees")) {
+                plusAngle = ((Number) ppmPlus.get("degrees")).doubleValue();
+            }
+
+            if (ppmMinus != null && ppmMinus.containsKey("degrees")) {
+                minusAngle = ((Number) ppmMinus.get("degrees")).doubleValue();
+            }
+
+            // Use defaults if not configured
+            if (plusAngle == null || minusAngle == null) {
+                logger.warn("PPM angles not configured in YAML. Using defaults (+5, -5).");
+                plusAngle = 5.0;
+                minusAngle = -5.0;
+            }
+
             strategies.add(new PPMRotationStrategy(plusAngle, minusAngle));
             logger.info("PPM angles configured: {} to {} degrees", minusAngle, plusAngle);
         }
-        strategies.add(new BrightfieldRotationStrategy());
+
+        // Check if this is a BF modality
+        boolean isBFModality = modality != null && modality.startsWith("BF_");
+
+        if (isBFModality) {
+            // Get brightfield angle from PPM config
+            Map<String, Object> ppmConfig = mgr.getPPMConfig();
+            Map<String, Object> bfConfig = (Map<String, Object>) ppmConfig.get("brightfield");
+
+            Double bfAngle = 90.0; // default
+            if (bfConfig != null && bfConfig.containsKey("degrees")) {
+                bfAngle = ((Number) bfConfig.get("degrees")).doubleValue();
+            }
+
+            strategies.add(new BrightfieldRotationStrategy(bfAngle));
+            logger.info("Brightfield angle configured: {} degrees", bfAngle);
+        }
+
+        // Always add NoRotationStrategy as fallback
         strategies.add(new NoRotationStrategy());
 
         logger.info("Initialized rotation strategies for modality: {}", modality);

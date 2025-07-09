@@ -36,10 +36,20 @@ public interface RotationStrategy {
     String getAngleSuffix(double angle);
 }
 
+
 /**
- * Implementation for Brightfield modalities - always rotates to 90°
+ * Implementation for Brightfield modalities - rotates to configured angle (default 90°)
  */
 class BrightfieldRotationStrategy implements RotationStrategy {
+    private final double rotationAngle;
+
+    public BrightfieldRotationStrategy() {
+        this(90.0); // default
+    }
+
+    public BrightfieldRotationStrategy(double angle) {
+        this.rotationAngle = angle;
+    }
 
     @Override
     public boolean appliesTo(String modalityName) {
@@ -48,8 +58,8 @@ class BrightfieldRotationStrategy implements RotationStrategy {
 
     @Override
     public CompletableFuture<List<Double>> getRotationAngles() {
-        // BF always uses 90 degrees
-        return CompletableFuture.completedFuture(List.of(90.0));
+        // BF always uses the configured angle
+        return CompletableFuture.completedFuture(List.of(rotationAngle));
     }
 
     @Override

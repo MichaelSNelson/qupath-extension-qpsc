@@ -8,17 +8,30 @@ import javafx.scene.layout.VBox;
 import javafx.stage.Modality;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import qupath.ext.qpsc.preferences.PersistentPreferences;
 
+import java.util.Map;
 import java.util.Optional;
 import java.util.ResourceBundle;
 import java.util.concurrent.CompletableFuture;
 
 public class BoundingBoxController {
     private static final Logger logger = LoggerFactory.getLogger(BoundingBoxController.class);
-    /** Holds the bounding-box + focus flag. */
-    public record BoundingBoxResult(double x1, double y1,
-                                    double x2, double y2,
-                                    boolean inFocus) { }
+
+    /**
+     * Holds the bounding-box + focus flag.
+     */
+    public record BoundingBoxResult(
+            double x1, double y1,
+            double x2, double y2,
+            boolean inFocus,
+            Map<String, Double> angleOverrides
+    ) {
+        // Convenience constructor without angle overrides
+        public BoundingBoxResult(double x1, double y1, double x2, double y2, boolean inFocus) {
+            this(x1, y1, x2, y2, inFocus, null);
+        }
+    }
 
     /**
      * Show a dialog asking the user to define a rectangular bounding box
@@ -30,7 +43,6 @@ public class BoundingBoxController {
      * @return a CompletableFuture which yields the bounding box coordinates and focus flag
      */
     public static CompletableFuture<BoundingBoxResult> showDialog() {
-
         CompletableFuture<BoundingBoxResult> future = new CompletableFuture<>();
         ResourceBundle res = ResourceBundle.getBundle("qupath.ext.qpsc.ui.strings");
 
@@ -57,15 +69,29 @@ public class BoundingBoxController {
             TabPane tabs = new TabPane();
             tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
 
-            // 3a) CSV entry tab
-            TextField csvField = new TextField("9000, 500, 10000, 1500");
+            // 3a) CSV entry tab - initialized with saved value
+            TextField csvField = new TextField(PersistentPreferences.getBoundingBoxString());
+            csvField.setPromptText("e.g., 9000, 500, 10000, 1500");
             Tab csvTab = new Tab(res.getString("boundingBox.tab.csv"), new VBox(5, csvField));
 
-            // 3b) Separate-fields tab
+            // 3b) Separate-fields tab - parse saved CSV to initialize fields
             TextField x1Field = new TextField();
             TextField y1Field = new TextField();
             TextField x2Field = new TextField();
             TextField y2Field = new TextField();
+
+            // Initialize separate fields from saved CSV if valid
+            try {
+                String[] savedParts = PersistentPreferences.getBoundingBoxString().split(",");
+                if (savedParts.length == 4) {
+                    x1Field.setText(savedParts[0].trim());
+                    y1Field.setText(savedParts[1].trim());
+                    x2Field.setText(savedParts[2].trim());
+                    y2Field.setText(savedParts[3].trim());
+                }
+            } catch (Exception e) {
+                logger.debug("Could not parse saved bounding box for field initialization: {}", e.getMessage());
+            }
 
             GridPane fieldsGrid = new GridPane();
             fieldsGrid.setHgap(10);
@@ -82,8 +108,9 @@ public class BoundingBoxController {
 
             tabs.getTabs().addAll(csvTab, fieldsTab);
 
-            // 4) In-focus checkbox
+            // 4) In-focus checkbox - initialized with saved value
             CheckBox inFocusCheckbox = new CheckBox(res.getString("boundingBox.label.inFocus"));
+            inFocusCheckbox.setSelected(PersistentPreferences.getBoundingBoxInFocus());
 
             // 5) Error label for validation
             Label errorLabel = new Label();
@@ -91,12 +118,41 @@ public class BoundingBoxController {
             errorLabel.setWrapText(true);
             errorLabel.setVisible(false);
 
-            // 6) Assemble content
+            // 6) Sync fields when switching tabs or typing
+            csvField.textProperty().addListener((obs, old, newVal) -> {
+                try {
+                    String[] parts = newVal.split(",");
+                    if (parts.length == 4) {
+                        x1Field.setText(parts[0].trim());
+                        y1Field.setText(parts[1].trim());
+                        x2Field.setText(parts[2].trim());
+                        y2Field.setText(parts[3].trim());
+                    }
+                } catch (Exception ignored) {
+                }
+            });
+
+            // Update CSV when individual fields change
+            Runnable updateCsvFromFields = () -> {
+                if (!x1Field.getText().isEmpty() && !y1Field.getText().isEmpty() &&
+                        !x2Field.getText().isEmpty() && !y2Field.getText().isEmpty()) {
+                    csvField.setText(String.format("%s, %s, %s, %s",
+                            x1Field.getText(), y1Field.getText(),
+                            x2Field.getText(), y2Field.getText()));
+                }
+            };
+
+            x1Field.textProperty().addListener((obs, old, newVal) -> updateCsvFromFields.run());
+            y1Field.textProperty().addListener((obs, old, newVal) -> updateCsvFromFields.run());
+            x2Field.textProperty().addListener((obs, old, newVal) -> updateCsvFromFields.run());
+            y2Field.textProperty().addListener((obs, old, newVal) -> updateCsvFromFields.run());
+
+            // 7) Assemble content
             VBox content = new VBox(10, tabs, inFocusCheckbox, errorLabel);
             content.setPadding(new Insets(20));
             dlg.getDialogPane().setContent(content);
 
-            // 7) Prevent dialog from closing on OK if validation fails
+            // 8) Prevent dialog from closing on OK if validation fails
             Button okButton = (Button) dlg.getDialogPane().lookupButton(okType);
             okButton.addEventFilter(javafx.event.ActionEvent.ACTION, event -> {
                 double x1, y1, x2, y2;
@@ -130,6 +186,16 @@ public class BoundingBoxController {
                         throw new IllegalArgumentException("Bounding box must have non-zero width and height");
                     }
 
+                    // Validate reasonable bounds (optional - adjust as needed)
+                    double width = Math.abs(x2 - x1);
+                    double height = Math.abs(y2 - y1);
+                    if (width < 100 || height < 100) {
+                        throw new IllegalArgumentException("Bounding box seems too small (< 100 µm). Please verify coordinates.");
+                    }
+                    if (width > 100000 || height > 100000) {
+                        throw new IllegalArgumentException("Bounding box seems too large (> 100mm). Please verify coordinates.");
+                    }
+
                     // Valid - hide error
                     errorLabel.setVisible(false);
 
@@ -144,7 +210,7 @@ public class BoundingBoxController {
                 }
             });
 
-            // 8) Convert the user's button choice into a BoundingBoxResult
+            // 9) Convert the user's button choice into a BoundingBoxResult
             dlg.setResultConverter(button -> {
                 if (button != okType) {
                     return null;
@@ -163,14 +229,21 @@ public class BoundingBoxController {
                         x2 = Double.parseDouble(x2Field.getText());
                         y2 = Double.parseDouble(y2Field.getText());
                     }
+
+                    // Save preferences before returning
+                    PersistentPreferences.setBoundingBoxString(csvField.getText());
+                    PersistentPreferences.setBoundingBoxInFocus(inFocusCheckbox.isSelected());
+                    logger.info("Saved bounding box preferences: {} (in focus: {})",
+                            csvField.getText(), inFocusCheckbox.isSelected());
+
                     return new BoundingBoxResult(x1, y1, x2, y2, inFocusCheckbox.isSelected());
                 } catch (Exception e) {
-                    // Should not happen due to event filter validation
+                    logger.error("Error creating bounding box result", e);
                     return null;
                 }
             });
 
-            // 9) Show and handle result
+            // 10) Show and handle result
             Optional<BoundingBoxResult> result = dlg.showAndWait();
             if (result.isPresent()) {
                 future.complete(result.get());

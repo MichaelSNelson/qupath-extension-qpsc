@@ -858,8 +858,14 @@ public class ExistingImageWorkflow {
                         cliArgs.add(anglesStr);
                     }
 
+                    int baseTimeout = 300; // 5 minutes base
+                    int timeoutSeconds = baseTimeout;
+                    if (rotationAngles != null && !rotationAngles.isEmpty()) {
+                        timeoutSeconds = baseTimeout * rotationAngles.size();
+                    }
+
                     var result = CliExecutor.execComplexCommand(
-                            300 * (rotationAngles != null ? rotationAngles.size() : 1), // Adjust timeout
+                            timeoutSeconds,
                             "tiles done",
                             cliArgs.toArray(new String[0])
                     );

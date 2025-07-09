@@ -276,7 +276,17 @@ public class MicroscopeConfigManager {
             return null;
         }
     }
-
+    /**
+     * Gets the global PPM configuration section.
+     * @return Map containing PPM settings, or empty map if not found
+     */
+    public Map<String, Object> getPPMConfig() {
+        Object ppmSection = configData.get("PPM");
+        if (ppmSection instanceof Map) {
+            return (Map<String, Object>) ppmSection;
+        }
+        return new HashMap<>();
+    }
     /**
      * Retrieves a Boolean value from the config or resources.
      *
