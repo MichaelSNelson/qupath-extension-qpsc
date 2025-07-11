@@ -35,7 +35,7 @@ import java.util.stream.Collectors;
 public class ExistingImageWorkflow {
     private static final Logger logger = LoggerFactory.getLogger(ExistingImageWorkflow.class);
     private static final ResourceBundle res = ResourceBundle.getBundle("qupath.ext.qpsc.ui.strings");
-
+    private static final String[] VALID_ANNOTATION_CLASSES = {"Tissue", "Scanned Area", "Bounding Box"};
     /**
      * Single-threaded executor for stitching to ensure only one stitching job runs at a time
      */

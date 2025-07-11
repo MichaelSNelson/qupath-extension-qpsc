@@ -234,6 +234,7 @@ public class UIFunctions {
      * Shows an error dialog on the JavaFX thread.
      */
     public static void notifyUserOfError(String message, String context) {
+        logger.error("Error during {}: {}", context, message);
         Platform.runLater(() -> {
             Alert alert = new Alert(Alert.AlertType.ERROR);
             alert.setTitle("Error");
@@ -268,7 +269,7 @@ public class UIFunctions {
                 Platform.runLater(() -> {
                     int count = (int) QP.getAnnotationObjects().stream()
                             .filter(o -> o.getPathClass() != null)  // Add null check
-                            .filter(o -> validNames.contains(o.getPathClass().toString()))
+                            .filter(o -> validNames.contains(o.getClassification()))
                             .count();
                     info.setText("Total Annotation count in image: " + count +
                             "\nADD, MODIFY or DELETE annotations to select regions to be scanned.");

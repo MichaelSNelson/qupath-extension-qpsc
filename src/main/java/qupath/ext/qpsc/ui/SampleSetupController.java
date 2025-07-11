@@ -4,10 +4,7 @@ import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.geometry.Insets;
 import javafx.scene.control.*;
-import javafx.scene.layout.GridPane;
-import javafx.scene.layout.HBox;
-import javafx.scene.layout.Priority;
-import javafx.scene.layout.Region;
+import javafx.scene.layout.*;
 import javafx.stage.DirectoryChooser;
 import javafx.stage.Modality;
 import javafx.stage.Window;
@@ -101,7 +98,7 @@ public class SampleSetupController {
             }
 
             TextField folderField = new TextField();
-            folderField.setPrefColumnCount(30);
+            folderField.setPrefColumnCount(20);
 
             String projectsFolder = QPPreferenceDialog.getProjectsFolderProperty();
             folderField.setText(projectsFolder);
@@ -172,7 +169,11 @@ public class SampleSetupController {
             grid.setHgap(10);
             grid.setVgap(10);
             grid.setPadding(new Insets(20));
-
+            ColumnConstraints col0 = new ColumnConstraints();
+            col0.setMinWidth(120); // Ensure labels have minimum width
+            ColumnConstraints col1 = new ColumnConstraints();
+            col1.setHgrow(Priority.ALWAYS);
+            grid.getColumnConstraints().addAll(col0, col1);
             int row = 0;
 
             // Only show name/folder fields if no project is open
@@ -217,7 +218,7 @@ public class SampleSetupController {
             grid.add(errorLabel, 0, row, 2, 1);
 
             dlg.getDialogPane().setContent(grid);
-            dlg.getDialogPane().setPrefWidth(500);
+            dlg.getDialogPane().setPrefWidth(600);
 
             // Update info label when sample name changes
             if (!hasOpenProject) {
