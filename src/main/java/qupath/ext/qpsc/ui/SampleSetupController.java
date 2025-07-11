@@ -163,7 +163,7 @@ public class SampleSetupController {
 
             // --- Info label for existing project ---
             Label infoLabel = new Label();
-            infoLabel.setStyle("-fx-text-fill: blue; -fx-font-size: 11px; -fx-font-style: italic;");
+            infoLabel.setStyle("-fx-text-fill: -fx-accent; -fx-font-size: 11px; -fx-font-style: italic;");
             infoLabel.setWrapText(true);
             infoLabel.setVisible(false);
 

@@ -25,6 +25,7 @@ import java.util.concurrent.CompletableFuture;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import qupath.lib.images.ImageData;
 
 /**
  * UI controller for microscope alignment workflow.
@@ -325,7 +326,23 @@ public class MacroImageController {
 
         Label resultLabel = new Label();
         resultLabel.setWrapText(true);
-
+// Try to load and display the macro image immediately when tab is created
+        Platform.runLater(() -> {
+            try {
+                ImageData imageData = gui.getImageData();
+                if (imageData != null) {
+                    BufferedImage macroImage = MacroImageUtility.retrieveMacroImage(gui);
+                    if (macroImage != null) {
+                        Image fxImage = SwingFXUtils.toFXImage(macroImage, null);
+                        previewImage.setImage(fxImage);
+                        resultLabel.setText("Macro image loaded. Click 'Preview Green Box Detection' to detect the scanned area.");
+                        resultLabel.setStyle("-fx-text-fill: #059669;"); // Neutral green color
+                    }
+                }
+            } catch (Exception ex) {
+                logger.debug("Could not load macro image on tab creation", ex);
+            }
+        });
         // Reset to defaults button
         Button resetButton = new Button("Reset to Defaults");
         resetButton.setOnAction(e -> {
@@ -340,8 +357,7 @@ public class MacroImageController {
         });
 
         previewButton.setOnAction(e -> {
-            // Get macro image
-            var imageData = gui.getImageData();
+            ImageData imageData = gui.getImageData();
             if (imageData == null) {
                 resultLabel.setText("No image loaded");
                 resultLabel.setStyle("-fx-text-fill: red;");
@@ -355,6 +371,10 @@ public class MacroImageController {
                 if (macroImage != null) {
                     logger.info("Successfully retrieved macro image: {}x{}",
                             macroImage.getWidth(), macroImage.getHeight());
+
+                    // First, always show the original macro image
+                    Image originalImage = SwingFXUtils.toFXImage(macroImage, null);
+                    previewImage.setImage(originalImage);
 
                     // Create detection parameters from current spinner values
                     GreenBoxDetector.DetectionParams params = new GreenBoxDetector.DetectionParams();
@@ -370,8 +390,10 @@ public class MacroImageController {
                     var result = GreenBoxDetector.detectGreenBox(macroImage, params);
 
                     if (result != null) {
-                        Image fxImage = SwingFXUtils.toFXImage(result.getDebugImage(), null);
-                        previewImage.setImage(fxImage);
+                        // Now update with the debug image showing the detection
+                        Image debugImage = SwingFXUtils.toFXImage(result.getDebugImage(), null);
+                        previewImage.setImage(debugImage);
+
                         resultLabel.setText(String.format(
                                 "Green box detected at (%.0f, %.0f) size %.0fx%.0f with confidence %.2f",
                                 result.getDetectedBox().getBoundsX(),
@@ -386,11 +408,9 @@ public class MacroImageController {
                         params.saveToPreferences();
                         logger.info("Saved successful detection parameters to preferences");
                     } else {
+                        // No detection - keep showing the original macro image
                         resultLabel.setText("No green box detected with current parameters");
                         resultLabel.setStyle("-fx-text-fill: orange;");
-                        // Still show the macro image
-                        Image fxImage = SwingFXUtils.toFXImage(macroImage, null);
-                        previewImage.setImage(fxImage);
                     }
                 } else {
                     resultLabel.setText("Could not retrieve macro image from current image");
@@ -670,7 +690,7 @@ public class MacroImageController {
 
         // Min region size - always visible
         Label minSizeLabel = new Label("Min Region Size (pixels):");
-        Spinner<Integer> minSizeSpinner = new Spinner<>(100, 50000,
+        Spinner<Integer> minSizeSpinner = new Spinner<>(100, 150000,
                 PersistentPreferences.getTissueMinRegionSize(), 100);
         minSizeSpinner.setEditable(true);
         minSizeSpinner.setPrefWidth(120);

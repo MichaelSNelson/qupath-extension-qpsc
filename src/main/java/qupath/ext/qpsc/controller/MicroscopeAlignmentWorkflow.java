@@ -177,13 +177,19 @@ public class MicroscopeAlignmentWorkflow {
                 boolean invertedY = QPPreferenceDialog.getInvertedYProperty();
 
                 // 3. Process green box detection if enabled
+                GreenBoxDetectionResult greenBoxResult = null;
                 AffineTransform initialTransform = null;
+
                 if (config.alignmentConfig().useGreenBoxDetection()) {
-                    initialTransform = attemptGreenBoxDetection(gui, config.alignmentConfig());
+                    greenBoxResult = attemptGreenBoxDetection(gui, config.alignmentConfig());
+                    if (greenBoxResult != null) {
+                        initialTransform = greenBoxResult.transform();
+                    }
                 }
 
-                // 4. Create tissue annotations
-                createTissueAnnotations(gui, config.alignmentConfig(), initialTransform);
+                // 4. Create tissue annotations - pass the detection result!
+                createTissueAnnotations(gui, config.alignmentConfig(),
+                        greenBoxResult != null ? greenBoxResult.detectionResult() : null);
 
                 // 5. Create tiles for alignment
                 createAlignmentTiles(gui, config.sampleSetup(), tempTileDirectory,
@@ -275,7 +281,11 @@ public class MicroscopeAlignmentWorkflow {
      * @return AffineTransform mapping macro coordinates to main image coordinates based on
      *         the detected green box, or null if detection fails or confidence is too low
      */
-    private static AffineTransform attemptGreenBoxDetection(
+    /**
+     * Modified attemptGreenBoxDetection to return the detection result
+     * instead of just the transform, so we can reuse it later.
+     */
+    private static GreenBoxDetectionResult attemptGreenBoxDetection(
             QuPathGUI gui,
             MacroImageController.AlignmentConfig config) {
 
@@ -309,7 +319,9 @@ public class MicroscopeAlignmentWorkflow {
                 );
 
                 logger.info("Green box detection successful, created initial transform");
-                return transform;
+
+                // Return both the transform AND the detection result
+                return new GreenBoxDetectionResult(transform, greenBoxResult);
             }
 
         } catch (Exception e) {
@@ -319,14 +331,22 @@ public class MicroscopeAlignmentWorkflow {
         return null;
     }
 
+    /**
+     * Simple record to hold both transform and detection result
+     */
+    private record GreenBoxDetectionResult(
+            AffineTransform transform,
+            GreenBoxDetector.DetectionResult detectionResult
+    ) {}
 
     /**
-     * Creates tissue annotations based on macro analysis or green box.
+     * Modified createTissueAnnotations to accept the detection result
+     * instead of trying to detect again.
      */
     private static void createTissueAnnotations(
             QuPathGUI gui,
             MacroImageController.AlignmentConfig config,
-            AffineTransform greenBoxTransform) {
+            GreenBoxDetector.DetectionResult greenBoxDetection) {
 
         // Clear existing tissue annotations
         var toRemove = gui.getViewer().getHierarchy().getAnnotationObjects().stream()
@@ -338,22 +358,22 @@ public class MicroscopeAlignmentWorkflow {
             gui.getViewer().getHierarchy().removeObject(annotation, true);
         }
 
-        if (greenBoxTransform != null) {
-            // Create annotation for the entire image area when green box is detected
+        if (greenBoxDetection != null) {
+            // Use the ALREADY DETECTED green box result
             int width = gui.getImageData().getServer().getWidth();
             int height = gui.getImageData().getServer().getHeight();
 
-            ROI roi = ROIs.createRectangleROI(0, 0, width, height, ImagePlane.getDefaultPlane());
+            logger.info("Creating full image annotation from green box detection");
+            logger.info("Server dimensions: {}x{}", width, height);
 
+            // Create annotation for the entire image area
+            ROI roi = ROIs.createRectangleROI(0, 0, width, height, ImagePlane.getDefaultPlane());
             PathObject annotation = PathObjects.createAnnotationObject(roi);
-            annotation.setName("Full Image Area (from green box)");
-            annotation.setPathClass(gui.getAvailablePathClasses().stream()
-                    .filter(pc -> "Tissue".equals(pc.getName()))
-                    .findFirst()
-                    .orElse(null));
+            annotation.setName("Scanned Area (from green box)");
+            annotation.setClassification("Scanned Area");  // Simple!
 
             gui.getViewer().getHierarchy().addObject(annotation);
-            logger.info("Created full image annotation from green box detection");
+            logger.info("Created scanned area annotation: (0, 0, {}, {})", width, height);
 
         } else {
             // Run tissue analysis on macro
@@ -363,61 +383,63 @@ public class MicroscopeAlignmentWorkflow {
                     config.thresholdParams()
             );
 
-            if (analysis != null) {
+            if (analysis != null && analysis.getTissueBounds() != null) {
                 // Scale tissue bounds to main image
-                // Note: This is approximate since we don't have the exact transform yet
                 ROI tissueBounds = analysis.scaleToMainImage(analysis.getTissueBounds());
 
-                PathObject annotation = PathObjects.createAnnotationObject(tissueBounds);
-                annotation.setName("Tissue Region (from macro analysis)");
-                annotation.setPathClass(gui.getAvailablePathClasses().stream()
-                        .filter(pc -> "Tissue".equals(pc.getName()))
-                        .findFirst()
-                        .orElse(null));
+                if (tissueBounds != null) {
+                    // Validate bounds
+                    int imageWidth = gui.getImageData().getServer().getWidth();
+                    int imageHeight = gui.getImageData().getServer().getHeight();
+
+                    // Clip to image bounds
+                    double x = Math.max(0, tissueBounds.getBoundsX());
+                    double y = Math.max(0, tissueBounds.getBoundsY());
+                    double width = Math.min(imageWidth - x, tissueBounds.getBoundsWidth());
+                    double height = Math.min(imageHeight - y, tissueBounds.getBoundsHeight());
+
+                    ROI clippedBounds = ROIs.createRectangleROI(x, y, width, height,
+                            ImagePlane.getDefaultPlane());
+
+                    PathObject annotation = PathObjects.createAnnotationObject(clippedBounds);
+                    annotation.setName("Tissue Region (from macro analysis)");
+                    annotation.setPathClass(gui.getAvailablePathClasses().stream()
+                            .filter(pc -> "Tissue".equals(pc.getName()))
+                            .findFirst()
+                            .orElse(null));
+
+                    gui.getViewer().getHierarchy().addObject(annotation);
+                    logger.info("Created tissue annotation from macro analysis");
+                }
+            } else {
+                // IMPORTANT: Don't create default annotation with margins!
+                // Instead, create full image annotation
+                logger.warn("Tissue analysis failed, creating full image annotation");
+
+                int imageWidth = gui.getImageData().getServer().getWidth();
+                int imageHeight = gui.getImageData().getServer().getHeight();
+
+                ROI roi = ROIs.createRectangleROI(0, 0, imageWidth, imageHeight,
+                        ImagePlane.getDefaultPlane());
+
+                PathObject annotation = PathObjects.createAnnotationObject(roi);
+                annotation.setName("Full Image (no tissue detection)");
+                annotation.setClassification("Scanned Area");
 
                 gui.getViewer().getHierarchy().addObject(annotation);
-                logger.info("Created tissue annotation from macro analysis");
-            } else {
-                // Create default annotation
-                createDefaultTissueAnnotation(gui);
+                logger.info("Created full image annotation as fallback");
             }
         }
 
         gui.getViewer().repaint();
-        //save data
+
+        // Save data
         try {
             QPProjectFunctions.saveCurrentImageData();
         } catch (IOException e) {
             logger.warn("Failed to save annotations: {}", e.getMessage());
         }
     }
-
-    /**
-     * Creates a default tissue annotation when analysis fails.
-     */
-    private static void createDefaultTissueAnnotation(QuPathGUI gui) {
-        double imageWidth = gui.getImageData().getServer().getWidth();
-        double imageHeight = gui.getImageData().getServer().getHeight();
-
-        double margin = Math.min(imageWidth, imageHeight) * 0.1;
-        ROI roi = ROIs.createRectangleROI(
-                margin, margin,
-                imageWidth - 2 * margin,
-                imageHeight - 2 * margin,
-                ImagePlane.getDefaultPlane()
-        );
-
-        PathObject annotation = PathObjects.createAnnotationObject(roi);
-        annotation.setName("Tissue Region (adjust as needed)");
-        annotation.setPathClass(gui.getAvailablePathClasses().stream()
-                .filter(pc -> "Tissue".equals(pc.getName()))
-                .findFirst()
-                .orElse(null));
-
-        gui.getViewer().getHierarchy().addObject(annotation);
-        logger.info("Created default tissue annotation");
-    }
-
     /**
      * Creates detection tiles for alignment based on selected modality.
      */

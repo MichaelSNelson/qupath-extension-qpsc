@@ -130,7 +130,7 @@ public class PersistentPreferences {
             PathPrefs.createPersistentPreference("TissueDetectionMethod", "COLOR_DECONVOLUTION");
 
     private static final StringProperty tissueMinRegionSizeSaved =
-            PathPrefs.createPersistentPreference("TissueMinRegionSize", "1000");
+            PathPrefs.createPersistentPreference("TissueMinRegionSize", "50000");
 
     private static final StringProperty tissuePercentileSaved =
             PathPrefs.createPersistentPreference("TissuePercentile", "0.5");
@@ -148,10 +148,10 @@ public class PersistentPreferences {
             PathPrefs.createPersistentPreference("TissueSaturationThreshold", "0.1");
 
     private static final StringProperty tissueBrightnessMinSaved =
-            PathPrefs.createPersistentPreference("TissueBrightnessMin", "0.2");
+            PathPrefs.createPersistentPreference("TissueBrightnessMin", "0.6");
 
     private static final StringProperty tissueBrightnessMaxSaved =
-            PathPrefs.createPersistentPreference("TissueBrightnessMax", "0.95");
+            PathPrefs.createPersistentPreference("TissueBrightnessMax", "0.8");
 
     public static String getTissueDetectionMethod() {
         return tissueMethodSaved.getValue();
