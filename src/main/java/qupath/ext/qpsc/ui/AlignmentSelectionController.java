@@ -2,38 +2,29 @@ package qupath.ext.qpsc.ui;
 
 import javafx.application.Platform;
 import javafx.geometry.Insets;
-import javafx.geometry.Pos;
 import javafx.scene.control.*;
-import javafx.scene.image.Image;
-import javafx.scene.image.ImageView;
 import javafx.scene.layout.*;
 import javafx.stage.Modality;
-import javafx.util.StringConverter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.utilities.AffineTransformManager;
-import qupath.ext.qpsc.utilities.MacroImageUtility;
+import qupath.ext.qpsc.utilities.MicroscopeConfigManager;
 import qupath.lib.gui.QuPathGUI;
 
 import java.io.File;
-import java.text.SimpleDateFormat;
-import java.util.Date;
 import java.util.List;
-import java.util.Optional;
-import java.util.ResourceBundle;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * Controller for alignment selection dialog.
- * Allows users to choose between using an existing microscope alignment
- * or creating a new one through the full alignment workflow.
+ * Controller for selecting between existing alignment transforms or creating new ones.
+ * This dialog appears in the Existing Image workflow after sample setup.
  */
 public class AlignmentSelectionController {
     private static final Logger logger = LoggerFactory.getLogger(AlignmentSelectionController.class);
 
     /**
-     * Result from the alignment selection dialog.
+     * Result of the alignment selection dialog.
      */
     public record AlignmentChoice(
             boolean useExistingAlignment,
@@ -45,53 +36,71 @@ public class AlignmentSelectionController {
      * Shows the alignment selection dialog.
      *
      * @param gui The QuPath GUI instance
-     * @param modality The imaging modality being used
-     * @return CompletableFuture with the user's alignment choice, or empty if cancelled
+     * @param modality The current imaging modality (e.g., "BF_10x")
+     * @return CompletableFuture with the user's choice, or null if cancelled
      */
     public static CompletableFuture<AlignmentChoice> showDialog(QuPathGUI gui, String modality) {
         CompletableFuture<AlignmentChoice> future = new CompletableFuture<>();
 
         Platform.runLater(() -> {
-            ResourceBundle res = ResourceBundle.getBundle("qupath.ext.qpsc.ui.strings");
-
-            Dialog<AlignmentChoice> dialog = new Dialog<>();
-            dialog.initModality(Modality.APPLICATION_MODAL);
-            dialog.setTitle("Select Alignment Method");
-            dialog.setHeaderText("Choose how to align the microscope with your image");
-            dialog.setResizable(true);
-
-            // Create the UI components
-            VBox content = new VBox(15);
-            content.setPadding(new Insets(20));
-            content.setPrefWidth(500);
-
-            // Check if macro image is available
-            boolean hasMacroImage = MacroImageUtility.isMacroImageAvailable(gui);
-
-            // Option 1: Use existing alignment
-            RadioButton useExistingRadio = new RadioButton("Use existing microscope alignment");
-            useExistingRadio.setWrapText(true);
-
-            // Load available transforms
-            String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
-            AffineTransformManager transformManager = null;
-            List<AffineTransformManager.TransformPreset> availableTransforms = null;
-
             try {
-                if (configPath != null && !configPath.isEmpty()) {
-                    transformManager = new AffineTransformManager(new File(configPath).getParent());
-                    availableTransforms = (List<AffineTransformManager.TransformPreset>) transformManager.getAllTransforms();
+                // Initialize transform manager
+                String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
+                AffineTransformManager transformManager = new AffineTransformManager(
+                        new File(configPath).getParent());
+
+                // Get current microscope name from config
+                MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(configPath);
+                String microscopeName = mgr.getString("microscope", "name");
+
+                logger.info("Loading transforms for microscope: '{}' from directory: '{}'",
+                        microscopeName, new File(configPath).getParent());
+
+                // Create dialog
+                Dialog<AlignmentChoice> dialog = new Dialog<>();
+                dialog.initModality(Modality.APPLICATION_MODAL);
+                dialog.setTitle("Alignment Selection");
+                dialog.setHeaderText("Choose alignment method for " + modality);
+                dialog.setResizable(true);
+
+                // Create content
+                VBox content = new VBox(15);
+                content.setPadding(new Insets(20));
+                content.setPrefWidth(500);
+
+                // Radio buttons for choice
+                ToggleGroup toggleGroup = new ToggleGroup();
+
+                RadioButton useExistingRadio = new RadioButton("Use existing alignment");
+                useExistingRadio.setToggleGroup(toggleGroup);
+
+                RadioButton createNewRadio = new RadioButton("Create new alignment");
+                createNewRadio.setToggleGroup(toggleGroup);
+                createNewRadio.setSelected(true);
+
+                // Transform selection area
+                VBox transformSelectionBox = new VBox(10);
+                transformSelectionBox.setPadding(new Insets(0, 0, 0, 30));
+
+                ComboBox<AffineTransformManager.TransformPreset> transformCombo = new ComboBox<>();
+                transformCombo.setPrefWidth(400);
+                transformCombo.setDisable(true);
+
+                // Load transforms for the current MICROSCOPE (not modality)
+                List<AffineTransformManager.TransformPreset> availableTransforms =
+                        transformManager.getTransformsForMicroscope(microscopeName);
+
+                logger.info("Found {} transforms for microscope '{}' in file: {}",
+                        availableTransforms.size(), microscopeName,
+                        new File(configPath).getParent() + "/saved_transforms.json");
+
+                // Debug: log all available transforms
+                if (logger.isDebugEnabled()) {
+                    transformManager.getAllTransforms().forEach(t ->
+                            logger.debug("Available transform: '{}' for microscope: '{}'",
+                                    t.getName(), t.getMicroscope()));
                 }
-            } catch (Exception e) {
-                logger.warn("Could not load saved transforms: {}", e.getMessage());
-            }
 
-            // Transform selection combo box
-            ComboBox<AffineTransformManager.TransformPreset> transformCombo = new ComboBox<>();
-            transformCombo.setMaxWidth(Double.MAX_VALUE);
-            transformCombo.setDisable(true);
-
-            if (availableTransforms != null && !availableTransforms.isEmpty()) {
                 transformCombo.getItems().addAll(availableTransforms);
 
                 // Custom cell factory to show transform details
@@ -102,134 +111,153 @@ public class AlignmentSelectionController {
                         if (empty || item == null) {
                             setText(null);
                         } else {
-                            SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm");
-                            setText(String.format("%s - %s (%s)",
-                                    item.getName(),
-                                    item.getMicroscope(),
-                                    sdf.format(item.getCreatedDate())));
+                            setText(item.getName() + " - " + item.getMountingMethod());
                         }
                     }
                 });
 
-                transformCombo.setButtonCell(transformCombo.getCellFactory().call(null));
-
-                // Select the most recently used or first available
-                String savedName = QPPreferenceDialog.getSavedTransformName();
-                if (savedName != null && !savedName.isEmpty()) {
-                    transformCombo.getItems().stream()
-                            .filter(t -> t.getName().equals(savedName))
-                            .findFirst()
-                            .ifPresent(transformCombo::setValue);
-                }
-                if (transformCombo.getValue() == null) {
-                    transformCombo.setValue(transformCombo.getItems().get(0));
-                }
-            } else {
-                useExistingRadio.setDisable(true);
-                transformCombo.setPromptText("No saved alignments available");
-            }
-
-            // Refinement checkbox
-            CheckBox refineCheckBox = new CheckBox("Refine alignment with single tile");
-            refineCheckBox.setDisable(true);
-            refineCheckBox.setTooltip(new Tooltip(
-                    "After applying the saved alignment, allow fine-tuning with a single tile adjustment"));
-
-            // Layout for existing alignment option
-            VBox existingBox = new VBox(5);
-            existingBox.setPadding(new Insets(0, 0, 0, 20));
-            existingBox.getChildren().addAll(transformCombo, refineCheckBox);
-
-            // Option 2: Create new alignment
-            RadioButton createNewRadio = new RadioButton("Create new alignment");
-            createNewRadio.setWrapText(true);
-
-            Label newAlignmentLabel = new Label(
-                    "This will guide you through:\n" +
-                            "• Tissue detection\n" +
-                            "• Tile selection and initial alignment\n" +
-                            "• Automatic edge tile refinement");
-            newAlignmentLabel.setWrapText(true);
-            newAlignmentLabel.setStyle("-fx-font-size: 11px; -fx-text-fill: #666;");
-            newAlignmentLabel.setPadding(new Insets(5, 0, 0, 20));
-
-            // Toggle group
-            ToggleGroup alignmentGroup = new ToggleGroup();
-            useExistingRadio.setToggleGroup(alignmentGroup);
-            createNewRadio.setToggleGroup(alignmentGroup);
-
-            // Enable/disable controls based on selection
-            useExistingRadio.selectedProperty().addListener((obs, oldVal, newVal) -> {
-                transformCombo.setDisable(!newVal);
-                refineCheckBox.setDisable(!newVal);
-            });
-
-            // Default selection
-            if (availableTransforms != null && !availableTransforms.isEmpty() && hasMacroImage) {
-                useExistingRadio.setSelected(true);
-            } else {
-                createNewRadio.setSelected(true);
-            }
-
-            // Macro image warning if needed
-            if (!hasMacroImage && useExistingRadio.isSelected()) {
-                Label warningLabel = new Label(
-                        "⚠ No macro image found. Using existing alignment requires a macro image.");
-                warningLabel.setStyle("-fx-text-fill: #ff6600; -fx-font-weight: bold;");
-                warningLabel.setWrapText(true);
-                content.getChildren().add(warningLabel);
-                createNewRadio.setSelected(true);
-                useExistingRadio.setDisable(true);
-            }
-
-            // Add all components
-            content.getChildren().addAll(
-                    useExistingRadio,
-                    existingBox,
-                    new Separator(),
-                    createNewRadio,
-                    newAlignmentLabel
-            );
-
-            dialog.getDialogPane().setContent(content);
-
-            // Buttons
-            ButtonType okType = new ButtonType("Continue", ButtonBar.ButtonData.OK_DONE);
-            ButtonType cancelType = new ButtonType("Cancel", ButtonBar.ButtonData.CANCEL_CLOSE);
-            dialog.getDialogPane().getButtonTypes().addAll(okType, cancelType);
-
-            // Disable OK button if no valid selection
-            Button okButton = (Button) dialog.getDialogPane().lookupButton(okType);
-            okButton.disableProperty().bind(
-                    useExistingRadio.selectedProperty()
-                            .and(transformCombo.valueProperty().isNull())
-            );
-
-            // Result converter
-            dialog.setResultConverter(buttonType -> {
-                if (buttonType == okType) {
-                    if (useExistingRadio.isSelected()) {
-                        return new AlignmentChoice(
-                                true,
-                                transformCombo.getValue(),
-                                refineCheckBox.isSelected()
-                        );
-                    } else {
-                        return new AlignmentChoice(false, null, false);
+                transformCombo.setButtonCell(new ListCell<>() {
+                    @Override
+                    protected void updateItem(AffineTransformManager.TransformPreset item, boolean empty) {
+                        super.updateItem(item, empty);
+                        if (empty || item == null) {
+                            setText(null);
+                        } else {
+                            setText(item.getName() + " - " + item.getMountingMethod());
+                        }
                     }
-                }
-                return null;
-            });
+                });
 
-            // Show dialog
-            Optional<AlignmentChoice> result = dialog.showAndWait();
-            if (result.isPresent()) {
-                logger.info("User selected: {} alignment",
-                        result.get().useExistingAlignment() ? "existing" : "new");
-                future.complete(result.get());
-            } else {
-                logger.info("Alignment selection cancelled");
-                future.cancel(true);
+                if (!availableTransforms.isEmpty()) {
+                    transformCombo.getSelectionModel().selectFirst();
+                }
+
+                // Transform details
+                TextArea detailsArea = new TextArea();
+                detailsArea.setEditable(false);
+                detailsArea.setPrefRowCount(4);
+                detailsArea.setWrapText(true);
+                detailsArea.setDisable(true);
+
+                // Update details when selection changes
+                transformCombo.getSelectionModel().selectedItemProperty().addListener((obs, old, preset) -> {
+                    if (preset != null) {
+                        detailsArea.setText(String.format(
+                                "Microscope: %s\nMounting: %s\nCreated: %s\nNotes: %s",
+                                preset.getMicroscope(),
+                                preset.getMountingMethod(),
+                                preset.getCreatedDate(),
+                                preset.getNotes()
+                        ));
+                    } else {
+                        detailsArea.clear();
+                    }
+                });
+
+                // Refinement checkbox
+                CheckBox refineCheckBox = new CheckBox("Refine alignment with single tile");
+                refineCheckBox.setDisable(true);
+                refineCheckBox.setTooltip(new Tooltip(
+                        "After using the saved alignment, verify position with a single tile"
+                ));
+
+                transformSelectionBox.getChildren().addAll(
+                        new Label("Select saved transform:"),
+                        transformCombo,
+                        detailsArea,
+                        refineCheckBox
+                );
+
+                // Enable/disable based on radio selection
+                useExistingRadio.selectedProperty().addListener((obs, old, selected) -> {
+                    transformCombo.setDisable(!selected);
+                    detailsArea.setDisable(!selected);
+                    refineCheckBox.setDisable(!selected);
+                });
+
+                // Info label
+                Label infoLabel = new Label();
+                infoLabel.setWrapText(true);
+                infoLabel.setStyle("-fx-font-size: 11px; -fx-text-fill: #666;");
+
+                if (availableTransforms.isEmpty()) {
+                    infoLabel.setText(
+                            "No saved alignments found for microscope '" + microscopeName + "'.\n" +
+                                    "You'll need to create a new alignment using the manual process."
+                    );
+                    useExistingRadio.setDisable(true);
+                } else {
+                    infoLabel.setText(
+                            "Found " + availableTransforms.size() + " saved alignment(s) for this microscope.\n" +
+                                    "Using an existing alignment will apply the saved transform and detect the green box location."
+                    );
+                }
+
+                // Create new alignment description with better styling
+                VBox createNewBox = new VBox(5);
+                createNewBox.setPadding(new Insets(0, 0, 0, 30));
+
+                Label createNewDescription = new Label("This will guide you through:");
+                createNewDescription.setStyle("-fx-font-weight: bold;");
+
+                Label step1 = new Label("• Tissue detection or manual annotation creation");
+                Label step2 = new Label("• Tile generation for the regions of interest");
+                Label step3 = new Label("• Manual alignment of microscope stage to tiles");
+                Label step4 = new Label("• Optional multi-tile refinement for accuracy");
+
+                // Set explicit text color for visibility
+                step1.setStyle("-fx-text-fill: #333333;");
+                step2.setStyle("-fx-text-fill: #333333;");
+                step3.setStyle("-fx-text-fill: #333333;");
+                step4.setStyle("-fx-text-fill: #333333;");
+
+                createNewBox.getChildren().addAll(createNewDescription, step1, step2, step3, step4);
+
+                // Assemble content
+                content.getChildren().addAll(
+                        new Label("How would you like to align the microscope to the image?"),
+                        new Separator(),
+                        useExistingRadio,
+                        transformSelectionBox,
+                        new Separator(),
+                        createNewRadio,
+                        createNewBox,
+                        new Separator(),
+                        infoLabel
+                );
+
+                // Set up dialog buttons
+                ButtonType okButton = new ButtonType("Continue", ButtonBar.ButtonData.OK_DONE);
+                ButtonType cancelButton = new ButtonType("Cancel", ButtonBar.ButtonData.CANCEL_CLOSE);
+                dialog.getDialogPane().getButtonTypes().addAll(okButton, cancelButton);
+
+                dialog.getDialogPane().setContent(content);
+
+                // Convert result
+                dialog.setResultConverter(buttonType -> {
+                    if (buttonType == okButton) {
+                        if (useExistingRadio.isSelected() && transformCombo.getValue() != null) {
+                            return new AlignmentChoice(
+                                    true,
+                                    transformCombo.getValue(),
+                                    refineCheckBox.isSelected()
+                            );
+                        } else {
+                            return new AlignmentChoice(false, null, false);
+                        }
+                    }
+                    return null;
+                });
+
+                // Show dialog
+                dialog.showAndWait().ifPresent(future::complete);
+                if (!future.isDone()) {
+                    future.complete(null);
+                }
+
+            } catch (Exception e) {
+                logger.error("Error showing alignment selection dialog", e);
+                future.completeExceptionally(e);
             }
         });
 
