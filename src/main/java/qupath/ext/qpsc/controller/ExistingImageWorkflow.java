@@ -27,8 +27,6 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.stream.Collectors;
 
-import static qupath.ext.qpsc.utilities.AffineTransformManager.saveSlideAlignment;
-
 /**
  * ExistingImageWorkflow - Handles acquisition workflows for images already open in QuPath.
  * <p>
