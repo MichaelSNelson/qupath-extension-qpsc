@@ -176,7 +176,6 @@ public class UtilityFunctions {
     }
 
 
-
     /**
      * Executes a command and returns all lines written to stdout.
      *

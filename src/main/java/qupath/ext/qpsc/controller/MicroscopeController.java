@@ -39,8 +39,6 @@ public class MicroscopeController {
 
     // Store whatever you need here: e.g. the last used transformation, Python script path, etc.
     private AffineTransform currentTransform;
-    private String pythonEnv;
-    private String pythonScript;
     private static final ResourceBundle BUNDLE =
             ResourceBundle.getBundle("qupath.ext.qpsc.ui.strings");
 
@@ -60,23 +58,6 @@ public class MicroscopeController {
         }
         return instance;
     }
-
-
-
-
-//    /** Build a platform appropriate copy command */
-//    private static String[] buildCopyCommand(Path src, Path dst) {
-//        if (System.getProperty("os.name").toLowerCase().contains("win")) {
-//            // Windows: use cmd /c copy "src" "dst"
-//            return new String[]{"cmd", "/c", "copy", "/Y",
-//                    src.toAbsolutePath().toString(),
-//                    dst.toAbsolutePath().toString()};
-//        }
-//        // *nix & macOS: use /bin/sh -c cp
-//        return new String[]{"/bin/sh", "-c",
-//                "cp \"" + src.toAbsolutePath() + "\" \"" + dst.toAbsolutePath() + "\""};
-//    }
-
 
     /**
      * Query the microscope for its current X,Y stage position.
@@ -293,6 +274,15 @@ public class MicroscopeController {
     /** If you ever want to update the scaling transform after alignment: */
     public void setCurrentTransform(AffineTransform tx) {
         this.currentTransform = tx;
+    }
+    /**
+     * Gets the current affine transform used for coordinate conversion between
+     * QuPath image coordinates and microscope stage coordinates.
+     *
+     * @return The current AffineTransform, or null if none has been set
+     */
+    public AffineTransform getCurrentTransform() {
+        return this.currentTransform;
     }
 
     public boolean isWithinBoundsXY(double x, double y) {

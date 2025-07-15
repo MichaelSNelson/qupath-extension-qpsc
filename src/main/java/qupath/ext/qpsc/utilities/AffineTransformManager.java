@@ -5,12 +5,18 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import qupath.ext.qpsc.controller.ExistingImageWorkflow;
 import qupath.ext.qpsc.controller.MicroscopeController;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
+import qupath.ext.qpsc.ui.SampleSetupController;
+import qupath.lib.projects.Project;
 
 import java.awt.geom.AffineTransform;
+import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
+import java.lang.reflect.Type;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -369,5 +375,108 @@ public class AffineTransformManager {
             return false;
         }
     }
+    /**
+     * Saves a slide-specific alignment to the project folder
+     */
+// In AffineTransformManager.java
+    public static void saveSlideAlignment(
+            Project<BufferedImage> project,
+            String sampleName,
+            String modality,
+            AffineTransform transform) {
 
+        try {
+            // Get project folder
+            File projectDir = project.getPath().toFile().getParentFile();
+
+            // Create alignmentFiles directory
+            File alignmentDir = new File(projectDir, "alignmentFiles");
+            if (!alignmentDir.exists()) {
+                alignmentDir.mkdirs();
+            }
+
+            // Create filename based on sample name
+            String filename = sampleName + "_alignment.json";
+            File alignmentFile = new File(alignmentDir, filename);
+
+            // Create a map to store the transform data
+            Map<String, Object> alignmentData = new HashMap<>();
+            alignmentData.put("sampleName", sampleName);
+            alignmentData.put("modality", modality);
+            alignmentData.put("timestamp", new Date().toString());
+            alignmentData.put("transform", new double[] {
+                    transform.getScaleX(),
+                    transform.getShearY(),
+                    transform.getShearX(),
+                    transform.getScaleY(),
+                    transform.getTranslateX(),
+                    transform.getTranslateY()
+            });
+
+            // Convert to JSON and save
+            Gson gson = new GsonBuilder().setPrettyPrinting().create();
+            String json = gson.toJson(alignmentData);
+            Files.write(alignmentFile.toPath(), json.getBytes(StandardCharsets.UTF_8));
+
+            logger.info("Saved slide-specific alignment to: {}", alignmentFile.getAbsolutePath());
+
+        } catch (Exception e) {
+            logger.error("Failed to save slide alignment", e);
+        }
+    }
+
+    public static AffineTransform loadSlideAlignment(
+            Project<BufferedImage> project,
+            String sampleName) {
+
+        try {
+            // Get project folder
+            File projectDir = project.getPath().toFile().getParentFile();
+
+            // Check for alignmentFiles directory
+            File alignmentDir = new File(projectDir, "alignmentFiles");
+            if (!alignmentDir.exists()) {
+                return null;
+            }
+
+            // Look for slide-specific alignment file
+            String filename = sampleName + "_alignment.json";
+            File alignmentFile = new File(alignmentDir, filename);
+
+            if (!alignmentFile.exists()) {
+                logger.info("No slide-specific alignment found at: {}", alignmentFile.getAbsolutePath());
+                return null;
+            }
+
+            // Read and parse the file
+            String json = new String(Files.readAllBytes(alignmentFile.toPath()), StandardCharsets.UTF_8);
+            Type mapType = new TypeToken<Map<String, Object>>(){}.getType();
+            Map<String, Object> alignmentData = new Gson().fromJson(json, mapType);
+
+            // Extract transform values
+            @SuppressWarnings("unchecked")
+            List<Double> transformValues = (List<Double>) alignmentData.get("transform");
+
+            if (transformValues != null && transformValues.size() == 6) {
+                AffineTransform transform = new AffineTransform(
+                        transformValues.get(0),  // m00 (scaleX)
+                        transformValues.get(1),  // m10 (shearY)
+                        transformValues.get(2),  // m01 (shearX)
+                        transformValues.get(3),  // m11 (scaleY)
+                        transformValues.get(4),  // m02 (translateX)
+                        transformValues.get(5)   // m12 (translateY)
+                );
+
+                logger.info("Loaded slide-specific alignment from: {}", alignmentFile.getAbsolutePath());
+                logger.info("Alignment created on: {}", alignmentData.get("timestamp"));
+
+                return transform;
+            }
+
+        } catch (Exception e) {
+            logger.error("Failed to load slide alignment", e);
+        }
+
+        return null;
+    }
 }

@@ -7,6 +7,7 @@ import javafx.scene.layout.*;
 import javafx.stage.Modality;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import qupath.ext.qpsc.preferences.PersistentPreferences;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.utilities.AffineTransformManager;
 import qupath.ext.qpsc.utilities.MicroscopeConfigManager;
@@ -40,12 +41,14 @@ public class AlignmentSelectionController {
      * @return CompletableFuture with the user's choice, or null if cancelled
      */
     public static CompletableFuture<AlignmentChoice> showDialog(QuPathGUI gui, String modality) {
+        logger.info("Starting alignment selection dialog for modality: {}", modality);
         CompletableFuture<AlignmentChoice> future = new CompletableFuture<>();
 
         Platform.runLater(() -> {
             try {
                 // Initialize transform manager
                 String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
+                logger.debug("Retrieved config path: {}", configPath);
                 AffineTransformManager transformManager = new AffineTransformManager(
                         new File(configPath).getParent());
 
@@ -62,21 +65,21 @@ public class AlignmentSelectionController {
                 dialog.setTitle("Alignment Selection");
                 dialog.setHeaderText("Choose alignment method for " + modality);
                 dialog.setResizable(true);
+                logger.debug("Created dialog with title: {}", dialog.getTitle());
 
                 // Create content
                 VBox content = new VBox(15);
                 content.setPadding(new Insets(20));
                 content.setPrefWidth(500);
 
-                // Radio buttons for choice
+// Radio buttons for choice
                 ToggleGroup toggleGroup = new ToggleGroup();
 
                 RadioButton useExistingRadio = new RadioButton("Use existing alignment");
                 useExistingRadio.setToggleGroup(toggleGroup);
 
-                RadioButton createNewRadio = new RadioButton("Create new alignment");
+                RadioButton createNewRadio = new RadioButton("Perform manual sample alignment");
                 createNewRadio.setToggleGroup(toggleGroup);
-                createNewRadio.setSelected(true);
 
                 // Transform selection area
                 VBox transformSelectionBox = new VBox(10);
@@ -84,7 +87,6 @@ public class AlignmentSelectionController {
 
                 ComboBox<AffineTransformManager.TransformPreset> transformCombo = new ComboBox<>();
                 transformCombo.setPrefWidth(400);
-                transformCombo.setDisable(true);
 
                 // Load transforms for the current MICROSCOPE (not modality)
                 List<AffineTransformManager.TransformPreset> availableTransforms =
@@ -94,16 +96,40 @@ public class AlignmentSelectionController {
                         availableTransforms.size(), microscopeName,
                         new File(configPath).getParent() + "/saved_transforms.json");
 
-                // Debug: log all available transforms
-                if (logger.isDebugEnabled()) {
-                    transformManager.getAllTransforms().forEach(t ->
-                            logger.debug("Available transform: '{}' for microscope: '{}'",
-                                    t.getName(), t.getMicroscope()));
-                }
-
                 transformCombo.getItems().addAll(availableTransforms);
 
-                // Custom cell factory to show transform details
+                // NOW we can check saved preference for alignment choice
+                boolean useExisting = PersistentPreferences.getUseExistingAlignment();
+                if (useExisting && !availableTransforms.isEmpty()) {
+                    useExistingRadio.setSelected(true);
+                } else {
+                    createNewRadio.setSelected(true);
+                }
+
+                // Disable combo initially based on radio selection
+                transformCombo.setDisable(!useExistingRadio.isSelected());
+
+                // Try to restore last selected transform
+                String lastSelectedName = PersistentPreferences.getLastSelectedTransform();
+                if (!lastSelectedName.isEmpty()) {
+                    availableTransforms.stream()
+                            .filter(t -> t.getName().equals(lastSelectedName))
+                            .findFirst()
+                            .ifPresent(transformCombo::setValue);
+                } else if (!availableTransforms.isEmpty()) {
+                    transformCombo.getSelectionModel().selectFirst();
+                }
+
+                // Save selection when changed
+                transformCombo.valueProperty().addListener((obs, old, newVal) -> {
+                    if (newVal != null) {
+                        PersistentPreferences.setLastSelectedTransform(newVal.getName());
+                        logger.info("User selected transform: '{}' (mounting method: {})",
+                                newVal.getName(), newVal.getMountingMethod());
+                    }
+                });
+
+                // Custom cell factory remains the same...
                 transformCombo.setCellFactory(lv -> new ListCell<>() {
                     @Override
                     protected void updateItem(AffineTransformManager.TransformPreset item, boolean empty) {
@@ -111,7 +137,7 @@ public class AlignmentSelectionController {
                         if (empty || item == null) {
                             setText(null);
                         } else {
-                            setText(item.getName() + " - " + item.getMountingMethod());
+                            setText(item.getName() + " (" + item.getMountingMethod() + ")");
                         }
                     }
                 });
@@ -123,21 +149,17 @@ public class AlignmentSelectionController {
                         if (empty || item == null) {
                             setText(null);
                         } else {
-                            setText(item.getName() + " - " + item.getMountingMethod());
+                            setText(item.getName() + " (" + item.getMountingMethod() + ")");
                         }
                     }
                 });
 
-                if (!availableTransforms.isEmpty()) {
-                    transformCombo.getSelectionModel().selectFirst();
-                }
-
-                // Transform details
+                // Transform details area
                 TextArea detailsArea = new TextArea();
+                detailsArea.setPrefRowCount(3);
                 detailsArea.setEditable(false);
-                detailsArea.setPrefRowCount(4);
                 detailsArea.setWrapText(true);
-                detailsArea.setDisable(true);
+                detailsArea.setDisable(!useExistingRadio.isSelected());
 
                 // Update details when selection changes
                 transformCombo.getSelectionModel().selectedItemProperty().addListener((obs, old, preset) -> {
@@ -156,10 +178,19 @@ public class AlignmentSelectionController {
 
                 // Refinement checkbox
                 CheckBox refineCheckBox = new CheckBox("Refine alignment with single tile");
-                refineCheckBox.setDisable(true);
+                refineCheckBox.setDisable(!useExistingRadio.isSelected());
                 refineCheckBox.setTooltip(new Tooltip(
                         "After using the saved alignment, verify position with a single tile"
                 ));
+
+                // Load saved refinement preference
+                refineCheckBox.setSelected(PersistentPreferences.getRefineAlignment());
+
+                // Save when changed
+                refineCheckBox.selectedProperty().addListener((obs, old, selected) -> {
+                    PersistentPreferences.setRefineAlignment(selected);
+                    logger.info("Refinement checkbox changed to: {}", selected);
+                });
 
                 transformSelectionBox.getChildren().addAll(
                         new Label("Select saved transform:"),
@@ -173,6 +204,17 @@ public class AlignmentSelectionController {
                     transformCombo.setDisable(!selected);
                     detailsArea.setDisable(!selected);
                     refineCheckBox.setDisable(!selected);
+                    // Save preference when changed
+                    PersistentPreferences.setUseExistingAlignment(selected);
+
+                });
+
+                createNewRadio.selectedProperty().addListener((obs, old, selected) -> {
+                    // Save preference when changed
+                    if (selected) {
+                        PersistentPreferences.setUseExistingAlignment(false);
+                        logger.info("User selected: Create new alignment");
+                    }
                 });
 
                 // Info label
@@ -198,18 +240,18 @@ public class AlignmentSelectionController {
                 createNewBox.setPadding(new Insets(0, 0, 0, 30));
 
                 Label createNewDescription = new Label("This will guide you through:");
-                createNewDescription.setStyle("-fx-font-weight: bold;");
+                createNewDescription.setStyle("-fx-font-weight: bold; -fx-text-fill: -fx-text-base-color;");
 
                 Label step1 = new Label("• Tissue detection or manual annotation creation");
                 Label step2 = new Label("• Tile generation for the regions of interest");
                 Label step3 = new Label("• Manual alignment of microscope stage to tiles");
                 Label step4 = new Label("• Optional multi-tile refinement for accuracy");
 
-                // Set explicit text color for visibility
-                step1.setStyle("-fx-text-fill: #333333;");
-                step2.setStyle("-fx-text-fill: #333333;");
-                step3.setStyle("-fx-text-fill: #333333;");
-                step4.setStyle("-fx-text-fill: #333333;");
+                // Use theme-aware text color
+                step1.setStyle("-fx-text-fill: -fx-text-base-color;");
+                step2.setStyle("-fx-text-fill: -fx-text-base-color;");
+                step3.setStyle("-fx-text-fill: -fx-text-base-color;");
+                step4.setStyle("-fx-text-fill: -fx-text-base-color;");
 
                 createNewBox.getChildren().addAll(createNewDescription, step1, step2, step3, step4);
 
@@ -237,12 +279,16 @@ public class AlignmentSelectionController {
                 dialog.setResultConverter(buttonType -> {
                     if (buttonType == okButton) {
                         if (useExistingRadio.isSelected() && transformCombo.getValue() != null) {
+                            logger.info("Dialog result: Use existing alignment - transform: '{}', refinement: {}",
+                                    transformCombo.getValue() != null ? transformCombo.getValue().getName() : "null",
+                                    refineCheckBox.isSelected());
                             return new AlignmentChoice(
                                     true,
                                     transformCombo.getValue(),
                                     refineCheckBox.isSelected()
                             );
                         } else {
+                            logger.info("Dialog closed without result");
                             return new AlignmentChoice(false, null, false);
                         }
                     }

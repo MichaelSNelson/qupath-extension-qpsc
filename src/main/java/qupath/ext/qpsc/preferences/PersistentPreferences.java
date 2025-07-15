@@ -351,4 +351,38 @@ public class PersistentPreferences {
     public static void setPPMPlusSelected(final boolean selected) {
         ppmPlusSelectedSaved.setValue(String.valueOf(selected));
     }
+
+    // ================== ALIGNMENT SELECTION ==================
+    private static final StringProperty useExistingAlignmentSaved =
+            PathPrefs.createPersistentPreference("UseExistingAlignment", "false");
+
+    private static final StringProperty lastSelectedTransformSaved =
+            PathPrefs.createPersistentPreference("LastSelectedTransform", "");
+
+    private static final StringProperty refineAlignmentSaved =
+            PathPrefs.createPersistentPreference("RefineAlignment", "false");
+
+    public static boolean getUseExistingAlignment() {
+        return Boolean.parseBoolean(useExistingAlignmentSaved.getValue());
+    }
+
+    public static void setUseExistingAlignment(final boolean useExisting) {
+        useExistingAlignmentSaved.setValue(String.valueOf(useExisting));
+    }
+
+    public static String getLastSelectedTransform() {
+        return lastSelectedTransformSaved.getValue();
+    }
+
+    public static void setLastSelectedTransform(final String transformName) {
+        lastSelectedTransformSaved.setValue(transformName != null ? transformName : "");
+    }
+
+    public static boolean getRefineAlignment() {
+        return Boolean.parseBoolean(refineAlignmentSaved.getValue());
+    }
+
+    public static void setRefineAlignment(final boolean refine) {
+        refineAlignmentSaved.setValue(String.valueOf(refine));
+    }
 }
