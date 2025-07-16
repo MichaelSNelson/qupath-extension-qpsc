@@ -226,16 +226,4 @@ public class TransformationFunctions {
     }
 
 
-
-    /**
-     * Placeholder for computing a transform from a previous low-res to new high-res image.
-     */
-    public static AffineTransform calculateNewImageTransform(
-            AffineTransform originalTransform,
-            List<Double> upperLeftStageCoord,
-            List<Double> offset,
-            double pixelSize) {
-        // Implementation depends on future requirements
-        return new AffineTransform();
-    }
 }

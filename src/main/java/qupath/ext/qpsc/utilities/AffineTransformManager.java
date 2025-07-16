@@ -10,8 +10,10 @@ import qupath.ext.qpsc.controller.MicroscopeController;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.ui.SampleSetupController;
 import qupath.lib.projects.Project;
+import qupath.lib.roi.interfaces.ROI;
 
 import java.awt.geom.AffineTransform;
+import java.awt.geom.NoninvertibleTransformException;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.FileReader;
@@ -524,5 +526,6 @@ public class AffineTransformManager {
 
         return null;
     }
+
 
 }
