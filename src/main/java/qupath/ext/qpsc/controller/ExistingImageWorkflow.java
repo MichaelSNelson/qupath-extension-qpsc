@@ -16,6 +16,7 @@ import qupath.ext.qpsc.utilities.*;
 import qupath.lib.gui.QuPathGUI;
 import qupath.lib.objects.PathObject;
 import qupath.lib.projects.Project;
+import qupath.lib.roi.interfaces.ROI;
 import qupath.lib.scripting.QP;
 import qupath.fx.dialogs.Dialogs;
 
@@ -252,11 +253,13 @@ public class ExistingImageWorkflow {
                     // Show green box preview
                     BufferedImage macroImage = MacroImageUtility.retrieveMacroImage(gui);
                     GreenBoxDetector.DetectionParams params = new GreenBoxDetector.DetectionParams();
-
+                    // Save macro dimensions while we have them
+                    int macroWidth = macroImage != null ? macroImage.getWidth() : 0;
+                    int macroHeight = macroImage != null ? macroImage.getHeight() : 0;
                     return GreenBoxPreviewController.showPreviewDialog(macroImage, params)
                             .thenApply(greenBoxResult -> {
                                 if (greenBoxResult == null) return null;
-                                return new AlignmentContext(context, pixelSize, greenBoxResult);
+                                return new AlignmentContext(context, pixelSize, greenBoxResult, macroWidth, macroHeight);
                             });
                 })
                 .thenCompose(alignContext -> {
@@ -365,6 +368,13 @@ public class ExistingImageWorkflow {
                             flippedX,
                             flippedY
                     );
+                    BufferedImage macroImage = MacroImageUtility.retrieveMacroImage(gui);
+                    if (macroImage != null) {
+                        projectDetails.put("macroWidth", macroImage.getWidth());
+                        projectDetails.put("macroHeight", macroImage.getHeight());
+                        logger.info("Saved macro dimensions to project: {} x {}",
+                                macroImage.getWidth(), macroImage.getHeight());
+                    }
                 } else {
                     logger.info("Using existing project");
                     projectDetails = QPProjectFunctions.getCurrentProjectInformation(
@@ -518,9 +528,29 @@ public class ExistingImageWorkflow {
                                 annotations, alignContext.pixelSize, refinedTransform);
                     });
         } else {
-            // Continue without refinement
+            // Continue without refinement - but need to convert baseTransform to full-res to stage
+            double imagePixelSize = gui.getImageData().getServer()
+                    .getPixelCalibration().getAveragedPixelSizeMicrons();
+            double fullResToMacroScale = imagePixelSize / alignContext.pixelSize;
+            AffineTransform fullResToMacro = AffineTransform.getScaleInstance(
+                    fullResToMacroScale, fullResToMacroScale
+            );
+
+            // Combine transforms: full-res → macro → stage
+            AffineTransform fullResToStage = new AffineTransform(baseTransform);
+            fullResToStage.concatenate(fullResToMacro);
+
+            // Save this as the slide-specific transform
+            Project<BufferedImage> project = (Project<BufferedImage>) projectInfo.details.get("currentQuPathProject");
+            AffineTransformManager.saveSlideAlignment(
+                    project,
+                    alignContext.context.sample.sampleName(),
+                    alignContext.context.sample.modality(),
+                    fullResToStage
+            );
+
             return continueToAcquisition(gui, alignContext.context.sample, projectInfo,
-                    annotations, alignContext.pixelSize, baseTransform);
+                    annotations, alignContext.pixelSize, fullResToStage);
         }
     }
 
@@ -547,7 +577,7 @@ public class ExistingImageWorkflow {
         createTilesForAnnotations(annotations, context.context.sample, tempTileDir,
                 modeWithIndex, context.pixelSize, invertedX, invertedY);
 
-        // Setup manual transform
+// Setup manual transform
         return AffineTransformationController.setupAffineTransformationAndValidationGUI(
                         context.pixelSize, invertedX, invertedY)
                 .thenCompose(transform -> {
@@ -556,12 +586,34 @@ public class ExistingImageWorkflow {
                         return CompletableFuture.completedFuture(null);
                     }
 
-                    MicroscopeController.getInstance().setCurrentTransform(transform);
+                    // The transform from AffineTransformationController is macro to stage
+                    // We need to create a full-res to stage transform for consistency
+                    double imagePixelSize = gui.getImageData().getServer()
+                            .getPixelCalibration().getAveragedPixelSizeMicrons();
+                    double fullResToMacroScale = imagePixelSize / context.pixelSize;
+                    AffineTransform fullResToMacro = AffineTransform.getScaleInstance(
+                            fullResToMacroScale, fullResToMacroScale
+                    );
 
-                    // Offer to save transform
+                    // Combine transforms: full-res → macro → stage
+                    AffineTransform fullResToStage = new AffineTransform(transform);
+                    fullResToStage.concatenate(fullResToMacro);
+
+                    MicroscopeController.getInstance().setCurrentTransform(fullResToStage);
+
+                    // Save the slide-specific transform as full-res to stage
+                    Project<BufferedImage> project = (Project<BufferedImage>) context.projectInfo.details.get("currentQuPathProject");
+                    AffineTransformManager.saveSlideAlignment(
+                            project,
+                            context.context.sample.sampleName(),
+                            context.context.sample.modality(),
+                            fullResToStage
+                    );
+
+                    // Offer to save the GENERAL transform (macro to stage)
                     return offerToSaveTransform(transform, context.context.sample.modality())
                             .thenCompose(saved -> continueToAcquisition(gui, context.context.sample,
-                                    context.projectInfo, annotations, context.pixelSize, transform));
+                                    context.projectInfo, annotations, context.pixelSize, fullResToStage));
                 });
     }
 
@@ -793,19 +845,86 @@ public class ExistingImageWorkflow {
                         tileCoords[0], tileCoords[1]);
 
                 // Convert to macro coordinates for the transform
-                double scaleFactor = alignContext.pixelSize / imagePixelSize;
+// Get green box from alignment context
+                ROI greenBox = alignContext.greenBoxResult.getDetectedBox();
+                double greenBoxX = greenBox.getBoundsX();
+                double greenBoxY = greenBox.getBoundsY();
+                double greenBoxWidth = greenBox.getBoundsWidth();
+                double greenBoxHeight = greenBox.getBoundsHeight();
+
+// Get full image dimensions
+                double fullImageWidth = gui.getImageData().getServer().getWidth();
+                double fullImageHeight = gui.getImageData().getServer().getHeight();
+
+// Apply flips to green box position if needed
+                if (QPPreferenceDialog.getFlipMacroXProperty()) {
+                    greenBoxX = alignContext.macroWidth - greenBoxX - greenBoxWidth;
+                }
+                if (QPPreferenceDialog.getFlipMacroYProperty()) {
+                    greenBoxY = alignContext.macroHeight - greenBoxY - greenBoxHeight;
+                }
+
+// Scale tile coordinates to fit within green box
+                double scaleX = greenBoxWidth / fullImageWidth;
+                double scaleY = greenBoxHeight / fullImageHeight;
+
+// Convert to macro coordinates
                 double[] macroCoords = {
-                        tileCoords[0] / scaleFactor,
-                        tileCoords[1] / scaleFactor
+                        (tileCoords[0] * scaleX) + greenBoxX,
+                        (tileCoords[1] * scaleY) + greenBoxY
                 };
+
+                logger.info("Green box mapping:");
+                logger.info("  Green box (flipped): ({}, {}, {}, {})", greenBoxX, greenBoxY, greenBoxWidth, greenBoxHeight);
+                logger.info("  Scale factors: X={}, Y={}", scaleX, scaleY);
+                logger.info("  Tile in macro: ({}, {})", macroCoords[0], macroCoords[1]);
 
                 logger.info("Tile coordinates in macro pixels: ({}, {})",
                         macroCoords[0], macroCoords[1]);
 
+                // Get macro dimensions - try multiple sources
+                double macroWidth = alignContext.macroWidth;
+                double macroHeight = alignContext.macroHeight;
+
+                // ADD THIS SECTION - Apply flips to macro coordinates if we have dimensions
+                if (macroWidth > 0 && macroHeight > 0) {
+                    double originalMacroX = macroCoords[0];
+                    double originalMacroY = macroCoords[1];
+
+                    if (QPPreferenceDialog.getFlipMacroXProperty()) {
+//                        macroCoords[0] = macroWidth - macroCoords[0];
+//                        logger.info("Applied X flip: {} -> {} (width: {})",
+//                                originalMacroX, macroCoords[0], macroWidth);
+                    }
+                    if (QPPreferenceDialog.getFlipMacroYProperty()) {
+//                        macroCoords[1] = macroHeight - macroCoords[1];
+//                        logger.info("Applied Y flip: {} -> {} (height: {})",
+//                                originalMacroY, macroCoords[1], macroHeight);
+                    }
+                } else {
+                    logger.error("Cannot apply flips without macro dimensions! Proceeding without flips.");
+                }
                 // Transform to stage coordinates using initial transform
                 double[] stageCoords = TransformationFunctions.qpToMicroscopeCoordinates(
                         macroCoords, initialTransform
                 );
+
+                // Add transform debugging (Fix 3)
+                logger.info("Transform debugging:");
+                logger.info("  Initial transform matrix: {}", initialTransform);
+                logger.info("  Transform chain:");
+                logger.info("    Tile coords (full-res): ({}, {})", tileCoords[0], tileCoords[1]);
+                logger.info("    → Macro coords (scaled): ({}, {})", macroCoords[0], macroCoords[1]);
+                logger.info("    → Stage coords: ({}, {})", stageCoords[0], stageCoords[1]);
+
+                // Verify stage bounds
+                logger.info("Stage bounds check:");
+                logger.info("  X: {} (limits: -21000 to 33000) - {}",
+                        stageCoords[0],
+                        (stageCoords[0] >= -21000 && stageCoords[0] <= 33000) ? "OK" : "OUT OF BOUNDS!");
+                logger.info("  Y: {} (limits: -9000 to 11000) - {}",
+                        stageCoords[1],
+                        (stageCoords[1] >= -9000 && stageCoords[1] <= 11000) ? "OK" : "OUT OF BOUNDS!");
 
                 logger.info("Moving to tile '{}' at stage position: {}",
                         selectedTile.getName(), Arrays.toString(stageCoords));
@@ -818,10 +937,24 @@ public class ExistingImageWorkflow {
                     double[] refinedStageCoords = MicroscopeController.getInstance().getStagePositionXY();
 
                     // Calculate the refined transform using macro coordinates
-                    AffineTransform refinedTransform = TransformationFunctions.addTranslationToScaledAffine(
+                    AffineTransform refinedMacroToStage = TransformationFunctions.addTranslationToScaledAffine(
                             initialTransform, macroCoords, refinedStageCoords
                     );
-                    logger.info("Refined transform: {}", refinedTransform);
+
+                    // Create transform that maps full-res to macro via green box
+                    AffineTransform fullResToMacro = new AffineTransform();
+
+                    // First scale to fit in green box
+                    fullResToMacro.scale(scaleX, scaleY);
+
+                    // Then translate to green box position
+                    fullResToMacro.translate(greenBoxX / scaleX, greenBoxY / scaleY);
+
+                    // Combine transforms
+                    AffineTransform fullResToStage = new AffineTransform(refinedMacroToStage);
+                    fullResToStage.concatenate(fullResToMacro);
+
+                    logger.info("Saving slide-specific transform (full-res → stage)");
 
                     // Save the slide-specific alignment
                     Project<BufferedImage> project = (Project<BufferedImage>) projectInfo.details.get("currentQuPathProject");
@@ -829,12 +962,37 @@ public class ExistingImageWorkflow {
                             project,
                             alignContext.context.sample.sampleName(),
                             alignContext.context.sample.modality(),
-                            refinedTransform
+                            fullResToStage
                     );
 
-                    future.complete(refinedTransform);
+                    future.complete(fullResToStage);
                 } else {
-                    future.complete(initialTransform);
+                    logger.info("Refinement cancelled - creating full-res to stage transform from initial");
+
+                    // Need to convert initial transform to full-res to stage as well
+                    double fullResToMacroScale = imagePixelSize / alignContext.pixelSize;
+                    AffineTransform fullResToMacro = AffineTransform.getScaleInstance(
+                            fullResToMacroScale, fullResToMacroScale
+                    );
+
+                    // Add flips if available and needed
+                    if (macroWidth > 0 && macroHeight > 0 &&
+                            (QPPreferenceDialog.getFlipMacroXProperty() || QPPreferenceDialog.getFlipMacroYProperty())) {
+
+                        if (QPPreferenceDialog.getFlipMacroXProperty()) {
+                            fullResToMacro.translate(macroWidth, 0);
+                            fullResToMacro.scale(-1, 1);
+                        }
+                        if (QPPreferenceDialog.getFlipMacroYProperty()) {
+                            fullResToMacro.translate(0, macroHeight);
+                            fullResToMacro.scale(1, -1);
+                        }
+                    }
+
+                    AffineTransform fullResToStage = new AffineTransform(initialTransform);
+                    fullResToStage.concatenate(fullResToMacro);
+
+                    future.complete(fullResToStage);
                 }
 
             } catch (Exception e) {
@@ -845,7 +1003,6 @@ public class ExistingImageWorkflow {
 
         return future;
     }
-
     /**
      * Offer to save transform for future use
      */
@@ -1297,12 +1454,17 @@ public class ExistingImageWorkflow {
         final WorkflowContext context;
         final double pixelSize;
         final GreenBoxDetector.DetectionResult greenBoxResult;
+        final int macroWidth;
+        final int macroHeight;
 
         AlignmentContext(WorkflowContext context, double pixelSize,
-                         GreenBoxDetector.DetectionResult greenBoxResult) {
+                         GreenBoxDetector.DetectionResult greenBoxResult,
+                         int macroWidth, int macroHeight) {
             this.context = context;
             this.pixelSize = pixelSize;
             this.greenBoxResult = greenBoxResult;
+            this.macroWidth = macroWidth;
+            this.macroHeight = macroHeight;
         }
     }
 

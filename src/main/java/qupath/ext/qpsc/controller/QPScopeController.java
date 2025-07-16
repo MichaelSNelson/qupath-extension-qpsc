@@ -68,7 +68,7 @@ public class QPScopeController {
             case "existingImage"-> ExistingImageWorkflow.run();
             case "basicStageInterface"-> StageMovementController.showTestStageMovementDialog();
             case "microscopeAlignment"       -> MicroscopeAlignmentWorkflow.run();  // Add this line
-            case "test" ->  TestWorkflow.runTestWorkflow();
+            case "test" ->  TestWorkflow.run();
             default             -> logger.warning("Unknown workflow mode " + mode);
         }
     }
