@@ -14,7 +14,9 @@ import qupath.lib.projects.Project;
 import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
 import java.io.File;
+import java.io.FileReader;
 import java.io.IOException;
+import java.io.Reader;
 import java.lang.reflect.Type;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -479,4 +481,48 @@ public class AffineTransformManager {
 
         return null;
     }
+
+    /**
+     * Load slide-specific alignment from a project directory without requiring an open project.
+     * Useful for checking if alignment exists before project is loaded.
+     *
+     * @param projectDir The project directory
+     * @param sampleName The sample/slide name
+     * @return The slide-specific transform, or null if not found
+     */
+    public static AffineTransform loadSlideAlignmentFromDirectory(File projectDir, String sampleName) {
+        if (projectDir == null || !projectDir.exists() || sampleName == null) {
+            return null;
+        }
+
+        File alignmentDir = new File(projectDir, "alignmentFiles");
+        if (!alignmentDir.exists()) {
+            return null;
+        }
+
+        File alignmentFile = new File(alignmentDir, sampleName + "_alignment.json");
+        if (!alignmentFile.exists()) {
+            logger.debug("No slide-specific alignment found at: {}", alignmentFile.getAbsolutePath());
+            return null;
+        }
+
+        try (Reader reader = new FileReader(alignmentFile)) {
+            Gson gson = new GsonBuilder()
+                    .registerTypeAdapter(AffineTransform.class, new AffineTransformAdapter())
+                    .create();
+
+            AffineTransform transform = gson.fromJson(reader, AffineTransform.class);
+
+            if (transform != null) {
+                logger.info("Loaded slide-specific alignment from: {}", alignmentFile.getAbsolutePath());
+                return transform;
+            }
+
+        } catch (IOException e) {
+            logger.error("Error loading slide alignment from: {}", alignmentFile, e);
+        }
+
+        return null;
+    }
+
 }

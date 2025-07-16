@@ -309,15 +309,35 @@ public class MicroscopeAlignmentWorkflow {
                 double macroPixelSize = DEFAULT_MACRO_PIXEL_SIZE;
                 double mainPixelSize = gui.getImageData().getServer()
                         .getPixelCalibration().getAveragedPixelSizeMicrons();
+
                 // Create tiles for manual alignment
                 String tempTileDirectory = (String) projectDetails.get("tempTileDirectory");
                 String modeWithIndex = (String) projectDetails.get("imagingModeWithIndex");
 
-                // Create tiles for alignment
+                // Create tiles for alignment (in full resolution coordinates)
                 createAlignmentTiles(gui, sampleSetup, tempTileDirectory,
                         modeWithIndex, invertedX, invertedY);
 
-                // Setup transformation
+                // CHANGE 1: Create macro-to-full-res transform for tile coordinate conversion
+                // This transform will be used to convert tile positions (in full res) to macro coordinates
+                AffineTransform macroToFullRes = createMacroToFullResTransform(
+                        detectionResults, macroPixelSize, mainPixelSize);
+
+                // CHANGE 2: Create inverse transform for converting full-res to macro coordinates
+                AffineTransform fullResToMacro = new AffineTransform();
+                try {
+                    fullResToMacro = macroToFullRes.createInverse();
+                } catch (Exception e) {
+                    logger.error("Failed to create inverse transform", e);
+                    UIFunctions.notifyUserOfError(
+                            "Failed to create coordinate transform: " + e.getMessage(),
+                            "Transform Error"
+                    );
+                    return;
+                }
+
+                // REVERT TO ORIGINAL: Pass main pixel size for alignment
+                // The alignment controller works with full resolution coordinates
                 AffineTransformationController.setupAffineTransformationAndValidationGUI(
                                 mainPixelSize, invertedX, invertedY)
                         .thenAccept(alignmentTransform -> {
@@ -328,24 +348,27 @@ public class MicroscopeAlignmentWorkflow {
 
                             logger.info("Alignment transform complete: {}", alignmentTransform);
 
-                            // Convert from main image → stage to macro → stage
-                            // The alignment transform maps: main image pixels → stage µm
-                            // We need: macro pixels → stage µm
-                            // First create the scaling difference
-                            double scaleFactor = macroPixelSize / mainPixelSize;
+                            // The alignmentTransform maps: full-res pixels → stage µm
+                            // We need to convert it to: macro pixels → stage µm
 
-                            // Create the correct macro-to-stage transform
-                            AffineTransform macroToStageTransform = new AffineTransform();
-                            macroToStageTransform.scale(scaleFactor, scaleFactor);
-                            macroToStageTransform.concatenate(alignmentTransform);
+                            // Create the general macro→stage transform by prepending fullres→macro
+                            AffineTransform generalTransform = new AffineTransform(alignmentTransform);
+                            generalTransform.concatenate(macroToFullRes);
 
-                            // Now this is the general transform (no green box offset needed)
-                            AffineTransform generalTransform = macroToStageTransform;
+                            logger.info("Created general macro→stage transform by combining:");
+                            logger.info("  Macro→FullRes: {}", macroToFullRes);
+                            logger.info("  FullRes→Stage: {}", alignmentTransform);
+                            logger.info("  Result Macro→Stage: {}", generalTransform);
 
-                            // Save the transform
+                            // Save the general transform
                             saveGeneralTransform(gui, alignConfig, generalTransform,
                                     detectionResults, macroPixelSize, invertedX, invertedY,
                                     transformManager);
+
+                            // Set the current transform for the microscope controller
+                            // This should be the full-res→stage transform for current operations
+                            MicroscopeController.getInstance().setCurrentTransform(alignmentTransform);
+
                         }).exceptionally(ex -> {
                             logger.error("Error in transform setup", ex);
                             Platform.runLater(() -> UIFunctions.notifyUserOfError(
@@ -363,6 +386,60 @@ public class MicroscopeAlignmentWorkflow {
                 );
             }
         });
+    }
+
+    /**
+     * CHANGE 6: New method to create macro-to-full-resolution transform
+     * This accounts for the green box position and scale difference
+     */
+    private static AffineTransform createMacroToFullResTransform(
+            MacroImageResults detectionResults,
+            double macroPixelSize,
+            double mainPixelSize) {
+
+        AffineTransform transform = new AffineTransform();
+
+        if (detectionResults.greenBoxResult() != null &&
+                detectionResults.greenBoxResult().getDetectedBox() != null) {
+
+            // Get green box position in macro pixels
+            ROI greenBox = detectionResults.greenBoxResult().getDetectedBox();
+            double greenBoxX = greenBox.getBoundsX();
+            double greenBoxY = greenBox.getBoundsY();
+            double greenBoxWidth = greenBox.getBoundsWidth();
+            double greenBoxHeight = greenBox.getBoundsHeight();
+
+            logger.info("Green box in macro: ({}, {}, {}, {})",
+                    greenBoxX, greenBoxY, greenBoxWidth, greenBoxHeight);
+
+            // The green box represents the full resolution image
+            // So macro coordinates inside the green box map to full res coordinates
+
+            // First translate by negative green box position to make it relative to green box origin
+            transform.translate(-greenBoxX, -greenBoxY);
+
+            // Then scale from macro pixels to full res pixels
+            // The green box width in macro pixels corresponds to full image width in full res pixels
+            QuPathGUI gui = QuPathGUI.getInstance();
+            double fullResWidth = gui.getImageData().getServer().getWidth();
+            double fullResHeight = gui.getImageData().getServer().getHeight();
+
+            double scaleX = fullResWidth / greenBoxWidth;
+            double scaleY = fullResHeight / greenBoxHeight;
+
+            transform.scale(scaleX, scaleY);
+
+            logger.info("Macro to full-res transform: translate({}, {}), scale({}, {})",
+                    -greenBoxX, -greenBoxY, scaleX, scaleY);
+
+        } else {
+            // No green box - assume full macro maps to full resolution with just pixel size scaling
+            double scale = macroPixelSize / mainPixelSize;
+            transform.scale(scale, scale);
+            logger.warn("No green box detected - using simple scaling: {}", scale);
+        }
+
+        return transform;
     }
 
     /**
@@ -410,6 +487,7 @@ public class MicroscopeAlignmentWorkflow {
 
     /**
      * Helper method to create tiles for given annotations.
+     * CHANGE 7: Tiles remain in full resolution coordinates - this is correct!
      */
     private static void createTilesForAnnotations(
             QuPathGUI gui,
@@ -445,7 +523,7 @@ public class MicroscopeAlignmentWorkflow {
             double frameWidthMicrons = pixelSize * cameraWidth;
             double frameHeightMicrons = pixelSize * cameraHeight;
 
-            // Convert to QuPath pixels
+            // Convert to QuPath pixels (full resolution)
             double frameWidthQP = frameWidthMicrons / mainPixelSize;
             double frameHeightQP = frameHeightMicrons / mainPixelSize;
             double overlapPercent = QPPreferenceDialog.getTileOverlapPercentProperty();
@@ -453,7 +531,7 @@ public class MicroscopeAlignmentWorkflow {
             logger.info("Creating tiles: frame size {}x{} QP pixels ({}x{} µm) for modality {}",
                     frameWidthQP, frameHeightQP, frameWidthMicrons, frameHeightMicrons, sampleSetup.modality());
 
-            // Build tiling request
+            // Build tiling request - tiles in full resolution coordinates
             TilingRequest request = new TilingRequest.Builder()
                     .outputFolder(tempTileDirectory)
                     .modalityName(modeWithIndex)
@@ -478,59 +556,13 @@ public class MicroscopeAlignmentWorkflow {
     }
 
     /**
-     * Creates a general macro-to-stage transform from a specific alignment transform.
-     *
-     * The alignment transform maps full-res image coordinates to stage coordinates,
-     * but it's specific to the green box position. This method creates a general
-     * transform that works regardless of green box position.
-     *
-     * @param alignmentTransform The transform from the alignment process (specific to green box position)
-     * @param greenBoxResult The green box detection result
-     * @param macroPixelSize The pixel size of the macro image in microns
-     * @return The general transform that maps macro coordinates to stage coordinates
+     * REMOVED: createGeneralMacroToStageTransform method is no longer needed
+     * The alignment transform already works with macro coordinates
      */
-    private static AffineTransform createGeneralMacroToStageTransform(
-            AffineTransform alignmentTransform,
-            GreenBoxDetector.DetectionResult greenBoxResult,
-            double macroPixelSize) {
-
-        if (greenBoxResult == null || greenBoxResult.getDetectedBox() == null) {
-            logger.warn("No green box detection available, returning alignment transform as-is");
-            return alignmentTransform;
-        }
-
-        // Get the green box position in macro image pixels
-        double greenBoxX_macro = greenBoxResult.getDetectedBox().getBoundsX();
-        double greenBoxY_macro = greenBoxResult.getDetectedBox().getBoundsY();
-
-        logger.info("Green box position in macro image: ({}, {}) pixels",
-                greenBoxX_macro, greenBoxY_macro);
-
-        // Convert green box position to stage units (microns)
-        double greenBoxX_stage = greenBoxX_macro * macroPixelSize;
-        double greenBoxY_stage = greenBoxY_macro * macroPixelSize;
-
-        logger.info("Green box offset in stage coordinates: ({}, {}) µm",
-                greenBoxX_stage, greenBoxY_stage);
-
-        // The alignment transform maps: full-res image coords → stage coords
-        // But it's specific to this green box position
-        // To make it general, we need to add back the green box offset
-
-        // Create the general transform
-        AffineTransform generalTransform = new AffineTransform(alignmentTransform);
-
-        // Add the green box offset to make it relative to macro image origin (0,0)
-        // This gives us: macro image coords → stage coords
-        generalTransform.translate(greenBoxX_stage, greenBoxY_stage);
-
-        logger.info("Created general macro→stage transform: {}", generalTransform);
-
-        return generalTransform;
-    }
 
     /**
      * Saves the general transform with metadata.
+     * CHANGE 8: Transform is already in macro coordinates, no conversion needed
      */
     private static void saveGeneralTransform(
             QuPathGUI gui,

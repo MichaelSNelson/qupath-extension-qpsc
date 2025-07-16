@@ -27,11 +27,13 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.stream.Collectors;
 
+import static qupath.ext.qpsc.utilities.AffineTransformManager.saveSlideAlignment;
+
 /**
  * ExistingImageWorkflow - Handles acquisition workflows for images already open in QuPath.
  * <p>
  * Supports two paths:
- * - Path A: Use existing saved alignment with green box detection
+ * - Path A: Use existing saved alignment (slide-specific or general transform)
  * - Path B: Create new alignment through manual annotation workflow
  *
  * @author Mike Nelson
@@ -54,9 +56,10 @@ public class ExistingImageWorkflow {
      * Entry point for the workflow. Follows the sequence:
      * 1. Check for open image
      * 2. Sample setup dialog
-     * 3. Alignment selection (existing or manual)
-     * 4. Path-specific dialogs and project creation
-     * 5. Acquisition and stitching
+     * 3. Check for existing slide-specific alignment (NEW)
+     * 4. Alignment selection or skip if using existing
+     * 5. Path-specific dialogs and project creation
+     * 6. Acquisition and stitching
      */
     public static void run() {
         logger.info("Starting Existing Image Workflow...");
@@ -81,22 +84,17 @@ public class ExistingImageWorkflow {
                         return CompletableFuture.completedFuture(null);
                     }
 
-                    // Step 2: Alignment Selection Dialog
-                    return AlignmentSelectionController.showDialog(gui, sample.modality())
-                            .thenApply(alignment -> alignment != null ? new WorkflowContext(sample, alignment) : null);
-                })
-                .thenCompose(context -> {
-                    if (context == null) {
-                        logger.info("Workflow cancelled");
-                        return CompletableFuture.completedFuture(null);
-                    }
-
-                    // Step 3: Path-specific handling
-                    if (context.alignment.useExistingAlignment()) {
-                        return handleExistingAlignmentPath(gui, context);
-                    } else {
-                        return handleManualAlignmentPath(gui, context);
-                    }
+                    // Step 2: Check for existing slide-specific alignment
+                    return checkForSlideSpecificAlignment(gui, sample)
+                            .thenCompose(slideAlignment -> {
+                                if (slideAlignment != null) {
+                                    // Fast path: Use existing slide alignment
+                                    return handleExistingSlideAlignment(gui, sample, slideAlignment);
+                                } else {
+                                    // Normal path: Continue with alignment selection
+                                    return continueWithAlignmentSelection(gui, sample);
+                                }
+                            });
                 })
                 .exceptionally(ex -> {
                     logger.error("Workflow failed", ex);
@@ -106,6 +104,125 @@ public class ExistingImageWorkflow {
                                     "Error")
                     );
                     return null;
+                });
+    }
+
+    /**
+     * Check if there's an existing slide-specific alignment and ask user if they want to use it
+     */
+    private static CompletableFuture<AffineTransform> checkForSlideSpecificAlignment(
+            QuPathGUI gui, SampleSetupController.SampleSetupResult sample) {
+
+        CompletableFuture<AffineTransform> future = new CompletableFuture<>();
+
+        // Try to load slide-specific alignment
+        AffineTransform slideTransform;
+
+        Project<BufferedImage> project = gui.getProject();
+        if (project != null) {
+            // Project is already open
+            slideTransform = AffineTransformManager.loadSlideAlignment(project, sample.sampleName());
+        } else {
+            // No project yet, check if one would exist
+            File projectDir = new File(sample.projectsFolder(), sample.sampleName());
+            if (projectDir.exists()) {
+                slideTransform = AffineTransformManager.loadSlideAlignmentFromDirectory(projectDir, sample.sampleName());
+            } else {
+                slideTransform = null;
+            }
+        }
+
+        if (slideTransform != null) {
+            Platform.runLater(() -> {
+                Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
+                alert.setTitle("Existing Slide Alignment Found");
+                alert.setHeaderText("Found existing alignment for slide '" + sample.sampleName() + "'");
+                alert.setContentText("Would you like to use the existing slide alignment?\n\n" +
+                        "Choose 'Yes' to proceed directly to acquisition.\n" +
+                        "Choose 'No' to create a new alignment.");
+
+                ButtonType yesButton = new ButtonType("Yes", ButtonBar.ButtonData.YES);
+                ButtonType noButton = new ButtonType("No", ButtonBar.ButtonData.NO);
+                alert.getButtonTypes().setAll(yesButton, noButton);
+
+                Optional<ButtonType> result = alert.showAndWait();
+                if (result.isPresent() && result.get() == yesButton) {
+                    logger.info("User chose to use existing slide alignment");
+                    future.complete(slideTransform);
+                } else {
+                    logger.info("User chose to create new alignment");
+                    future.complete(null);
+                }
+            });
+        } else {
+            future.complete(null);
+        }
+
+        return future;
+    }
+
+    /**
+     * Fast path when using existing slide alignment
+     */
+    private static CompletableFuture<Void> handleExistingSlideAlignment(
+            QuPathGUI gui,
+            SampleSetupController.SampleSetupResult sample,
+            AffineTransform slideTransform) {
+
+        logger.info("Using existing slide-specific alignment");
+
+        // Set the transform
+        MicroscopeController.getInstance().setCurrentTransform(slideTransform);
+
+        // Setup or get project
+        return setupProject(gui, sample)
+                .thenCompose(projectInfo -> {
+                    if (projectInfo == null) {
+                        return CompletableFuture.completedFuture(null);
+                    }
+
+                    // Get macro pixel size from preferences
+                    String macroPixelSizeStr = PersistentPreferences.getMacroImagePixelSizeInMicrons();
+                    double macroPixelSize = 80.0; // default
+                    try {
+                        macroPixelSize = Double.parseDouble(macroPixelSizeStr);
+                    } catch (NumberFormatException e) {
+                        logger.warn("Invalid macro pixel size in preferences, using default: {}", macroPixelSize);
+                    }
+
+                    // Create or validate annotations
+                    List<PathObject> annotations = ensureAnnotationsExist(gui, macroPixelSize);
+                    if (annotations.isEmpty()) {
+                        return CompletableFuture.completedFuture(null);
+                    }
+
+                    // Proceed directly to acquisition
+                    return continueToAcquisition(gui, sample, projectInfo,
+                            annotations, macroPixelSize, slideTransform);
+                });
+    }
+
+    /**
+     * Normal path with alignment selection
+     */
+    private static CompletableFuture<Void> continueWithAlignmentSelection(
+            QuPathGUI gui, SampleSetupController.SampleSetupResult sample) {
+
+        // Continue with normal alignment selection dialog
+        return AlignmentSelectionController.showDialog(gui, sample.modality())
+                .thenApply(alignment -> alignment != null ? new WorkflowContext(sample, alignment) : null)
+                .thenCompose(context -> {
+                    if (context == null) {
+                        logger.info("Workflow cancelled");
+                        return CompletableFuture.completedFuture(null);
+                    }
+
+                    // Path-specific handling
+                    if (context.alignment.useExistingAlignment()) {
+                        return handleExistingAlignmentPath(gui, context);
+                    } else {
+                        return handleManualAlignmentPath(gui, context);
+                    }
                 });
     }
 
@@ -308,14 +425,13 @@ public class ExistingImageWorkflow {
     private static CompletableFuture<Void> processExistingAlignment(
             QuPathGUI gui, AlignmentContext alignContext, ProjectInfo projectInfo) {
 
-
         Project<BufferedImage> project = (Project<BufferedImage>) projectInfo.details.get("currentQuPathProject");
 
         // Get the base transform
         AffineTransform baseTransform = alignContext.context.alignment.selectedTransform().getTransform();
 
-        // Get or create annotations first (we need them regardless of which path we take)
-        List<PathObject> annotations = collectOrCreateAnnotations(gui, alignContext.pixelSize);
+        // Get or create annotations first
+        List<PathObject> annotations = ensureAnnotationsExist(gui, alignContext.pixelSize);
 
         if (annotations.isEmpty()) {
             logger.warn("No annotations available");
@@ -349,15 +465,6 @@ public class ExistingImageWorkflow {
                     // Use the existing slide alignment
                     MicroscopeController.getInstance().setCurrentTransform(slideTransform);
                     logger.info("Using existing slide-specific alignment");
-
-                    // Create tiles for all annotations
-                    String tempTileDir = (String) projectInfo.details.get("tempTileDirectory");
-                    String modeWithIndex = (String) projectInfo.details.get("imagingModeWithIndex");
-                    boolean invertedX = QPPreferenceDialog.getInvertedXProperty();
-                    boolean invertedY = QPPreferenceDialog.getInvertedYProperty();
-
-                    createTilesForAnnotations(annotations, alignContext.context.sample, tempTileDir,
-                            modeWithIndex, alignContext.pixelSize, invertedX, invertedY);
 
                     // Skip refinement and continue directly to acquisition
                     return continueToAcquisition(gui, alignContext.context.sample, projectInfo,
@@ -416,6 +523,7 @@ public class ExistingImageWorkflow {
                     annotations, alignContext.pixelSize, baseTransform);
         }
     }
+
     /**
      * Process manual alignment workflow
      */
@@ -423,14 +531,14 @@ public class ExistingImageWorkflow {
             QuPathGUI gui, ManualAlignmentContext context) {
 
         // Get or create annotations
-        List<PathObject> annotations = collectOrCreateAnnotations(gui, context.pixelSize);
+        List<PathObject> annotations = ensureAnnotationsExist(gui, context.pixelSize);
 
         if (annotations.isEmpty()) {
             logger.warn("No annotations available for manual workflow");
             return CompletableFuture.completedFuture(null);
         }
 
-        // Create tiles
+        // Create initial tiles for alignment
         String tempTileDir = (String) context.projectInfo.details.get("tempTileDirectory");
         String modeWithIndex = (String) context.projectInfo.details.get("imagingModeWithIndex");
         boolean invertedX = QPPreferenceDialog.getInvertedXProperty();
@@ -458,20 +566,18 @@ public class ExistingImageWorkflow {
     }
 
     /**
-     * Collect existing annotations or create new ones via tissue detection
+     * Ensure annotations exist - either collect existing or create new ones
+     * Always returns current valid annotations with names
      */
-    private static List<PathObject> collectOrCreateAnnotations(
+    private static List<PathObject> ensureAnnotationsExist(
             QuPathGUI gui, double macroPixelSize) {
 
         // Get existing annotations
-        List<PathObject> annotations = QP.getAnnotationObjects().stream()
-                .filter(ann -> ann.getROI() != null && !ann.getROI().isEmpty())
-                .filter(ann -> ann.getPathClass() != null &&
-                        Arrays.asList(VALID_ANNOTATION_CLASSES).contains(ann.getPathClass().getName()))
-                .collect(Collectors.toList());
+        List<PathObject> annotations = getCurrentValidAnnotations();
 
         if (!annotations.isEmpty()) {
             logger.info("Found {} existing annotations", annotations.size());
+            ensureAnnotationNames(annotations);
             return annotations;
         }
 
@@ -493,11 +599,7 @@ public class ExistingImageWorkflow {
                 logger.info("Tissue detection completed");
 
                 // Re-collect annotations
-                annotations = QP.getAnnotationObjects().stream()
-                        .filter(ann -> ann.getROI() != null && !ann.getROI().isEmpty())
-                        .filter(ann -> ann.getPathClass() != null &&
-                                Arrays.asList(VALID_ANNOTATION_CLASSES).contains(ann.getPathClass().getName()))
-                        .collect(Collectors.toList());
+                annotations = getCurrentValidAnnotations();
 
             } catch (Exception e) {
                 logger.error("Error running tissue detection", e);
@@ -511,9 +613,49 @@ public class ExistingImageWorkflow {
                                     String.join(", ", VALID_ANNOTATION_CLASSES),
                             "No Annotations")
             );
+        } else {
+            ensureAnnotationNames(annotations);
         }
 
         return annotations;
+    }
+
+    /**
+     * Get current valid annotations from the image
+     */
+    private static List<PathObject> getCurrentValidAnnotations() {
+        return QP.getAnnotationObjects().stream()
+                .filter(ann -> ann.getROI() != null && !ann.getROI().isEmpty())
+                .filter(ann -> ann.getPathClass() != null &&
+                        Arrays.asList(VALID_ANNOTATION_CLASSES).contains(ann.getPathClass().getName()))
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Ensure all annotations have names (auto-generate if needed)
+     */
+    private static void ensureAnnotationNames(List<PathObject> annotations) {
+        int unnamedCount = 0;
+        for (PathObject ann : annotations) {
+            if (ann.getName() == null || ann.getName().trim().isEmpty()) {
+                String className = ann.getPathClass() != null ?
+                        ann.getPathClass().getName() : "Annotation";
+
+                // Create a unique name based on position
+                String name = String.format("%s_%d_%d",
+                        className,
+                        Math.round(ann.getROI().getCentroidX()),
+                        Math.round(ann.getROI().getCentroidY()));
+
+                ann.setName(name);
+                logger.info("Auto-named annotation: {}", ann.getName());
+                unnamedCount++;
+            }
+        }
+
+        if (unnamedCount > 0) {
+            logger.info("Auto-named {} annotations", unnamedCount);
+        }
     }
 
     /**
@@ -675,21 +817,12 @@ public class ExistingImageWorkflow {
                 if (refined) {
                     double[] refinedStageCoords = MicroscopeController.getInstance().getStagePositionXY();
 
-                    // Calculate the offset in stage coordinates
+                    // Calculate the refined transform using macro coordinates
                     AffineTransform refinedTransform = TransformationFunctions.addTranslationToScaledAffine(
                             initialTransform, macroCoords, refinedStageCoords
                     );
                     logger.info("Refined transform: {}", refinedTransform);
-//                    double stageOffsetX = refinedStageCoords[0] - stageCoords[0];
-//                    double stageOffsetY = refinedStageCoords[1] - stageCoords[1];
-//
-//                    logger.info("Stage offset: ({}, {})", stageOffsetX, stageOffsetY);
-//
-//                    // Create refined transform by adding the offset
-//                    AffineTransform refinedTransform = new AffineTransform(initialTransform);
-//                    refinedTransform.translate(stageOffsetX, stageOffsetY);
-//
-//                    logger.info("Refined transform: {}", refinedTransform);
+
                     // Save the slide-specific alignment
                     Project<BufferedImage> project = (Project<BufferedImage>) projectInfo.details.get("currentQuPathProject");
                     AffineTransformManager.saveSlideAlignment(
@@ -810,13 +943,83 @@ public class ExistingImageWorkflow {
                     .thenCompose(rotationAngles -> {
                         logger.info("Rotation angles: {}", rotationAngles);
 
+                        // IMPORTANT: Regenerate tiles for current annotations before acquisition
+                        String tempTileDir = (String) projectInfo.details.get("tempTileDirectory");
+                        String modeWithIndex = (String) projectInfo.details.get("imagingModeWithIndex");
+
+                        List<PathObject> currentAnnotations = ensureAnnotationsReadyForAcquisition(
+                                gui, sample, tempTileDir, modeWithIndex, macroPixelSize);
+
+                        if (currentAnnotations.isEmpty()) {
+                            logger.warn("No annotations available for acquisition after tile regeneration");
+                            return CompletableFuture.completedFuture(null);
+                        }
+
                         // Process annotations
                         return processAnnotationsForAcquisition(
-                                gui, sample, projectInfo, annotations,
+                                gui, sample, projectInfo, currentAnnotations,
                                 macroPixelSize, transform, rotationAngles, rotationManager
                         );
                     });
         });
+    }
+
+    /**
+     * Ensure annotations are ready for acquisition - regenerate tiles for current state
+     */
+    private static List<PathObject> ensureAnnotationsReadyForAcquisition(
+            QuPathGUI gui,
+            SampleSetupController.SampleSetupResult sample,
+            String tempTileDirectory,
+            String modeWithIndex,
+            double macroPixelSize) {
+
+        logger.info("Preparing annotations for acquisition...");
+
+        // Get current valid annotations
+        List<PathObject> currentAnnotations = getCurrentValidAnnotations();
+
+        if (currentAnnotations.isEmpty()) {
+            logger.warn("No valid annotations found for acquisition");
+            return currentAnnotations;
+        }
+
+        // Ensure all have names
+        ensureAnnotationNames(currentAnnotations);
+
+        // Delete ALL existing tiles to avoid duplicates
+        deleteAllTiles(gui, sample.modality());
+
+        // Get settings
+        boolean invertedX = QPPreferenceDialog.getInvertedXProperty();
+        boolean invertedY = QPPreferenceDialog.getInvertedYProperty();
+
+        // Create fresh tiles for all current annotations
+        createTilesForAnnotations(currentAnnotations, sample, tempTileDirectory,
+                modeWithIndex, macroPixelSize, invertedX, invertedY);
+
+        logger.info("Created tiles for {} annotations", currentAnnotations.size());
+
+        return currentAnnotations;
+    }
+
+    /**
+     * Delete all tiles for a given modality
+     */
+    private static void deleteAllTiles(QuPathGUI gui, String modality) {
+        String modalityBase = modality.replaceAll("(_\\d+)$", "");
+
+        List<PathObject> tilesToRemove = gui.getViewer().getHierarchy().getDetectionObjects().stream()
+                .filter(o -> o.getPathClass() != null &&
+                        o.getPathClass().toString().contains(modalityBase))
+                .collect(Collectors.toList());
+
+        if (!tilesToRemove.isEmpty()) {
+            tilesToRemove.forEach(tile ->
+                    gui.getViewer().getHierarchy().removeObject(tile, false));
+            gui.getViewer().getHierarchy().fireHierarchyChangedEvent(gui.getViewer());
+            logger.info("Removed {} existing tiles for modality: {}", tilesToRemove.size(), modalityBase);
+        }
     }
 
     /**
@@ -842,8 +1045,26 @@ public class ExistingImageWorkflow {
         @SuppressWarnings("unchecked")
         Project<BufferedImage> project = (Project<BufferedImage>) projectInfo.details.get("currentQuPathProject");
 
+        // Get current annotations right before acquisition (one more time to be safe)
+        List<PathObject> currentAnnotations = getCurrentValidAnnotations();
+
+        if (currentAnnotations.isEmpty()) {
+            logger.warn("No valid annotations available for acquisition");
+            Platform.runLater(() -> {
+                Alert alert = new Alert(Alert.AlertType.WARNING);
+                alert.setTitle("No Annotations");
+                alert.setHeaderText("No annotations available for acquisition");
+                alert.setContentText("No annotations with valid classes found. Please create annotations with one of these classes:\n" +
+                        String.join(", ", VALID_ANNOTATION_CLASSES));
+                alert.showAndWait();
+            });
+            return CompletableFuture.completedFuture(null);
+        }
+
+        logger.info("Found {} valid annotations for acquisition", currentAnnotations.size());
+
         // Process each annotation
-        List<CompletableFuture<Void>> acquisitionFutures = annotations.stream()
+        List<CompletableFuture<Void>> acquisitionFutures = currentAnnotations.stream()
                 .map(annotation -> processAnnotation(
                         annotation, sample, projectsFolder, modeWithIndex,
                         configFile, rotationAngles, rotationManager, pixelSize,
@@ -898,7 +1119,7 @@ public class ExistingImageWorkflow {
         // Launch acquisition
         return CompletableFuture.supplyAsync(() -> {
             try {
-                List<String> cliArgs = new ArrayList<>(List.of(
+                List<String> cliArgs = new ArrayList<>(Arrays.asList(
                         res.getString("command.acquisitionWorkflow"),
                         configFile,
                         projectsFolder,
@@ -929,7 +1150,14 @@ public class ExistingImageWorkflow {
                 );
 
                 if (result.exitCode() != 0) {
-                    throw new RuntimeException("Acquisition failed with exit code " + result.exitCode());
+                    String errorDetails = String.valueOf(result.stderr());
+                    if (errorDetails == null || errorDetails.trim().isEmpty()) {
+                        errorDetails = "No error details available from acquisition script";
+                    }
+                    logger.error("Acquisition failed with exit code {} for annotation '{}'. Error: {}",
+                            result.exitCode(), annotationName, errorDetails);
+                    throw new RuntimeException("Acquisition failed for " + annotationName +
+                            " with exit code " + result.exitCode() + ":\n" + errorDetails);
                 }
 
                 logger.info("Acquisition completed for {}", annotationName);
@@ -937,9 +1165,23 @@ public class ExistingImageWorkflow {
 
             } catch (Exception e) {
                 logger.error("Acquisition failed for {}", annotationName, e);
+                String errorMessage = e.getMessage();
+                if (errorMessage == null || errorMessage.isEmpty()) {
+                    errorMessage = "Unknown error during acquisition";
+                }
+
+                // Extract just the meaningful part of the error if it's wrapped
+                if (errorMessage.contains(":\n")) {
+                    String[] parts = errorMessage.split(":\n", 2);
+                    if (parts.length > 1) {
+                        errorMessage = parts[1].trim();
+                    }
+                }
+
+                final String finalErrorMessage = errorMessage;
                 Platform.runLater(() ->
                         UIFunctions.notifyUserOfError(
-                                "Acquisition failed for " + annotationName + ": " + e.getMessage(),
+                                "Acquisition failed for " + annotationName + ":\n\n" + finalErrorMessage,
                                 "Acquisition Error"
                         )
                 );
