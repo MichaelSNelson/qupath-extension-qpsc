@@ -371,9 +371,17 @@ public class MacroImageController {
                 if (macroImage != null) {
                     logger.info("Successfully retrieved macro image: {}x{}",
                             macroImage.getWidth(), macroImage.getHeight());
+                    //Crop the macro image to just the slide area
+                    MacroImageUtility.CroppedMacroResult croppedResult = MacroImageUtility.cropToSlideArea(macroImage);
+                    BufferedImage croppedMacroImage = croppedResult.getCroppedImage();
+
+                    logger.info("Successfully retrieved macro image: {}x{}", macroImage.getWidth(), macroImage.getHeight());
+                    logger.info("Cropped to slide area: {}x{} (offset: {}, {})",
+                            croppedMacroImage.getWidth(), croppedMacroImage.getHeight(),
+                            croppedResult.getCropOffsetX(), croppedResult.getCropOffsetY());
 
                     // First, always show the original macro image
-                    Image originalImage = SwingFXUtils.toFXImage(macroImage, null);
+                    Image originalImage = SwingFXUtils.toFXImage(croppedMacroImage, null);
                     previewImage.setImage(originalImage);
 
                     // Create detection parameters from current spinner values
@@ -387,7 +395,7 @@ public class MacroImageController {
                     params.minBoxHeight = minHeightSpinner.getValue();
 
                     // Run detection
-                    var result = GreenBoxDetector.detectGreenBox(macroImage, params);
+                    var result = GreenBoxDetector.detectGreenBox(croppedMacroImage, params);
 
                     if (result != null) {
                         // Now update with the debug image showing the detection

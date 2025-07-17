@@ -219,7 +219,7 @@ public class MicroscopeController {
     // These two functions form a base for that.
     public void onMoveButtonClicked(PathObject tile) {
         // 1) compute stageCoords from QuPath coords
-        double[] stageCoords = TransformationFunctions.qpToMicroscopeCoordinates(
+        double[] stageCoords = TransformationFunctions.transformQuPathFullResToStage(
                 new double[]{tile.getROI().getCentroidX(), tile.getROI().getCentroidY()},
                 currentTransform
         );
@@ -253,7 +253,7 @@ public class MicroscopeController {
         logger.info("Moving to QuPath coords: " + qpCoords);
 
         // 2) transform into stage coords
-        double [] stageCoords = TransformationFunctions.qpToMicroscopeCoordinates(qpCoords, currentTransform);
+        double [] stageCoords = TransformationFunctions.transformQuPathFullResToStage(qpCoords, currentTransform);
 
 //        // 3) account for any offset (if you store one) TODO remove
 //        double[] offset = getCurrentOffset();

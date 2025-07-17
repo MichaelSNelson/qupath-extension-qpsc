@@ -905,7 +905,7 @@ public class ExistingImageWorkflow {
                     logger.error("Cannot apply flips without macro dimensions! Proceeding without flips.");
                 }
                 // Transform to stage coordinates using initial transform
-                double[] stageCoords = TransformationFunctions.qpToMicroscopeCoordinates(
+                double[] stageCoords = TransformationFunctions.transformQuPathFullResToStage(
                         macroCoords, initialTransform
                 );
 

@@ -121,7 +121,7 @@ public class TestWorkflow {
                 results.append(formatTransform("  General (macro→stage)", generalTransform));
 
                 // Test the transform with macro coordinates
-                double[] stageFromMacro = TransformationFunctions.qpToMicroscopeCoordinates(
+                double[] stageFromMacro = TransformationFunctions.transformQuPathFullResToStage(
                         testPointMacro, generalTransform);
                 results.append(String.format("  Macro center → Stage: (%.2f, %.2f) µm\n",
                         stageFromMacro[0], stageFromMacro[1]));
@@ -143,13 +143,13 @@ public class TestWorkflow {
                     results.append(formatTransform("  Slide (?→stage)", slideTransform));
 
                     // Test with full-res coordinates
-                    double[] stageFromFullRes = TransformationFunctions.qpToMicroscopeCoordinates(
+                    double[] stageFromFullRes = TransformationFunctions.transformQuPathFullResToStage(
                             testPointFullRes, slideTransform);
                     results.append(String.format("  Full-res center → Stage: (%.2f, %.2f) µm\n",
                             stageFromFullRes[0], stageFromFullRes[1]));
 
                     // Test with macro coordinates (to see if it's expecting macro)
-                    double[] stageFromMacroViaSlide = TransformationFunctions.qpToMicroscopeCoordinates(
+                    double[] stageFromMacroViaSlide = TransformationFunctions.transformQuPathFullResToStage(
                             testPointMacro, slideTransform);
                     results.append(String.format("  Macro center → Stage (via slide): (%.2f, %.2f) µm\n",
                             stageFromMacroViaSlide[0], stageFromMacroViaSlide[1]));
@@ -216,7 +216,7 @@ public class TestWorkflow {
 
             // If we have transforms, test them
             if (generalTransform != null) {
-                double[] stageFromProblem = TransformationFunctions.qpToMicroscopeCoordinates(
+                double[] stageFromProblem = TransformationFunctions.transformQuPathFullResToStage(
                         problemMacro, generalTransform);
                 results.append(String.format("  → Stage (via general): (%.2f, %.2f) µm\n",
                         stageFromProblem[0], stageFromProblem[1]));
@@ -230,7 +230,7 @@ public class TestWorkflow {
                 results.append(formatTransform("  Current", currentTransform));
 
                 // Test with problem coordinates as if they're what the transform expects
-                double[] directTest = TransformationFunctions.qpToMicroscopeCoordinates(
+                double[] directTest = TransformationFunctions.transformQuPathFullResToStage(
                         problemCoords, currentTransform);
                 results.append(String.format("  Problem coords → Stage (direct): (%.2f, %.2f) µm\n",
                         directTest[0], directTest[1]));

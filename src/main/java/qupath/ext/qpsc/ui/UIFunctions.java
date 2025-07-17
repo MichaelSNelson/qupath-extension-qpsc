@@ -4,10 +4,7 @@ import javafx.animation.KeyFrame;
 import javafx.animation.PauseTransition;
 import javafx.animation.Timeline;
 import javafx.application.Platform;
-import javafx.beans.binding.Bindings;
-import javafx.collections.FXCollections;
-import javafx.collections.ObservableList;
-import javafx.event.ActionEvent;
+
 import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.Scene;
@@ -22,27 +19,18 @@ import javafx.scene.layout.VBox;
 import javafx.stage.DirectoryChooser;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
-import javafx.stage.Window;
+
 import javafx.util.Duration;
 import javafx.scene.paint.Color;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import qupath.ext.qpsc.controller.MicroscopeController;
-import qupath.ext.qpsc.preferences.QPPreferenceDialog;
-import qupath.ext.qpsc.utilities.MicroscopeConfigManager;
-import qupath.ext.qpsc.utilities.MinorFunctions;
-import qupath.ext.qpsc.utilities.TransformationFunctions;
-import qupath.ext.qpsc.utilities.UtilityFunctions;
-import qupath.lib.gui.QuPathGUI;
-import qupath.lib.gui.scripting.QPEx;
+
 import qupath.lib.objects.PathObject;
 import qupath.lib.scripting.QP;
 
 import javafx.geometry.Insets;
-import java.awt.geom.AffineTransform;
-import java.io.File;
-import java.io.IOException;
+
 import java.util.*;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -53,6 +41,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
+import javafx.scene.control.Separator;
+
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * UIFunctions
@@ -284,23 +276,106 @@ public class UIFunctions {
     }
 
 
+//    /**
+//     * Confirmation dialog for current stage position accuracy.
+//     */
+//    public static boolean stageToQuPathAlignmentGUI2() {
+//        Dialog<Boolean> dlg = new Dialog<>();
+//        dlg.initModality(Modality.NONE);
+//        dlg.setTitle("Position Confirmation");
+//        dlg.setHeaderText(
+//                "Is the current position accurate?\nCompare with the uManager live view.");
+//        ButtonType ok = new ButtonType("Current Position is Accurate", ButtonBar.ButtonData.OK_DONE);
+//        ButtonType cancel = new ButtonType("Cancel acquisition", ButtonBar.ButtonData.CANCEL_CLOSE);
+//        dlg.getDialogPane().getButtonTypes().addAll(ok, cancel);
+//
+//        dlg.setResultConverter(btn -> btn == ok);
+//        return dlg.showAndWait().orElse(false);
+//    }
     /**
      * Confirmation dialog for current stage position accuracy.
+     * Uses a custom Stage with alwaysOnTop to ensure visibility while remaining non-modal.
+     *
+     * Location: UIFunctions.java - stageToQuPathAlignmentGUI2() method
+     *
+     * @return true if user confirms position is accurate, false otherwise
      */
     public static boolean stageToQuPathAlignmentGUI2() {
-        Dialog<Boolean> dlg = new Dialog<>();
-        dlg.initModality(Modality.NONE);
-        dlg.setTitle("Position Confirmation");
-        dlg.setHeaderText(
-                "Is the current position accurate?\nCompare with the uManager live view.");
-        ButtonType ok = new ButtonType("Current Position is Accurate", ButtonBar.ButtonData.OK_DONE);
-        ButtonType cancel = new ButtonType("Cancel acquisition", ButtonBar.ButtonData.CANCEL_CLOSE);
-        dlg.getDialogPane().getButtonTypes().addAll(ok, cancel);
+        // Use AtomicBoolean for thread-safe result storage
+        AtomicBoolean result = new AtomicBoolean(false);
+        CountDownLatch latch = new CountDownLatch(1);
 
-        dlg.setResultConverter(btn -> btn == ok);
-        return dlg.showAndWait().orElse(false);
+        Platform.runLater(() -> {
+            try {
+                Stage stage = new Stage();
+                stage.initModality(Modality.NONE);
+                stage.setTitle("Position Confirmation");
+                stage.setAlwaysOnTop(true);
+
+                // Create layout
+                VBox layout = new VBox(10);
+                layout.setPadding(new Insets(20));
+                layout.setAlignment(Pos.CENTER);
+
+                Label headerLabel = new Label("Is the current position accurate?");
+                headerLabel.setStyle("-fx-font-weight: bold; -fx-font-size: 14px;");
+
+                Label instructionLabel = new Label("Compare with the uManager live view.");
+
+                HBox buttonBox = new HBox(10);
+                buttonBox.setAlignment(Pos.CENTER);
+
+                Button confirmButton = new Button("Current Position is Accurate");
+                confirmButton.setDefaultButton(true);
+                confirmButton.setOnAction(e -> {
+                    result.set(true);
+                    stage.close();
+                    latch.countDown();
+                });
+
+                Button cancelButton = new Button("Cancel acquisition");
+                cancelButton.setCancelButton(true);
+                cancelButton.setOnAction(e -> {
+                    result.set(false);
+                    stage.close();
+                    latch.countDown();
+                });
+
+                buttonBox.getChildren().addAll(confirmButton, cancelButton);
+                layout.getChildren().addAll(headerLabel, instructionLabel, new Separator(), buttonBox);
+
+                Scene scene = new Scene(layout, 350, 150);
+                stage.setScene(scene);
+
+                // Handle window close button
+                stage.setOnCloseRequest(e -> {
+                    result.set(false);
+                    latch.countDown();
+                });
+
+                // Position and show
+                stage.centerOnScreen();
+                stage.show();
+                stage.toFront();
+                stage.requestFocus();
+
+                logger.debug("Position confirmation dialog displayed with alwaysOnTop=true");
+
+            } catch (Exception e) {
+                logger.error("Error creating position confirmation dialog", e);
+                latch.countDown();
+            }
+        });
+
+        try {
+            latch.await();
+            return result.get();
+        } catch (InterruptedException e) {
+            logger.error("Interrupted while waiting for position confirmation", e);
+            Thread.currentThread().interrupt();
+            return false;
+        }
     }
-
 
     /** Pops up a modal warning dialog. */
     public static void showAlertDialog(String message) {

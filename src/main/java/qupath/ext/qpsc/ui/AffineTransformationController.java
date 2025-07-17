@@ -128,7 +128,8 @@ public class AffineTransformationController {
                                         logger.info("Secondary alignment: moving to refinement tile '{}'", tile.getName());
 
                                         double[] tileCoords = {tile.getROI().getCentroidX(), tile.getROI().getCentroidY()};
-                                        double[] stageCoords = TransformationFunctions.qpToMicroscopeCoordinates(tileCoords, currentTransform);
+                                        double[] stageCoords = TransformationFunctions.transformQuPathFullResToStage(tileCoords, currentTransform);
+
 
                                         MicroscopeController.getInstance().moveStageXY(stageCoords[0], stageCoords[1]);
 

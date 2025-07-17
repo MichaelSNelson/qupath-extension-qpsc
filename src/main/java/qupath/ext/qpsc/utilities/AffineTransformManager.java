@@ -302,7 +302,7 @@ public class AffineTransformManager {
         };
 
         for (double[] point : testPoints) {
-            double[] transformed = TransformationFunctions.qpToMicroscopeCoordinates(
+            double[] transformed = TransformationFunctions.transformQuPathFullResToStage(
                     point, transform);
 
             if (transformed[0] < stageXMin || transformed[0] > stageXMax ||
