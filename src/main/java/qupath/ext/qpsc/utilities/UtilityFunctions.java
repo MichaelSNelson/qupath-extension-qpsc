@@ -62,37 +62,44 @@ public class UtilityFunctions {
             String sampleLabel,
             String imagingModeWithIndex,
             String annotationName,
+            String matchingString,  // NEW PARAMETER
             QuPathGUI qupathGUI,
             Project<BufferedImage> project,
             String compression,
             double pixelSizeMicrons,
             int downsample) throws IOException {
 
-        // 1) Construct folder paths
-        String tileFolder    = projectsFolderPath + File.separator
+        // Construct folder paths
+        String tileFolder = projectsFolderPath + File.separator
                 + sampleLabel + File.separator
-                + imagingModeWithIndex;
+                + imagingModeWithIndex + File.separator + annotationName;
         String stitchedFolder = projectsFolderPath + File.separator
                 + sampleLabel + File.separator
                 + "SlideImages";
 
         logger.info("Stitching tiles in '{}' → output in '{}'", tileFolder, stitchedFolder);
+        logger.info("Using matching string: '{}'", matchingString);
 
-        // 2) Run the core stitching routine
-        // The annotationName here is used as the "matching string" filter (like before).
+        // Run the core stitching routine with the explicit matching string
         StitchingConfig config = new StitchingConfig(
-                "Coordinates in TileConfiguration.txt file", // stitchingType
-                tileFolder,          // folderPath (tile input root)
-                stitchedFolder,      // outputPath (where OME-TIFF is saved)
-                compression,         // compressionType
-                pixelSizeMicrons,    // pixel size (microns)
-                downsample,          // downsample factor
-                annotationName,      // matching string for subfolder/file filtering
-                1.0                  // zSpacingMicrons (can be set as needed)
+                "Coordinates in TileConfiguration.txt file",
+                tileFolder,
+                stitchedFolder,
+                compression,
+                pixelSizeMicrons,
+                downsample,
+                matchingString,  // Use the provided matching string
+                1.0
         );
+
         String outPath = StitchingWorkflow.run(config);
-        //TODO clean up if not needed
-        logger.info("Stitching returned path: {}", outPath); // ADD THIS
+        logger.info("Stitching returned path: {}", outPath);
+
+        // Handle null return from stitching
+        if (outPath == null) {
+            throw new IOException("Stitching workflow returned null - no tiles were stitched");
+        }
+
         // Defensive check for extension
         if (outPath.endsWith(".ome") && !outPath.endsWith(".ome.tif")) {
             logger.warn("Stitching returned .ome without .tif, appending .tif extension");
@@ -101,14 +108,23 @@ public class UtilityFunctions {
 
         // 3) Rename according to sample/mode/annotation
         File orig = new File(outPath);
-        String baseName = sampleLabel + "_" + imagingModeWithIndex
-                + (annotationName.equals("bounds") ? "" : "_" + annotationName)
-                + ".ome.tif";
+        // For angle-based stitching, include the matching string (angle) in the filename
+        String baseName;
+        if (!matchingString.equals(annotationName)) {
+            // This is angle-based stitching
+            baseName = sampleLabel + "_" + imagingModeWithIndex + "_" + matchingString + ".ome.tif";
+        } else {
+            // Standard stitching
+            baseName = sampleLabel + "_" + imagingModeWithIndex
+                    + (annotationName.equals("bounds") ? "" : "_" + annotationName)
+                    + ".ome.tif";
+        }
+
         File renamed = new File(orig.getParent(), baseName);
         if (orig.renameTo(renamed)) {
             outPath = renamed.getAbsolutePath();
             logger.info("Renamed stitched file → {}", baseName);
-            logger.info("Full renamed path: {}", outPath); // ADD THIS
+            logger.info("Full renamed path: {}", outPath);
         }
 
         final String finalOut = outPath;  // for use in the lambda below
@@ -156,6 +172,30 @@ public class UtilityFunctions {
         return outPath;
     }
 
+    public static String stitchImagesAndUpdateProject(
+            String projectsFolderPath,
+            String sampleLabel,
+            String imagingModeWithIndex,
+            String annotationName,
+            QuPathGUI qupathGUI,
+            Project<BufferedImage> project,
+            String compression,
+            double pixelSizeMicrons,
+            int downsample) throws IOException {
+        // Call the new method with annotationName as the matching string
+        return stitchImagesAndUpdateProject(
+                projectsFolderPath,
+                sampleLabel,
+                imagingModeWithIndex,
+                annotationName,
+                annotationName,  // Use annotation name as matching string for backward compatibility
+                qupathGUI,
+                project,
+                compression,
+                pixelSizeMicrons,
+                downsample
+        );
+    }
     /**
      * Execute the microscope CLI with the given arguments and return the exit code.
      *
@@ -176,29 +216,6 @@ public class UtilityFunctions {
     }
 
 
-    /**
-     * Executes a command and returns all lines written to stdout.
-     *
-     * @param cmd the executable + its arguments
-     * @return list of stdout lines (never {@code null})
-     */
-    public static List<String> execCommandAndCapture(String... cmd)
-            throws IOException, InterruptedException {
-
-        Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
-        List<String> out = new ArrayList<>();
-        try (BufferedReader r =
-                     new BufferedReader(new InputStreamReader(p.getInputStream()))) {
-            String line;
-            while ((line = r.readLine()) != null)
-                out.add(line);
-        }
-        int exit = p.waitFor();
-        if (exit != 0)
-            throw new IOException("Command " + String.join(" ", cmd) +
-                    " exited with " + exit);
-        return out;
-    }
     // 3) Delete folder + its files
     public static void deleteTilesAndFolder(String folderPath) {
         try {

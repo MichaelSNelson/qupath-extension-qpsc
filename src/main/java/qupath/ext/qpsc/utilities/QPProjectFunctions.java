@@ -144,7 +144,7 @@ public class QPProjectFunctions {
         result.put("currentQuPathProject", project);
         result.put("tempTileDirectory", setup.tempTileDirectory);
 
-        logger.info("Project setup complete. Mode: {}, Tiles dir: {}",
+        logger.info("Project setup complete. Mode: {}, Tile acquisition parent dir: {}",
                 setup.imagingModeWithIndex, setup.tempTileDirectory);
 
         return result;

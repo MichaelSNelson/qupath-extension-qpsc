@@ -18,7 +18,10 @@ import org.slf4j.LoggerFactory;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.stream.Collectors;
@@ -215,7 +218,6 @@ public class BoundingBoxWorkflow {
                                         if (rotationAngles != null && !rotationAngles.isEmpty()) {
                                             // Multiple angles - stitch each separately
                                             for (Double angle : rotationAngles) {
-                                                String angleSuffix = rotationManager.getAngleSuffix(sample.modality(), angle);
                                                 CompletableFuture<Void> stitchFuture = CompletableFuture.runAsync(() -> {
                                                     try {
                                                         Platform.runLater(() ->
@@ -223,16 +225,24 @@ public class BoundingBoxWorkflow {
                                                                         "Stitching",
                                                                         "Stitching " + sample.sampleName() + " at angle " + angle + "…"));
 
+                                                        String angleFolder = angleToFolder(angle);
+                                                        logger.info("Stitching angle folder: {}", angleFolder);
+
+                                                        // For angle-based stitching, we need to pass:
+                                                        // - The parent folder (PPM_10x_1) as base
+                                                        // - "bounds" as annotation name (gets appended to create tile folder)
+                                                        // - The angle folder name as matching string
                                                         String outPath = UtilityFunctions.stitchImagesAndUpdateProject(
                                                                 projectsFolder,
                                                                 sample.sampleName(),
-                                                                modeWithIndex + angleSuffix,
-                                                                "bounds",
+                                                                modeWithIndex,      // e.g., "PPM_10x_1"
+                                                                boundsMode,         // "bounds"
+                                                                angleFolder,        // e.g., "0.0", "-5.0", "5.0"
                                                                 qupathGUI,
                                                                 project,
                                                                 String.valueOf(QPPreferenceDialog.getCompressionTypeProperty()),
                                                                 pixelSize,
-                                                                1  // downsample
+                                                                1
                                                         );
 
                                                         Platform.runLater(() ->
@@ -241,6 +251,7 @@ public class BoundingBoxWorkflow {
                                                                         "Output: " + outPath));
 
                                                     } catch (Exception e) {
+                                                        logger.error("Stitching failed for angle " + angle, e);
                                                         Platform.runLater(() ->
                                                                 UIFunctions.notifyUserOfError(
                                                                         "Stitching failed for angle " + angle + ":\n" + e.getMessage(),
@@ -248,8 +259,7 @@ public class BoundingBoxWorkflow {
                                                     }
                                                 }, STITCH_EXECUTOR);
                                                 stitchingFutures.add(stitchFuture);
-                                            }
-                                        } else {
+                                            }                                        } else {
                                             // No rotation - single stitch
                                             CompletableFuture<Void> stitchFuture = CompletableFuture.runAsync(() -> {
                                                 try {
@@ -312,5 +322,12 @@ public class BoundingBoxWorkflow {
                                 return null;
                             });
                 });
+    }
+
+    private static String angleToFolder(double angle) {
+//        if (angle == 0.0) return "0";
+//        else if (angle > 0) return String.valueOf((int) angle);
+//        else return String.valueOf((int) angle);
+        return String.valueOf(angle);
     }
 }

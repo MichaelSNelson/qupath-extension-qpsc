@@ -295,87 +295,65 @@ public class UIFunctions {
     /**
      * Confirmation dialog for current stage position accuracy.
      * Uses a custom Stage with alwaysOnTop to ensure visibility while remaining non-modal.
+     * Must be called from the JavaFX Application Thread.
      *
      * Location: UIFunctions.java - stageToQuPathAlignmentGUI2() method
      *
      * @return true if user confirms position is accurate, false otherwise
+     * @throws IllegalStateException if not called from JavaFX thread
      */
     public static boolean stageToQuPathAlignmentGUI2() {
-        // Use AtomicBoolean for thread-safe result storage
+        if (!Platform.isFxApplicationThread()) {
+            throw new IllegalStateException("stageToQuPathAlignmentGUI2 must be called from JavaFX thread");
+        }
+
+        Stage stage = new Stage();
+        stage.initModality(Modality.NONE);
+        stage.setTitle("Position Confirmation");
+        stage.setAlwaysOnTop(true);
+
+        VBox layout = new VBox(10);
+        layout.setPadding(new Insets(20));
+        layout.setAlignment(Pos.CENTER);
+
+        Label headerLabel = new Label("Is the current position accurate?");
+        headerLabel.setStyle("-fx-font-weight: bold; -fx-font-size: 14px;");
+
+        Label instructionLabel = new Label("Compare with the uManager live view.");
+
+        HBox buttonBox = new HBox(10);
+        buttonBox.setAlignment(Pos.CENTER);
+
         AtomicBoolean result = new AtomicBoolean(false);
-        CountDownLatch latch = new CountDownLatch(1);
 
-        Platform.runLater(() -> {
-            try {
-                Stage stage = new Stage();
-                stage.initModality(Modality.NONE);
-                stage.setTitle("Position Confirmation");
-                stage.setAlwaysOnTop(true);
-
-                // Create layout
-                VBox layout = new VBox(10);
-                layout.setPadding(new Insets(20));
-                layout.setAlignment(Pos.CENTER);
-
-                Label headerLabel = new Label("Is the current position accurate?");
-                headerLabel.setStyle("-fx-font-weight: bold; -fx-font-size: 14px;");
-
-                Label instructionLabel = new Label("Compare with the uManager live view.");
-
-                HBox buttonBox = new HBox(10);
-                buttonBox.setAlignment(Pos.CENTER);
-
-                Button confirmButton = new Button("Current Position is Accurate");
-                confirmButton.setDefaultButton(true);
-                confirmButton.setOnAction(e -> {
-                    result.set(true);
-                    stage.close();
-                    latch.countDown();
-                });
-
-                Button cancelButton = new Button("Cancel acquisition");
-                cancelButton.setCancelButton(true);
-                cancelButton.setOnAction(e -> {
-                    result.set(false);
-                    stage.close();
-                    latch.countDown();
-                });
-
-                buttonBox.getChildren().addAll(confirmButton, cancelButton);
-                layout.getChildren().addAll(headerLabel, instructionLabel, new Separator(), buttonBox);
-
-                Scene scene = new Scene(layout, 350, 150);
-                stage.setScene(scene);
-
-                // Handle window close button
-                stage.setOnCloseRequest(e -> {
-                    result.set(false);
-                    latch.countDown();
-                });
-
-                // Position and show
-                stage.centerOnScreen();
-                stage.show();
-                stage.toFront();
-                stage.requestFocus();
-
-                logger.debug("Position confirmation dialog displayed with alwaysOnTop=true");
-
-            } catch (Exception e) {
-                logger.error("Error creating position confirmation dialog", e);
-                latch.countDown();
-            }
+        Button confirmButton = new Button("Current Position is Accurate");
+        confirmButton.setDefaultButton(true);
+        confirmButton.setOnAction(e -> {
+            result.set(true);
+            stage.close();
         });
 
-        try {
-            latch.await();
-            return result.get();
-        } catch (InterruptedException e) {
-            logger.error("Interrupted while waiting for position confirmation", e);
-            Thread.currentThread().interrupt();
-            return false;
-        }
+        Button cancelButton = new Button("Cancel acquisition");
+        cancelButton.setCancelButton(true);
+        cancelButton.setOnAction(e -> {
+            result.set(false);
+            stage.close();
+        });
+
+        buttonBox.getChildren().addAll(confirmButton, cancelButton);
+        layout.getChildren().addAll(headerLabel, instructionLabel, new Separator(), buttonBox);
+
+        Scene scene = new Scene(layout, 350, 150);
+        stage.setScene(scene);
+
+        stage.setOnCloseRequest(e -> result.set(false));
+
+        stage.centerOnScreen();
+        stage.showAndWait();
+
+        return result.get();
     }
+
 
     /** Pops up a modal warning dialog. */
     public static void showAlertDialog(String message) {

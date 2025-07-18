@@ -10,6 +10,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qupath.ext.qpsc.utilities.AffineTransformManager;
 import qupath.ext.qpsc.utilities.MacroImageAnalyzer;
+import qupath.ext.qpsc.utilities.MicroscopeConfigManager;
 import qupath.fx.prefs.controlsfx.PropertyItemBuilder;
 import qupath.lib.gui.QuPathGUI;
 import qupath.lib.gui.prefs.PathPrefs;
@@ -36,6 +37,8 @@ public class QPPreferenceDialog {
     private static final String CATEGORY = ResourceBundle.getBundle("qupath.ext.qpsc.ui.strings").getString("name");
 
     // --- Preference definitions ---
+    private static final StringProperty selectedScannerProperty =
+            PathPrefs.createPersistentPreference("selectedScanner", "Generic");
     private static final StringProperty savedTransformNameProperty  =
             PathPrefs.createPersistentPreference("savedMicroscopeTransform", "");
     private static final BooleanProperty flipMacroXProperty =
@@ -91,6 +94,13 @@ public class QPPreferenceDialog {
                 qupath.getPreferencePane()
                         .getPropertySheet()
                         .getItems();
+        items.add( new PropertyItemBuilder<>(selectedScannerProperty(), String.class)
+                .propertyType(PropertyItemBuilder.PropertyType.CHOICE)
+                .name("Source Scanner")
+                .category(CATEGORY)
+                .description("Select the scanner that created the images you're working with")
+                .choices(getScannerChoices())
+                .build());
 
         items.add(new PropertyItemBuilder<>(savedTransformNameProperty , String.class)
                 .propertyType(PropertyItemBuilder.PropertyType.CHOICE)
@@ -192,7 +202,17 @@ public class QPPreferenceDialog {
     public static String getSavedTransformName() {
         return savedTransformNameProperty.get();
     }
+    public static String getSelectedScannerProperty() {
+        return selectedScannerProperty.get();
+    }
 
+    public static void setSelectedScannerProperty(String scanner) {
+        selectedScannerProperty.set(scanner);
+    }
+
+    public static StringProperty selectedScannerProperty() {
+        return selectedScannerProperty;
+    }
     public static String getMicroscopeConfigFileProperty() {
         return microscopeConfigFileProperty.get();
     }
@@ -217,9 +237,35 @@ public class QPPreferenceDialog {
     public static String getCliFolder() {
         return cliFolderProperty.getValue();
     }
+    //TODO should this be here?
+
+    private static ObservableList<String> getScannerChoices() {
+        List<String> choices = new ArrayList<>();
+
+        try {
+            MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(
+                    microscopeConfigFileProperty.get()
+            );
+            List<String> availableScanners = mgr.getAvailableScanners();
+
+            if (!availableScanners.isEmpty()) {
+                choices.addAll(availableScanners);
+            } else {
+                logger.warn("No scanners found in configuration, using Generic only");
+                choices.add("Generic");
+            }
+        } catch (Exception e) {
+            logger.error("Error loading scanner choices", e);
+            choices.add("Generic");
+        }
+
+        return FXCollections.observableArrayList(choices);
+    }
+
     public static void setSavedTransformName(String name) {
         savedTransformNameProperty.set(name);
     }
+
     private static List<String> getAvailableTransforms() {
         List<String> transforms = new ArrayList<>();
         transforms.add(""); // Empty option for no transform

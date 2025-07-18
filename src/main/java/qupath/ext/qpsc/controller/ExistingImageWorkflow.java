@@ -98,12 +98,16 @@ public class ExistingImageWorkflow {
                             });
                 })
                 .exceptionally(ex -> {
-                    logger.error("Workflow failed", ex);
-                    Platform.runLater(() ->
-                            UIFunctions.notifyUserOfError(
-                                    "Workflow failed: " + ex.getMessage(),
-                                    "Error")
-                    );
+                    // Check if this is a cancellation - if so, handle gracefully
+                    if (ex.getCause() instanceof CancellationException) {
+                        logger.info("User cancelled the workflow");
+                        return null;
+                    }
+
+                    logger.error("Alignment workflow failed", ex);
+                    Platform.runLater(() -> UIFunctions.notifyUserOfError(
+                            "Workflow error: " + ex.getMessage(),
+                            "Alignment Error"));
                     return null;
                 });
     }
@@ -246,21 +250,27 @@ public class ExistingImageWorkflow {
         }
 
         // Get macro pixel size
-        return getMacroPixelSize()
-                .thenCompose(pixelSize -> {
-                    if (pixelSize == null) return CompletableFuture.completedFuture(null);
+        double pixelSize;
+        try {
+            pixelSize = MacroImageUtility.getMacroPixelSize();
+        } catch (IllegalStateException e) {
+            UIFunctions.notifyUserOfError(
+                    e.getMessage() + "\n\nThe workflow cannot continue without the macro image pixel size.",
+                    "Configuration Error"
+            );
+            return CompletableFuture.completedFuture(null);
+        }
 
-                    // Show green box preview
-                    BufferedImage macroImage = MacroImageUtility.retrieveMacroImage(gui);
-                    GreenBoxDetector.DetectionParams params = new GreenBoxDetector.DetectionParams();
-                    // Save macro dimensions while we have them
-                    int macroWidth = macroImage != null ? macroImage.getWidth() : 0;
-                    int macroHeight = macroImage != null ? macroImage.getHeight() : 0;
-                    return GreenBoxPreviewController.showPreviewDialog(macroImage, params)
-                            .thenApply(greenBoxResult -> {
-                                if (greenBoxResult == null) return null;
-                                return new AlignmentContext(context, pixelSize, greenBoxResult, macroWidth, macroHeight);
-                            });
+        // Show green box preview
+        BufferedImage macroImage = MacroImageUtility.retrieveMacroImage(gui);
+        GreenBoxDetector.DetectionParams params = new GreenBoxDetector.DetectionParams();
+        // Save macro dimensions while we have them
+        int macroWidth = macroImage != null ? macroImage.getWidth() : 0;
+        int macroHeight = macroImage != null ? macroImage.getHeight() : 0;
+        return GreenBoxPreviewController.showPreviewDialog(macroImage, params)
+                .thenApply(greenBoxResult -> {
+                    if (greenBoxResult == null) return null;
+                    return new AlignmentContext(context, pixelSize, greenBoxResult, macroWidth, macroHeight);
                 })
                 .thenCompose(alignContext -> {
                     if (alignContext == null) return CompletableFuture.completedFuture(null);
@@ -285,16 +295,22 @@ public class ExistingImageWorkflow {
         logger.info("Path B: Manual alignment");
 
         // Get macro pixel size
-        return getMacroPixelSize()
-                .thenCompose(pixelSize -> {
-                    if (pixelSize == null) return CompletableFuture.completedFuture(null);
+        double pixelSize;
+        try {
+            pixelSize = MacroImageUtility.getMacroPixelSize();
+        } catch (IllegalStateException e) {
+            UIFunctions.notifyUserOfError(
+                    e.getMessage() + "\n\nThe workflow cannot continue without the macro image pixel size.",
+                    "Configuration Error"
+            );
+            return CompletableFuture.completedFuture(null);
+        }
 
-                    // Create/setup project
-                    return setupProject(gui, context.sample)
-                            .thenApply(projectInfo -> {
-                                if (projectInfo == null) return null;
-                                return new ManualAlignmentContext(context, pixelSize, projectInfo);
-                            });
+// Create/setup project
+        return setupProject(gui, context.sample)
+                .thenApply(projectInfo -> {
+                    if (projectInfo == null) return null;
+                    return new ManualAlignmentContext(context, pixelSize, projectInfo);
                 })
                 .thenCompose(manualContext -> {
                     if (manualContext == null) return CompletableFuture.completedFuture(null);
@@ -304,44 +320,6 @@ public class ExistingImageWorkflow {
                 });
     }
 
-    /**
-     * Get macro pixel size from user
-     */
-    private static CompletableFuture<Double> getMacroPixelSize() {
-        CompletableFuture<Double> future = new CompletableFuture<>();
-
-        Platform.runLater(() -> {
-            TextInputDialog dialog = new TextInputDialog(
-                    PersistentPreferences.getMacroImagePixelSizeInMicrons()
-            );
-            dialog.setTitle("Macro Image Pixel Size");
-            dialog.setHeaderText("Enter the pixel size for the macro image");
-            dialog.setContentText("Pixel size (microns):");
-            dialog.initModality(Modality.APPLICATION_MODAL);
-
-            Optional<String> result = dialog.showAndWait();
-            if (result.isPresent()) {
-                try {
-                    double pixelSize = Double.parseDouble(result.get());
-                    if (pixelSize <= 0 || pixelSize > 100) {
-                        throw new NumberFormatException("Invalid pixel size");
-                    }
-                    PersistentPreferences.setMacroImagePixelSizeInMicrons(result.get());
-                    future.complete(pixelSize);
-                } catch (NumberFormatException e) {
-                    UIFunctions.notifyUserOfError(
-                            "Please enter a valid pixel size (0-100 microns)",
-                            "Invalid Input"
-                    );
-                    future.complete(null);
-                }
-            } else {
-                future.complete(null);
-            }
-        });
-
-        return future;
-    }
 
     /**
      * Setup project - create new or use existing

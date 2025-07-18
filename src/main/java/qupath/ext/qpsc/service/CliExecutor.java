@@ -245,8 +245,8 @@ public class CliExecutor {
                                             int newCount = tifCounter.incrementAndGet();
                                             lastProgressTime.set(System.currentTimeMillis());
                                             logger.info("NEW TIF DETECTED: {}", p.getFileName());
-                                            logger.info("  - Counter incremented from {} to {}", oldCount, newCount);
-                                            logger.info("  - Total found so far: {}/{}", newCount, expectedFiles);
+                                            //logger.info("  - Counter incremented from {} to {}", oldCount, newCount);
+                                            //logger.info("  - Total found so far: {}/{}", newCount, expectedFiles);
                                         }
                                     }
                                 } else if (checkCount == 1 || checkCount % 40 == 0) {

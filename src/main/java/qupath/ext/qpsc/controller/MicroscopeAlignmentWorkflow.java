@@ -25,6 +25,7 @@ import java.io.File;
 import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.*;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -52,9 +53,6 @@ import java.util.concurrent.CompletableFuture;
  */
 public class MicroscopeAlignmentWorkflow {
     private static final Logger logger = LoggerFactory.getLogger(MicroscopeAlignmentWorkflow.class);
-
-    // Default macro pixel size if not available from metadata
-    private static final double DEFAULT_MACRO_PIXEL_SIZE = 80.0; // microns
 
     // Valid annotation classes for acquisition
     private static final List<String> VALID_ANNOTATION_CLASSES =
@@ -132,6 +130,12 @@ public class MicroscopeAlignmentWorkflow {
                     processAlignmentWithProject(gui, combinedConfig, transformManager);
                 })
                 .exceptionally(ex -> {
+                    // Check if this is a cancellation - if so, handle gracefully
+                    if (ex.getCause() instanceof CancellationException) {
+                        logger.info("User cancelled the workflow");
+                        return null;
+                    }
+
                     logger.error("Alignment workflow failed", ex);
                     Platform.runLater(() -> UIFunctions.notifyUserOfError(
                             "Workflow error: " + ex.getMessage(),
@@ -187,6 +191,11 @@ public class MicroscopeAlignmentWorkflow {
         int originalMacroWidth = originalMacroImage.getWidth();
         int originalMacroHeight = originalMacroImage.getHeight();
         logger.info("Original macro dimensions: {}x{}", originalMacroWidth, originalMacroHeight);
+
+        // Crop the macro image to just the slide area
+        // Log which scanner is being used
+        String scanner = QPPreferenceDialog.getSelectedScannerProperty();
+        logger.info("Using scanner '{}' for macro image processing", scanner);
 
         // Crop the macro image to just the slide area
         MacroImageUtility.CroppedMacroResult croppedResult = MacroImageUtility.cropToSlideArea(originalMacroImage);
@@ -364,11 +373,24 @@ public class MicroscopeAlignmentWorkflow {
                 boolean invertedX = QPPreferenceDialog.getInvertedXProperty();
                 boolean invertedY = QPPreferenceDialog.getInvertedYProperty();
 
-                double macroPixelSize = DEFAULT_MACRO_PIXEL_SIZE;
+// Get macro pixel size from scanner configuration
+                double macroPixelSize;
+                try {
+                    macroPixelSize = MacroImageUtility.getMacroPixelSize();
+                    logger.info("Using macro pixel size {} µm from scanner configuration", macroPixelSize);
+                } catch (IllegalStateException e) {
+                    logger.error("Failed to get macro pixel size: {}", e.getMessage());
+                    UIFunctions.notifyUserOfError(
+                            e.getMessage() + "\n\nCannot proceed with alignment.",
+                            "Configuration Error"
+                    );
+                    return;
+                }
+
                 double mainPixelSize = gui.getImageData().getServer()
                         .getPixelCalibration().getAveragedPixelSizeMicrons();
 
-                // Create tiles for manual alignment
+// Create tiles for manual alignment
                 String tempTileDirectory = (String) projectDetails.get("tempTileDirectory");
                 String modeWithIndex = (String) projectDetails.get("imagingModeWithIndex");
 

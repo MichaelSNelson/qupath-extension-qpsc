@@ -255,13 +255,11 @@ public class MicroscopeController {
         // 2) transform into stage coords
         double [] stageCoords = TransformationFunctions.transformQuPathFullResToStage(qpCoords, currentTransform);
 
-//        // 3) account for any offset (if you store one) TODO remove
-//        double[] offset = getCurrentOffset();
-//        double[] adjusted = TransformationFunctions.applyOffset(stageCoords, offset, true);
 
         logger.info("Transformed to stage coords: " + List.of(stageCoords[0], stageCoords[1]));
 
         // 4) send to Python
+        //TODO this should be using CLIExecutor
         UtilityFunctions.execCommand(
                 String.valueOf(List.of(String.valueOf(stageCoords[0]), String.valueOf(stageCoords[1]))),
                 "moveStageToCoordinates");

@@ -356,4 +356,113 @@ public class MicroscopeConfigManager {
             new GsonBuilder().setPrettyPrinting().create().toJson(metadata, w);
         }
     }
+    // Add these methods to the existing MicroscopeConfigManager class:
+
+    /**
+     * Get list of available scanners from configuration
+     */
+    public List<String> getAvailableScanners() {
+        List<String> scanners = new ArrayList<>();
+        try {
+            Map<String, Object> scannersMap = (Map<String, Object>) configData.get("scanners");
+            if (scannersMap != null) {
+                scanners.addAll(scannersMap.keySet());
+            }
+        } catch (Exception e) {
+            logger.warn("No scanners section found in configuration");
+        }
+        return scanners;
+    }
+
+    /**
+     * Check if a scanner is configured
+     */
+    public boolean isScannerConfigured(String scannerName) {
+        return getAvailableScanners().contains(scannerName);
+    }
+
+    /**
+     * Get scanner type
+     */
+    public String getScannerType(String scannerName) {
+        String type = getString("scanners", scannerName, "type");
+        return type != null ? type : "Generic";
+    }
+
+    /**
+     * Check if scanner requires macro cropping
+     */
+    public boolean scannerRequiresCropping(String scannerName) {
+        Boolean requiresCropping = getBoolean("scanners", scannerName, "macro", "requiresCropping");
+        if (requiresCropping == null) {
+            logger.warn("No requiresCropping setting for scanner '{}', defaulting to false", scannerName);
+            return false;
+        }
+        return requiresCropping;
+    }
+
+    /**
+     * Get macro pixel size for scanner
+     */
+    public double getScannerMacroPixelSize(String scannerName) {
+        Double pixelSize = getDouble("scanners", scannerName, "macro", "pixelSize_um");
+        if (pixelSize == null || pixelSize <= 0) {
+            logger.warn("Invalid or missing macro pixel size for scanner '{}', using default 80.0 µm", scannerName);
+            return 80.0;
+        }
+        return pixelSize;
+    }
+
+    /**
+     * Get slide bounds for scanner
+     */
+    public SlideBounds getScannerSlideBounds(String scannerName) {
+        if (!scannerRequiresCropping(scannerName)) {
+            return null;
+        }
+
+        try {
+            Integer xMin = getInteger("scanners", scannerName, "macro", "slideBounds", "xMin");
+            Integer xMax = getInteger("scanners", scannerName, "macro", "slideBounds", "xMax");
+            Integer yMin = getInteger("scanners", scannerName, "macro", "slideBounds", "yMin");
+            Integer yMax = getInteger("scanners", scannerName, "macro", "slideBounds", "yMax");
+
+            if (xMin != null && xMax != null && yMin != null && yMax != null) {
+                return new SlideBounds(xMin, xMax, yMin, yMax);
+            }
+        } catch (Exception e) {
+            logger.error("Error reading slide bounds for scanner '{}'", scannerName, e);
+        }
+
+        logger.warn("Slide bounds not properly configured for scanner '{}'", scannerName);
+        return null;
+    }
+
+    /**
+     * Container for slide boundary information
+     */
+    public static class SlideBounds {
+        public final int xMin, xMax, yMin, yMax;
+
+        public SlideBounds(int xMin, int xMax, int yMin, int yMax) {
+            this.xMin = xMin;
+            this.xMax = xMax;
+            this.yMin = yMin;
+            this.yMax = yMax;
+        }
+
+        public int getWidth() {
+            return xMax - xMin;
+        }
+
+        public int getHeight() {
+            return yMax - yMin;
+        }
+
+        @Override
+        public String toString() {
+            return String.format("SlideBounds[x:%d-%d, y:%d-%d]", xMin, xMax, yMin, yMax);
+        }
+    }
+
 }

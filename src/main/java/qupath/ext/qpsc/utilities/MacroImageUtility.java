@@ -5,6 +5,7 @@ import javafx.scene.control.Alert;
 import javafx.scene.control.ButtonType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.lib.gui.QuPathGUI;
 import qupath.lib.images.servers.ImageServer;
 import qupath.lib.images.servers.ImageServerMetadata;
@@ -177,7 +178,100 @@ public class MacroImageUtility {
         return new CroppedMacroResult(croppedCopy, originalWidth, originalHeight,
                 slideXMin, slideYMin);
     }
+    /**
+     * Crops the macro image based on scanner configuration.
+     *
+     * @param macroImage The original macro image
+     * @param scannerName The scanner that produced this image (e.g., "Ocus40")
+     * @return CroppedMacroResult containing the cropped image and offset information
+     */
+    public static CroppedMacroResult cropToSlideArea(BufferedImage macroImage, String scannerName) {
+        // Implementation remains the same as before
+        if (macroImage == null) {
+            throw new IllegalArgumentException("Macro image cannot be null");
+        }
 
+        MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(
+                QPPreferenceDialog.getMicroscopeConfigFileProperty()
+        );
+
+        // Check if scanner is configured
+        if (!mgr.isScannerConfigured(scannerName)) {
+            logger.warn("Scanner '{}' not configured. Available scanners: {}. Using generic settings.",
+                    scannerName, mgr.getAvailableScanners());
+            scannerName = "Generic";
+        }
+
+
+        // Check if cropping is needed
+        if (!mgr.scannerRequiresCropping(scannerName)) {
+            logger.info("Scanner '{}' does not require cropping, returning original image", scannerName);
+            return new CroppedMacroResult(macroImage, macroImage.getWidth(), macroImage.getHeight(), 0, 0);
+        }
+
+        // Get slide bounds
+        MicroscopeConfigManager.SlideBounds bounds = mgr.getScannerSlideBounds(scannerName);
+        if (bounds == null) {
+            logger.error("Scanner '{}' requires cropping but has no configured bounds. Using defaults.", scannerName);
+            return cropToSlideArea(macroImage, DEFAULT_SLIDE_X_MIN, DEFAULT_SLIDE_X_MAX,
+                    DEFAULT_SLIDE_Y_MIN, DEFAULT_SLIDE_Y_MAX);
+        }
+
+        logger.info("Cropping macro image for scanner '{}' using bounds: {}", scannerName, bounds);
+        return cropToSlideArea(macroImage, bounds.xMin, bounds.xMax, bounds.yMin, bounds.yMax);
+    }
+
+    /**
+     * Get macro pixel size for a specific scanner.
+     * @param scannerName The scanner name
+     * @return The macro pixel size in microns
+     * @throws IllegalStateException if scanner is not configured or pixel size is missing
+     */
+    public static double getMacroPixelSize(String scannerName) {
+        MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(
+                QPPreferenceDialog.getMicroscopeConfigFileProperty()
+        );
+
+        if (!mgr.isScannerConfigured(scannerName)) {
+            String error = String.format(
+                    "Scanner '%s' is not configured in the microscope configuration file. " +
+                            "Available scanners: %s. Please add scanner configuration or select a different scanner.",
+                    scannerName, mgr.getAvailableScanners()
+            );
+            logger.error(error);
+            throw new IllegalStateException(error);
+        }
+
+        Double pixelSize = mgr.getScannerMacroPixelSize(scannerName);
+        if (pixelSize == null || pixelSize <= 0) {
+            String error = String.format(
+                    "Scanner '%s' has no valid macro pixel size configured. " +
+                            "This is required for accurate alignment. " +
+                            "Please add 'macro.pixelSize_um' to the scanner configuration.",
+                    scannerName
+            );
+            logger.error(error);
+            throw new IllegalStateException(error);
+        }
+
+        logger.info("Using macro pixel size {} µm for scanner '{}'", pixelSize, scannerName);
+        return pixelSize;
+    }
+
+    /**
+     * Get macro pixel size for the scanner selected in preferences.
+     * @return The macro pixel size in microns
+     * @throws IllegalStateException if scanner is not configured or pixel size is missing
+     */
+    public static double getMacroPixelSize() {
+        String scannerName = QPPreferenceDialog.getSelectedScannerProperty();
+        if (scannerName == null || scannerName.isEmpty()) {
+            String error = "No scanner selected in preferences. Please select a scanner in Edit > Preferences.";
+            logger.error(error);
+            throw new IllegalStateException(error);
+        }
+        return getMacroPixelSize(scannerName);
+    }
 
     /**
      * Applies X and/or Y flips to a macro image.
