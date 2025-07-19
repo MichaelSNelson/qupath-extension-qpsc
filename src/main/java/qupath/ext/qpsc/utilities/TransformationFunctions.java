@@ -356,47 +356,45 @@ public class TransformationFunctions {
         // Create the macro-to-fullres transform
         AffineTransform macroToFullRes = new AffineTransform();
 
-        if (flipX && flipY) {
-            // Both axes flipped
-            // The green box in the original image maps to the full image, but flipped
-            // A point at (gbX, gbY) in original should map to (fullResWidth, fullResHeight) in flipped
-            // A point at (gbX + gbWidth, gbY + gbHeight) should map to (0, 0) in flipped
+        // IMPORTANT: Both the macro image AND the full-res image are already flipped in QuPath
+        // So when flipX=true and flipY=true, the green box in the unflipped cropped macro
+        // should map directly to the full-res image without additional flipping
 
-            // Transform: translate by -gbX,-gbY, scale, then flip
-            macroToFullRes.translate(fullResWidth, fullResHeight);  // Move origin for flip
-            macroToFullRes.scale(-scaleX, -scaleY);                 // Scale and flip
-            macroToFullRes.translate(-gbX, -gbY);                   // Move green box to origin
+        // The green box represents the full resolution image area
+        // Simple mapping: green box → full-res image
+        macroToFullRes.scale(scaleX, scaleY);
+        macroToFullRes.translate(-gbX, -gbY);
 
-        } else if (flipX) {
-            // Only X flipped
-            macroToFullRes.translate(fullResWidth, 0);
-            macroToFullRes.scale(-scaleX, scaleY);
-            macroToFullRes.translate(-gbX, -gbY);
+        // Log for debugging
+        logger.info("  Macro→FullRes transform: {}", macroToFullRes);
 
-        } else if (flipY) {
-            // Only Y flipped
-            macroToFullRes.translate(0, fullResHeight);
-            macroToFullRes.scale(scaleX, -scaleY);
-            macroToFullRes.translate(-gbX, -gbY);
+        // Test the green box corners to verify the transform
+        logger.info("  Testing green box corner mappings:");
+        double[][] corners = {
+                {gbX, gbY},                             // top-left
+                {gbX + gbWidth, gbY},                   // top-right
+                {gbX, gbY + gbHeight},                  // bottom-left
+                {gbX + gbWidth, gbY + gbHeight}         // bottom-right
+        };
+        String[] labels = {"top-left", "top-right", "bottom-left", "bottom-right"};
 
-        } else {
-            // No flips - simple case
-            macroToFullRes.translate(-gbX, -gbY);
-            macroToFullRes.scale(scaleX, scaleY);
+        for (int i = 0; i < corners.length; i++) {
+            Point2D src = new Point2D.Double(corners[i][0], corners[i][1]);
+            Point2D dst = new Point2D.Double();
+            macroToFullRes.transform(src, dst);
+            logger.info("    {} ({}, {}) → ({}, {})",
+                    labels[i], src.getX(), src.getY(), dst.getX(), dst.getY());
         }
 
         // Now combine with full-res to stage
         AffineTransform macroToStage = new AffineTransform(fullResToStage);
         macroToStage.concatenate(macroToFullRes);
 
-        // Log for debugging
-        logger.info("  Macro→FullRes transform: {}", macroToFullRes);
         logger.info("  FullRes→Stage transform: {}", fullResToStage);
         logger.info("  Combined Macro→Stage: {}", macroToStage);
 
         return macroToStage;
     }
-
     // ==================== VALIDATION FUNCTIONS ====================
 
     /**

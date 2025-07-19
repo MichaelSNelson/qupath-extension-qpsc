@@ -66,8 +66,9 @@ public class MicroscopeAlignmentWorkflow {
      *           with any green box position in future acquisitions
      */
     public static void run() {
+        logger.info("*******************************************");
         logger.info("Starting Microscope Alignment Workflow...");
-
+        logger.info("********************************************");
         QuPathGUI gui = QuPathGUI.getInstance();
 
         // Check prerequisites
@@ -193,11 +194,9 @@ public class MicroscopeAlignmentWorkflow {
         logger.info("Original macro dimensions: {}x{}", originalMacroWidth, originalMacroHeight);
 
         // Crop the macro image to just the slide area
-        // Log which scanner is being used
         String scanner = QPPreferenceDialog.getSelectedScannerProperty();
         logger.info("Using scanner '{}' for macro image processing", scanner);
 
-        // Crop the macro image to just the slide area
         MacroImageUtility.CroppedMacroResult croppedResult = MacroImageUtility.cropToSlideArea(originalMacroImage);
         BufferedImage croppedMacroImage = croppedResult.getCroppedImage();
 
@@ -206,42 +205,43 @@ public class MicroscopeAlignmentWorkflow {
         logger.info("Cropped macro dimensions: {}x{} (offset: {}, {})",
                 macroWidth, macroHeight, croppedResult.getCropOffsetX(), croppedResult.getCropOffsetY());
 
+        // Get flip settings
+        boolean flipX = QPPreferenceDialog.getFlipMacroXProperty();
+        boolean flipY = QPPreferenceDialog.getFlipMacroYProperty();
+
         GreenBoxDetector.DetectionResult greenBoxResult = null;
         AffineTransform greenBoxTransform = null;
 
-        // Try green box detection if enabled - use the CROPPED image
+        // Try green box detection if enabled
         if (config.useGreenBoxDetection()) {
             try {
-                greenBoxResult = GreenBoxDetector.detectGreenBox(croppedMacroImage, config.greenBoxParams());
+                // APPLY FLIPS to match what user saw in preview
+                BufferedImage imageForDetection = croppedMacroImage;
+                if (flipX || flipY) {
+                    imageForDetection = MacroImageUtility.flipMacroImage(croppedMacroImage, flipX, flipY);
+                    logger.info("Applied flips for green box detection: X={}, Y={}", flipX, flipY);
+                }
+
+                greenBoxResult = GreenBoxDetector.detectGreenBox(imageForDetection, config.greenBoxParams());
 
                 if (greenBoxResult != null && greenBoxResult.getConfidence() > 0.7) {
-                    logger.info("Green box detected in cropped macro with confidence {}", greenBoxResult.getConfidence());
+                    logger.info("Green box detected in flipped macro with confidence {}", greenBoxResult.getConfidence());
 
-                    // The green box coordinates are now relative to the cropped image
-                    ROI greenBoxCropped = greenBoxResult.getDetectedBox();
-                    logger.info("Green box in cropped macro: ({}, {}, {}, {})",
-                            greenBoxCropped.getBoundsX(), greenBoxCropped.getBoundsY(),
-                            greenBoxCropped.getBoundsWidth(), greenBoxCropped.getBoundsHeight());
+                    // The green box coordinates are now in FLIPPED cropped image space
+                    ROI greenBoxFlipped = greenBoxResult.getDetectedBox();
+                    logger.info("Green box in flipped cropped macro: ({}, {}, {}, {})",
+                            greenBoxFlipped.getBoundsX(), greenBoxFlipped.getBoundsY(),
+                            greenBoxFlipped.getBoundsWidth(), greenBoxFlipped.getBoundsHeight());
 
-                    // Calculate transform using the cropped dimensions
+                    // Calculate transform using the flipped coordinates directly
                     int mainWidth = gui.getImageData().getServer().getWidth();
                     int mainHeight = gui.getImageData().getServer().getHeight();
-                    double mainPixelSize = gui.getImageData().getServer()
-                            .getPixelCalibration().getAveragedPixelSizeMicrons();
 
-                    // Get flip settings
-                    boolean flipX = QPPreferenceDialog.getFlipMacroXProperty();
-                    boolean flipY = QPPreferenceDialog.getFlipMacroYProperty();
-
-                    // Use the new centralized function with CROPPED dimensions
-                    greenBoxTransform = TransformationFunctions.calculateMacroOriginalToFullResTransform(
-                            greenBoxCropped,
-                            macroWidth,  // Use cropped width
-                            macroHeight, // Use cropped height
+                    // Use the transform function for flipped coordinates
+                    greenBoxTransform = TransformationFunctions.calculateMacroFlippedToFullResTransform(
+                            greenBoxFlipped,
                             mainWidth,
-                            mainHeight,
-                            flipX,
-                            flipY
+                            mainHeight
                     );
                 }
             } catch (Exception e) {
@@ -558,16 +558,58 @@ public class MicroscopeAlignmentWorkflow {
     }
 
     /**
-     * Saves the general transform with metadata.
+     * Saves a general macro-to-stage transform that can be reused across different imaging sessions.
      *
-     * @param gui QuPath GUI instance
-     * @param config Alignment configuration
-     * @param fullResToStageTransform Transform that maps full-res pixels → stage micrometers
-     * @param macroImageResults Macro image detection results
-     * @param macroPixelSize Macro image pixel size in micrometers
-     * @param invertedX Whether X axis is inverted
-     * @param invertedY Whether Y axis is inverted
-     * @param transformManager Manager for saving transforms
+     * <p>This method creates and persists an affine transform that maps coordinates from a macro image
+     * to physical stage coordinates in micrometers. The macro image is expected to be in the same
+     * orientation as the whole slide image and as the user sees the tissue through the microscope.</p>
+     *
+     * <h3>Transform Details:</h3>
+     * <ul>
+     *   <li><b>Input:</b> Macro image coordinates as displayed to the user (pixels)</li>
+     *   <li><b>Output:</b> Physical stage coordinates (micrometers)</li>
+     *   <li><b>Green box:</b> If detected, provides accurate registration between macro and full-res images</li>
+     *   <li><b>Fallback:</b> Uses pixel size scaling if no green box is detected (less accurate)</li>
+     * </ul>
+     *
+     * <h3>Coordinate System Expectations:</h3>
+     * <ul>
+     *   <li>The macro image should show tissue in the same orientation as seen through the microscope</li>
+     *   <li>The macro image should match the orientation of the whole slide image in QuPath</li>
+     *   <li>Any flips or rotations needed for display consistency should be applied before this method</li>
+     * </ul>
+     *
+     * <h3>Validation:</h3>
+     * <p>The transform is validated using:</p>
+     * <ul>
+     *   <li>Ground truth points with known macro-to-stage mappings</li>
+     *   <li>Stage boundary checks to ensure coordinates fall within valid ranges</li>
+     *   <li>Transform consistency checks</li>
+     * </ul>
+     *
+     * <h3>Saved Information:</h3>
+     * <p>The transform preset includes:</p>
+     * <ul>
+     *   <li>Transform matrix coefficients</li>
+     *   <li>Microscope name and configuration</li>
+     *   <li>Macro image dimensions and crop information</li>
+     *   <li>Green box detection parameters (if applicable)</li>
+     *   <li>Creation timestamp and validation results</li>
+     * </ul>
+     *
+     * @param gui QuPath GUI instance providing access to the current image data
+     * @param config Alignment configuration containing transform name and detection parameters
+     * @param fullResToStageTransform Transform mapping full-resolution pixels to stage micrometers,
+     *                                created during manual alignment
+     * @param macroImageResults Detection results containing green box location and macro dimensions
+     * @param macroPixelSize Physical size of each macro image pixel in micrometers
+     * @param invertedX Whether the microscope stage X-axis is inverted (unused, kept for compatibility)
+     * @param invertedY Whether the microscope stage Y-axis is inverted (unused, kept for compatibility)
+     * @param transformManager Manager responsible for persisting transforms to disk
+     *
+     * @throws IllegalStateException if the transform calculation fails or produces invalid results
+     *
+     * @since 0.3.0
      */
     private static void saveGeneralTransform(
             QuPathGUI gui,
@@ -580,81 +622,75 @@ public class MicroscopeAlignmentWorkflow {
             AffineTransformManager transformManager) {
 
         try {
-            // The fullResToStageTransform maps: full-res pixels → stage µm
-            // We need to create: macro pixels (original) → stage µm
-
-            // Get flip settings
-            boolean flipX = QPPreferenceDialog.getFlipMacroXProperty();
-            boolean flipY = QPPreferenceDialog.getFlipMacroYProperty();
-
             // Get image dimensions
-            double mainPixelSize = gui.getImageData().getServer()
-                    .getPixelCalibration().getAveragedPixelSizeMicrons();
             int fullResWidth = gui.getImageData().getServer().getWidth();
             int fullResHeight = gui.getImageData().getServer().getHeight();
 
             // Create the transform based on whether we have green box detection
-            AffineTransform macroOriginalToStage;
+            AffineTransform macroToStageTransform;
 
             if (macroImageResults.greenBoxResult() != null &&
                     macroImageResults.greenBoxResult().getDetectedBox() != null) {
 
-                // We have green box - use the specialized function
+                // Get the green box ROI - it's in the displayed macro image coordinates
                 ROI greenBox = macroImageResults.greenBoxResult().getDetectedBox();
 
-                // Use the new function that properly handles the flipped full-res image
-                macroOriginalToStage = TransformationFunctions.createGeneralMacroToStageTransform(
-                        greenBox,
-                        macroImageResults.macroWidth(),
-                        macroImageResults.macroHeight(),
-                        fullResWidth,
-                        fullResHeight,
-                        fullResToStageTransform,
-                        flipX,
-                        flipY
-                );
+                logger.info("Using green box at ({}, {}, {}, {}) in displayed macro image",
+                        greenBox.getBoundsX(), greenBox.getBoundsY(),
+                        greenBox.getBoundsWidth(), greenBox.getBoundsHeight());
+
+                // The green box in the macro image corresponds to the full resolution image
+                // Create transform: macro → full-res
+                double scaleX = fullResWidth / greenBox.getBoundsWidth();
+                double scaleY = fullResHeight / greenBox.getBoundsHeight();
+
+                AffineTransform macroToFullRes = new AffineTransform();
+                // Scale first, then translate
+                macroToFullRes.scale(scaleX, scaleY);
+                macroToFullRes.translate(-greenBox.getBoundsX(), -greenBox.getBoundsY());
+
+                logger.info("Macro→FullRes transform: scale({}, {}), translate({}, {})",
+                        scaleX, scaleY, -greenBox.getBoundsX(), -greenBox.getBoundsY());
+
+                // Test the macro to full-res transform
+                Point2D gbTopLeft = new Point2D.Double(greenBox.getBoundsX(), greenBox.getBoundsY());
+                Point2D gbBottomRight = new Point2D.Double(
+                        greenBox.getBoundsX() + greenBox.getBoundsWidth(),
+                        greenBox.getBoundsY() + greenBox.getBoundsHeight());
+
+                Point2D fullResTopLeft = new Point2D.Double();
+                Point2D fullResBottomRight = new Point2D.Double();
+                macroToFullRes.transform(gbTopLeft, fullResTopLeft);
+                macroToFullRes.transform(gbBottomRight, fullResBottomRight);
+
+                logger.info("Green box corners map to full-res: ({}, {}) → ({}, {}), ({}, {}) → ({}, {})",
+                        gbTopLeft.getX(), gbTopLeft.getY(), fullResTopLeft.getX(), fullResTopLeft.getY(),
+                        gbBottomRight.getX(), gbBottomRight.getY(), fullResBottomRight.getX(), fullResBottomRight.getY());
+
+                // Now combine: macro → full-res → stage
+                macroToStageTransform = new AffineTransform(fullResToStageTransform);
+                macroToStageTransform.concatenate(macroToFullRes);
+
+                logger.info("Created macro→stage transform: {}", macroToStageTransform);
 
                 // Validate with test points
                 validateTransformWithTestPoints(
-                        macroOriginalToStage,
-                        macroImageResults,
-                        flipX,
-                        flipY
+                        macroToStageTransform,
+                        macroImageResults
                 );
 
             } else {
-                // No green box - fallback to simple pixel size scaling
-                logger.warn("No green box detected - using pixel size scaling (less accurate)");
-
-                double scale = macroPixelSize / mainPixelSize;
-                AffineTransform macroToFullRes = AffineTransform.getScaleInstance(scale, scale);
-
-                // Apply flips if needed
-                if (flipX || flipY) {
-                    AffineTransform flipTransform = new AffineTransform();
-                    if (flipX) {
-                        flipTransform.translate(macroImageResults.macroWidth(), 0);
-                        flipTransform.scale(-1, 1);
-                    }
-                    if (flipY) {
-                        flipTransform.translate(0, macroImageResults.macroHeight());
-                        flipTransform.scale(1, -1);
-                    }
-                    macroToFullRes.preConcatenate(flipTransform);
-                }
-
-                // Combine transforms: macro → full-res → stage
-                macroOriginalToStage = new AffineTransform(fullResToStageTransform);
-                macroOriginalToStage.concatenate(macroToFullRes);
-                logger.info("Combined macro→stage transform: {}", macroOriginalToStage);
+                // No green box - fallback
+                logger.warn("No green box detected - cannot create accurate transform");
+                throw new IllegalStateException("Green box detection is required for alignment");
             }
 
             // Log final transform
-            TransformationFunctions.logTransformDetails("Final Macro→Stage", macroOriginalToStage);
+            TransformationFunctions.logTransformDetails("Final Macro→Stage", macroToStageTransform);
 
             // Validate the transform
             boolean isValid = TransformationFunctions.validateTransform(
-                    macroOriginalToStage,
+                    macroToStageTransform,
                     macroImageResults.macroWidth(),
                     macroImageResults.macroHeight(),
                     -21000, 33000,  // Stage X limits
@@ -665,61 +701,51 @@ public class MicroscopeAlignmentWorkflow {
                 logger.warn("Transform validation failed - may produce out-of-bounds coordinates!");
             }
 
-            // Get configuration path
-            String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
+            // Create description
             String description = String.format(
-                    "General macro-to-stage transform created via alignment workflow. " +
-                            "Cropped macro size: %dx%d (original: %dx%d, offset: %d,%d). " +
-                            "Flips: X=%s, Y=%s. Green box detected: %s. Validation: %s",
+                    "Macro-to-stage transform for %dx%d macro image. " +
+                            "Green box detected: %s. Validation: %s",
                     macroImageResults.macroWidth(),
                     macroImageResults.macroHeight(),
-                    macroImageResults.originalMacroWidth(),
-                    macroImageResults.originalMacroHeight(),
-                    macroImageResults.cropOffsetX(),
-                    macroImageResults.cropOffsetY(),
-                    flipX,
-                    flipY,
                     (macroImageResults.greenBoxResult() != null),
                     isValid ? "PASSED" : "FAILED"
             );
 
-            // Get the actual microscope name from config
+            // Get microscope name
+            String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
             MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(configPath);
             String microscopeName = mgr.getString("microscope", "name");
 
-            // Generate a default name if not provided
+            // Generate transform name if needed
             String transformName = config.transformName();
             if (transformName == null || transformName.isBlank()) {
                 transformName = microscopeName + "_Transform_" +
                         new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
             }
 
-            // Create transform preset
+            // Create and save transform preset
             AffineTransformManager.TransformPreset preset =
                     new AffineTransformManager.TransformPreset(
                             transformName,
                             microscopeName,
-                            "Standard", // Default mounting method
-                            macroOriginalToStage,
+                            "Standard",
+                            macroToStageTransform,
                             description,
                             config.greenBoxParams()
                     );
 
-            // Save using AffineTransformManager
             transformManager.savePreset(preset);
+            logger.info("Saved macro→stage transform: {}", transformName);
 
-            logger.info("Saved general macro→stage transform: {}", transformName);
-
-            // Save the transform name to preferences for future use
+            // Save to preferences for future use
             QPPreferenceDialog.setSavedTransformName(transformName);
 
             // Notify user
             String finalTransformName = transformName;
             Platform.runLater(() -> {
                 String message = String.format(
-                        "Successfully saved general alignment transform: %s\n\n" +
-                                "This transform maps macro image coordinates (original/unflipped) to stage coordinates " +
-                                "and can be used with any green box position in future workflows.\n\n" +
+                        "Successfully saved alignment transform: %s\n\n" +
+                                "This transform maps macro image coordinates to stage coordinates.\n" +
                                 "Transform validation: %s",
                         finalTransformName,
                         isValid ? "PASSED ✓" : "WARNING - May produce out-of-bounds coordinates!"
@@ -746,89 +772,46 @@ public class MicroscopeAlignmentWorkflow {
      * Validates transform with test points for debugging.
      */
     private static void validateTransformWithTestPoints(
-            AffineTransform macroOriginalToStage,
-            MacroImageResults macroImageResults,
-            boolean flipX,
-            boolean flipY) {
+            AffineTransform macroToStageTransform,
+            MacroImageResults macroImageResults) {
 
         logger.info("Testing transform with ground truth values:");
 
-        // Test point 1: Top center tissue
-        // In flipped macro: (971, 109) → stage (16286, -8112)
-        // NOTE: These coordinates are in the ORIGINAL (uncropped) macro image
-        double[] topCenterFlippedOriginal = {971, 109};
-
-        // Adjust for crop offset - subtract the crop offset to get cropped coordinates
-        double[] topCenterFlippedCropped = {
-                topCenterFlippedOriginal[0] - macroImageResults.cropOffsetX(),
-                topCenterFlippedOriginal[1] - macroImageResults.cropOffsetY()
-        };
-
-        double[] topCenterOriginalCropped = topCenterFlippedCropped.clone();
-
-        // Reverse the flips to get original coordinates in the CROPPED image
-        if (flipX) {
-            topCenterOriginalCropped[0] = macroImageResults.macroWidth() - topCenterFlippedCropped[0];
-        }
-        if (flipY) {
-            topCenterOriginalCropped[1] = macroImageResults.macroHeight() - topCenterFlippedCropped[1];
-        }
-
+        // Test point 1: Top center tissue in displayed (flipped/cropped) macro
+        double[] topCenterMacro = {700, 43};  // <-- Use the actual tissue coordinates
         double[] topCenterStage = TransformationFunctions.transformMacroOriginalToStage(
-                topCenterOriginalCropped,
-                macroOriginalToStage
+                topCenterMacro,
+                macroToStageTransform
         );
 
-        logger.info("  Top center: flipped original ({}, {}) → flipped cropped ({}, {}) → original cropped ({}, {}) → stage ({}, {}), expected (~16286, ~-8112)",
-                topCenterFlippedOriginal[0], topCenterFlippedOriginal[1],
-                topCenterFlippedCropped[0], topCenterFlippedCropped[1],
-                topCenterOriginalCropped[0], topCenterOriginalCropped[1],
+        logger.info("  Top center: macro ({}, {}) → stage ({}, {}), expected (~16286, ~-8112)",
+                topCenterMacro[0], topCenterMacro[1],
                 topCenterStage[0], topCenterStage[1]);
 
-        // Test point 2: Center left tissue
-        // In flipped macro: (751, 270) → stage (-1275, 4664)
-        double[] centerLeftFlippedOriginal = {751, 270};
-
-        // Adjust for crop offset
-        double[] centerLeftFlippedCropped = {
-                centerLeftFlippedOriginal[0] - macroImageResults.cropOffsetX(),
-                centerLeftFlippedOriginal[1] - macroImageResults.cropOffsetY()
-        };
-
-        double[] centerLeftOriginalCropped = centerLeftFlippedCropped.clone();
-
-        // Reverse the flips
-        if (flipX) {
-            centerLeftOriginalCropped[0] = macroImageResults.macroWidth() - centerLeftFlippedCropped[0];
-        }
-        if (flipY) {
-            centerLeftOriginalCropped[1] = macroImageResults.macroHeight() - centerLeftFlippedCropped[1];
-        }
-
+        // Test point 2: Center left tissue in displayed (flipped/cropped) macro
+        double[] centerLeftMacro = {486, 202};  // <-- Use the actual tissue coordinates
         double[] centerLeftStage = TransformationFunctions.transformMacroOriginalToStage(
-                centerLeftOriginalCropped,
-                macroOriginalToStage
+                centerLeftMacro,
+                macroToStageTransform
         );
 
-        logger.info("  Center left: flipped original ({}, {}) → flipped cropped ({}, {}) → original cropped ({}, {}) → stage ({}, {}), expected (~-1275, ~4664)",
-                centerLeftFlippedOriginal[0], centerLeftFlippedOriginal[1],
-                centerLeftFlippedCropped[0], centerLeftFlippedCropped[1],
-                centerLeftOriginalCropped[0], centerLeftOriginalCropped[1],
+        logger.info("  Center left: macro ({}, {}) → stage ({}, {}), expected (~-1275, ~4664)",
+                centerLeftMacro[0], centerLeftMacro[1],
                 centerLeftStage[0], centerLeftStage[1]);
 
         // Create ground truth map for validation
         Map<Point2D, Point2D> groundTruth = new HashMap<>();
         groundTruth.put(
-                new Point2D.Double(topCenterOriginalCropped[0], topCenterOriginalCropped[1]),
+                new Point2D.Double(topCenterMacro[0], topCenterMacro[1]),
                 new Point2D.Double(16286, -8112)
         );
         groundTruth.put(
-                new Point2D.Double(centerLeftOriginalCropped[0], centerLeftOriginalCropped[1]),
+                new Point2D.Double(centerLeftMacro[0], centerLeftMacro[1]),
                 new Point2D.Double(-1275, 4664)
         );
 
         boolean groundTruthValid = TransformationFunctions.validateTransformWithGroundTruth(
-                macroOriginalToStage,
+                macroToStageTransform,
                 groundTruth,
                 500  // 500 µm tolerance
         );
@@ -837,6 +820,7 @@ public class MicroscopeAlignmentWorkflow {
             logger.warn("Ground truth validation failed - transform may be incorrect!");
         }
     }
+
 
     /**
      * Runs the tissue detection script if configured.

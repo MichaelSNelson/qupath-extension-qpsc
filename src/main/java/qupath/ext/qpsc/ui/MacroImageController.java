@@ -11,6 +11,7 @@ import javafx.stage.Modality;
 import javafx.embed.swing.SwingFXUtils;
 import javafx.util.StringConverter;
 import qupath.ext.qpsc.preferences.PersistentPreferences;
+import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.utilities.AffineTransformManager;
 import qupath.ext.qpsc.utilities.MacroImageAnalyzer;
 import qupath.ext.qpsc.utilities.GreenBoxDetector;
@@ -201,7 +202,9 @@ public class MacroImageController {
         // Enable/disable green box detection
         CheckBox enableGreenBox = new CheckBox("Use green box detection for initial positioning");
         enableGreenBox.setSelected(true);
-
+        // Get flip settings for display
+        boolean flipX = QPPreferenceDialog.getFlipMacroXProperty();
+        boolean flipY = QPPreferenceDialog.getFlipMacroYProperty();
         // Detection parameters
         GridPane paramsGrid = new GridPane();
         paramsGrid.setHgap(10);
@@ -326,17 +329,37 @@ public class MacroImageController {
 
         Label resultLabel = new Label();
         resultLabel.setWrapText(true);
-// Try to load and display the macro image immediately when tab is created
+        // Add info about flips being applied
+        Label flipInfoLabel = new Label();
+        if (flipX || flipY) {
+            String flipText = "Image display: ";
+            if (flipX && flipY) flipText += "Flipped X and Y";
+            else if (flipX) flipText += "Flipped X";
+            else flipText += "Flipped Y";
+            flipInfoLabel.setText(flipText);
+            flipInfoLabel.setStyle("-fx-font-style: italic; -fx-text-fill: #2c3e50;");
+        }
+
+        // Try to load and display the macro image immediately when tab is created
         Platform.runLater(() -> {
             try {
                 ImageData imageData = gui.getImageData();
                 if (imageData != null) {
                     BufferedImage macroImage = MacroImageUtility.retrieveMacroImage(gui);
                     if (macroImage != null) {
-                        Image fxImage = SwingFXUtils.toFXImage(macroImage, null);
+                        // Crop the macro image
+                        MacroImageUtility.CroppedMacroResult croppedResult = MacroImageUtility.cropToSlideArea(macroImage);
+                        BufferedImage processedImage = croppedResult.getCroppedImage();
+
+                        // Apply flips if needed
+                        if (flipX || flipY) {
+                            processedImage = MacroImageUtility.flipMacroImage(processedImage, flipX, flipY);
+                        }
+
+                        Image fxImage = SwingFXUtils.toFXImage(processedImage, null);
                         previewImage.setImage(fxImage);
-                        resultLabel.setText("Macro image loaded. Click 'Preview Green Box Detection' to detect the scanned area.");
-                        resultLabel.setStyle("-fx-text-fill: #059669;"); // Neutral green color
+                        resultLabel.setText("Macro image loaded (cropped and flipped). Click 'Preview Green Box Detection' to detect the scanned area.");
+                        resultLabel.setStyle("-fx-text-fill: #059669;");
                     }
                 }
             } catch (Exception ex) {
@@ -371,17 +394,23 @@ public class MacroImageController {
                 if (macroImage != null) {
                     logger.info("Successfully retrieved macro image: {}x{}",
                             macroImage.getWidth(), macroImage.getHeight());
-                    //Crop the macro image to just the slide area
-                    MacroImageUtility.CroppedMacroResult croppedResult = MacroImageUtility.cropToSlideArea(macroImage);
-                    BufferedImage croppedMacroImage = croppedResult.getCroppedImage();
 
-                    logger.info("Successfully retrieved macro image: {}x{}", macroImage.getWidth(), macroImage.getHeight());
+                    // Crop the macro image to just the slide area
+                    MacroImageUtility.CroppedMacroResult croppedResult = MacroImageUtility.cropToSlideArea(macroImage);
+                    BufferedImage processedImage = croppedResult.getCroppedImage();
+
                     logger.info("Cropped to slide area: {}x{} (offset: {}, {})",
-                            croppedMacroImage.getWidth(), croppedMacroImage.getHeight(),
+                            processedImage.getWidth(), processedImage.getHeight(),
                             croppedResult.getCropOffsetX(), croppedResult.getCropOffsetY());
 
-                    // First, always show the original macro image
-                    Image originalImage = SwingFXUtils.toFXImage(croppedMacroImage, null);
+                    // Apply flips if needed
+                    if (flipX || flipY) {
+                        processedImage = MacroImageUtility.flipMacroImage(processedImage, flipX, flipY);
+                        logger.info("Applied flips: X={}, Y={}", flipX, flipY);
+                    }
+
+                    // First, always show the processed (cropped and flipped) macro image
+                    Image originalImage = SwingFXUtils.toFXImage(processedImage, null);
                     previewImage.setImage(originalImage);
 
                     // Create detection parameters from current spinner values
@@ -394,8 +423,8 @@ public class MacroImageController {
                     params.minBoxWidth = minWidthSpinner.getValue();
                     params.minBoxHeight = minHeightSpinner.getValue();
 
-                    // Run detection
-                    var result = GreenBoxDetector.detectGreenBox(croppedMacroImage, params);
+                    // Run detection on the flipped, cropped image
+                    var result = GreenBoxDetector.detectGreenBox(processedImage, params);
 
                     if (result != null) {
                         // Now update with the debug image showing the detection
@@ -403,7 +432,8 @@ public class MacroImageController {
                         previewImage.setImage(debugImage);
 
                         resultLabel.setText(String.format(
-                                "Green box detected at (%.0f, %.0f) size %.0fx%.0f with confidence %.2f",
+                                "Green box detected at (%.0f, %.0f) size %.0fx%.0f with confidence %.2f\n" +
+                                        "Note: Coordinates are in the flipped, cropped macro image",
                                 result.getDetectedBox().getBoundsX(),
                                 result.getDetectedBox().getBoundsY(),
                                 result.getDetectedBox().getBoundsWidth(),
@@ -416,7 +446,7 @@ public class MacroImageController {
                         params.saveToPreferences();
                         logger.info("Saved successful detection parameters to preferences");
                     } else {
-                        // No detection - keep showing the original macro image
+                        // No detection - keep showing the processed macro image
                         resultLabel.setText("No green box detected with current parameters");
                         resultLabel.setStyle("-fx-text-fill: orange;");
                     }
@@ -439,6 +469,7 @@ public class MacroImageController {
 
         content.getChildren().addAll(
                 enableGreenBox,
+                flipInfoLabel,  // Add flip info
                 new Separator(),
                 paramsGrid,
                 buttonBox,

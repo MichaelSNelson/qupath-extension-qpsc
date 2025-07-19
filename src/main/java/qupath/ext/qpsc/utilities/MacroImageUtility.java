@@ -29,8 +29,10 @@ public class MacroImageUtility {
 
     // Default slide boundaries in macro image coordinates (in pixels)
     // These define the physical slide area within the macro image
+
+    //TODO THIS IS NOW IN THE CONFIG FILE
     private static final int DEFAULT_SLIDE_X_MIN = 0;
-    private static final int DEFAULT_SLIDE_X_MAX = 985;
+    private static final int DEFAULT_SLIDE_X_MAX = 938;
     private static final int DEFAULT_SLIDE_Y_MIN = 19;
     private static final int DEFAULT_SLIDE_Y_MAX = 331;
 
