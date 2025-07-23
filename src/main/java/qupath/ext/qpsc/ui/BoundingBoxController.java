@@ -7,6 +7,7 @@ import javafx.scene.control.*;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
+import javafx.geometry.Pos;
 import javafx.stage.Modality;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -60,8 +61,9 @@ public class BoundingBoxController {
             dlg.initModality(Modality.APPLICATION_MODAL);
             dlg.setTitle(res.getString("boundingBox.title"));
 
-            String headerText = res.getString("boundingBox.header") +
-                    "\n\nNote: Enter coordinates in microscope stage units (microns).";
+            String headerText = "Enter bounding box coordinates either as four values (x1,y1,x2,y2) " +
+                    "or specify a starting point with width and height." +
+                    "\n\nNote: All coordinates are in microscope stage units (microns).";
 
             if (isPPMModality) {
                 headerText += "\n\nPPM mode detected - you can adjust polarization angles below.";
@@ -177,7 +179,7 @@ public class BoundingBoxController {
 
             // Center + Size Tab (replacing the Individual Fields tab) with colored label
             Tab centerSizeTab = new Tab();
-            Label centerSizeTabLabel = new Label("Center + Size");
+            Label centerSizeTabLabel = new Label("Start Point + Size");
             centerSizeTabLabel.setStyle("-fx-text-fill: #f5a623;"); // Pale orange
             centerSizeTab.setGraphic(centerSizeTabLabel);
             GridPane centerGrid = new GridPane();
@@ -185,44 +187,48 @@ public class BoundingBoxController {
             centerGrid.setVgap(10);
             centerGrid.setPadding(new Insets(10));
 
-            // Center point fields
-            TextField centerXField = new TextField();
-            TextField centerYField = new TextField();
-            centerXField.setPromptText("Center X");
-            centerYField.setPromptText("Center Y");
-            centerXField.setPrefWidth(150);
-            centerYField.setPrefWidth(150);
+            // Start point fields
+            TextField startXField = new TextField();
+            TextField startYField = new TextField();
+            startXField.setPromptText("Start X");
+            startYField.setPromptText("Start Y");
+            startXField.setPrefWidth(150);
+            startYField.setPrefWidth(150);
 
-            // Size fields
-            TextField widthField = new TextField();
-            TextField heightField = new TextField();
+            // Size fields - load saved values if available
+            TextField widthField = new TextField(PersistentPreferences.getBoundingBoxWidth());
+            TextField heightField = new TextField(PersistentPreferences.getBoundingBoxHeight());
             widthField.setPromptText("Width");
             heightField.setPromptText("Height");
             widthField.setPrefWidth(150);
             heightField.setPrefWidth(150);
 
-            // Layout the center + size controls
-            centerGrid.add(new Label("Center Point:"), 0, 0);
-            centerGrid.add(new Label("X:"), 1, 0);
-            centerGrid.add(centerXField, 2, 0);
-            centerGrid.add(new Label("Y:"), 3, 0);
-            centerGrid.add(centerYField, 4, 0);
+            // Layout the start point + size controls
+            centerGrid.add(new Label("Start Point:"), 0, 0);
+            centerGrid.add(new Label("X (µm):"), 1, 0);
+            centerGrid.add(startXField, 2, 0);
+            centerGrid.add(new Label("Y (µm):"), 3, 0);
+            centerGrid.add(startYField, 4, 0);
 
             centerGrid.add(new Label("Size:"), 0, 1);
-            centerGrid.add(new Label("Width:"), 1, 1);
+            centerGrid.add(new Label("Width (µm):"), 1, 1);
             centerGrid.add(widthField, 2, 1);
-            centerGrid.add(new Label("Height:"), 3, 1);
+            centerGrid.add(new Label("Height (µm):"), 3, 1);
             centerGrid.add(heightField, 4, 1);
 
-            // Add "Get Current Position" button for center point
-            Button centerGetPosButton = new Button("Get Current Position");
+            // Add "Get Stage Position" button with description
+            Button centerGetPosButton = new Button("Get Stage Position");
+            centerGetPosButton.setPrefWidth(150);
+            Label stageButtonDesc = new Label("Copies current stage X,Y coordinates");
+            stageButtonDesc.setStyle("-fx-font-size: 11px; -fx-text-fill: gray;");
+
             centerGetPosButton.setOnAction(e -> {
                 try {
                     double[] coords = MicroscopeController.getInstance().getStagePositionXY();
                     if (coords != null && coords.length >= 2) {
-                        centerXField.setText(String.format("%.2f", coords[0]));
-                        centerYField.setText(String.format("%.2f", coords[1]));
-                        logger.info("Updated center position from stage: X={}, Y={}", coords[0], coords[1]);
+                        startXField.setText(String.format("%.2f", coords[0]));
+                        startYField.setText(String.format("%.2f", coords[1]));
+                        logger.info("Updated start position from stage: X={}, Y={}", coords[0], coords[1]);
 
                         // If width/height are empty, set defaults
                         if (widthField.getText().trim().isEmpty()) {
@@ -242,7 +248,10 @@ public class BoundingBoxController {
             Label calculatedBoundsLabel = new Label("Calculated bounds: ");
             calculatedBoundsLabel.setStyle("-fx-font-size: 11px; -fx-text-fill: gray;");
 
-            centerGrid.add(centerGetPosButton, 0, 2, 2, 1);
+            HBox stageButtonBox = new HBox(10, centerGetPosButton, stageButtonDesc);
+            stageButtonBox.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
+
+            centerGrid.add(stageButtonBox, 0, 2, 5, 1);
             centerGrid.add(calculatedBoundsLabel, 0, 3, 5, 1);
 
             centerSizeTab.setContent(centerGrid);
@@ -333,28 +342,27 @@ public class BoundingBoxController {
 
             // 7) Field synchronization between tabs
 
-            // Update listener for center+size to CSV conversion
-            ChangeListener<String> centerSizeListener = (obs, old, newVal) -> {
+            // Update listener for start+size to CSV conversion
+            ChangeListener<String> startSizeListener = (obs, old, newVal) -> {
                 try {
-                    String centerXStr = centerXField.getText().trim();
-                    String centerYStr = centerYField.getText().trim();
+                    String startXStr = startXField.getText().trim();
+                    String startYStr = startYField.getText().trim();
                     String widthStr = widthField.getText().trim();
                     String heightStr = heightField.getText().trim();
 
-                    if (!centerXStr.isEmpty() && !centerYStr.isEmpty() &&
+                    if (!startXStr.isEmpty() && !startYStr.isEmpty() &&
                             !widthStr.isEmpty() && !heightStr.isEmpty()) {
 
-                        double centerX = Double.parseDouble(centerXStr);
-                        double centerY = Double.parseDouble(centerYStr);
+                        double startX = Double.parseDouble(startXStr);
+                        double startY = Double.parseDouble(startYStr);
                         double width = Double.parseDouble(widthStr);
                         double height = Double.parseDouble(heightStr);
 
-                        // Calculate corners from center and size
-                        // Assuming positive direction means x2 > x1 and y2 > y1
-                        double x1 = centerX - width / 2;
-                        double y1 = centerY - height / 2;
-                        double x2 = centerX + width / 2;
-                        double y2 = centerY + height / 2;
+                        // Calculate end point by adding width and height to start point
+                        double x1 = startX;
+                        double y1 = startY;
+                        double x2 = startX + width;
+                        double y2 = startY + height;
 
                         // Update CSV field
                         csvField.setText(String.format("%.2f,%.2f,%.2f,%.2f", x1, y1, x2, y2));
@@ -363,18 +371,22 @@ public class BoundingBoxController {
                         calculatedBoundsLabel.setText(String.format(
                                 "Calculated bounds: (%.2f, %.2f) to (%.2f, %.2f)",
                                 x1, y1, x2, y2));
+
+                        // Save width and height preferences
+                        PersistentPreferences.setBoundingBoxWidth(widthStr);
+                        PersistentPreferences.setBoundingBoxHeight(heightStr);
                     }
                 } catch (NumberFormatException e) {
                     // Invalid input, ignore
                 }
             };
 
-            centerXField.textProperty().addListener(centerSizeListener);
-            centerYField.textProperty().addListener(centerSizeListener);
-            widthField.textProperty().addListener(centerSizeListener);
-            heightField.textProperty().addListener(centerSizeListener);
+            startXField.textProperty().addListener(startSizeListener);
+            startYField.textProperty().addListener(startSizeListener);
+            widthField.textProperty().addListener(startSizeListener);
+            heightField.textProperty().addListener(startSizeListener);
 
-            // Update center+size fields when CSV changes
+            // Update start+size fields when CSV changes
             csvField.textProperty().addListener((obs, old, newVal) -> {
                 if (tabs.getSelectionModel().getSelectedItem() == csvTab &&
                         newVal != null && !newVal.trim().isEmpty()) {
@@ -386,32 +398,38 @@ public class BoundingBoxController {
                             double x2 = Double.parseDouble(parts[2].trim());
                             double y2 = Double.parseDouble(parts[3].trim());
 
-                            // Calculate center and size
-                            double centerX = (x1 + x2) / 2;
-                            double centerY = (y1 + y2) / 2;
-                            double width = Math.abs(x2 - x1);
-                            double height = Math.abs(y2 - y1);
+                            // Calculate start point and size
+                            double startX = x1;
+                            double startY = y1;
+                            double width = x2 - x1;
+                            double height = y2 - y1;
 
                             // Temporarily remove listeners to avoid feedback loop
-                            centerXField.textProperty().removeListener(centerSizeListener);
-                            centerYField.textProperty().removeListener(centerSizeListener);
-                            widthField.textProperty().removeListener(centerSizeListener);
-                            heightField.textProperty().removeListener(centerSizeListener);
+                            startXField.textProperty().removeListener(startSizeListener);
+                            startYField.textProperty().removeListener(startSizeListener);
+                            widthField.textProperty().removeListener(startSizeListener);
+                            heightField.textProperty().removeListener(startSizeListener);
 
-                            centerXField.setText(String.format("%.2f", centerX));
-                            centerYField.setText(String.format("%.2f", centerY));
+                            startXField.setText(String.format("%.2f", startX));
+                            startYField.setText(String.format("%.2f", startY));
                             widthField.setText(String.format("%.2f", width));
                             heightField.setText(String.format("%.2f", height));
 
                             // Re-add listeners
-                            centerXField.textProperty().addListener(centerSizeListener);
-                            centerYField.textProperty().addListener(centerSizeListener);
-                            widthField.textProperty().addListener(centerSizeListener);
-                            heightField.textProperty().addListener(centerSizeListener);
+                            startXField.textProperty().addListener(startSizeListener);
+                            startYField.textProperty().addListener(startSizeListener);
+                            widthField.textProperty().addListener(startSizeListener);
+                            heightField.textProperty().addListener(startSizeListener);
 
                             calculatedBoundsLabel.setText(String.format(
                                     "Calculated bounds: (%.2f, %.2f) to (%.2f, %.2f)",
                                     x1, y1, x2, y2));
+
+                            // Save width and height preferences
+                            if (width > 0 && height > 0) {
+                                PersistentPreferences.setBoundingBoxWidth(String.format("%.2f", width));
+                                PersistentPreferences.setBoundingBoxHeight(String.format("%.2f", height));
+                            }
                         } catch (Exception e) {
                             // Invalid format, ignore
                         }

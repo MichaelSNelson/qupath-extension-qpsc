@@ -25,11 +25,18 @@ public class PersistentPreferences {
     }
 
     // ================== BOUNDING BOX WORKFLOW ==================
+// ================== BOUNDING BOX WORKFLOW ==================
     private static final StringProperty boundingBoxString =
             PathPrefs.createPersistentPreference("BoundingBox", "27000,7000,20000,10000");
 
     private static final StringProperty boundingBoxInFocusSaved =
             PathPrefs.createPersistentPreference("BoundingBoxInFocus", "false");
+
+    private static final StringProperty boundingBoxWidthSaved =
+            PathPrefs.createPersistentPreference("BoundingBoxWidth", "2000");
+
+    private static final StringProperty boundingBoxHeightSaved =
+            PathPrefs.createPersistentPreference("BoundingBoxHeight", "2000");
 
     public static String getBoundingBoxString() {
         return boundingBoxString.getValue();
@@ -45,6 +52,22 @@ public class PersistentPreferences {
 
     public static void setBoundingBoxInFocus(final boolean inFocus) {
         boundingBoxInFocusSaved.setValue(String.valueOf(inFocus));
+    }
+
+    public static String getBoundingBoxWidth() {
+        return boundingBoxWidthSaved.getValue();
+    }
+
+    public static void setBoundingBoxWidth(final String width) {
+        boundingBoxWidthSaved.setValue(width);
+    }
+
+    public static String getBoundingBoxHeight() {
+        return boundingBoxHeightSaved.getValue();
+    }
+
+    public static void setBoundingBoxHeight(final String height) {
+        boundingBoxHeightSaved.setValue(height);
     }
 
     // ================== GREEN BOX DETECTION PARAMETERS ==================
