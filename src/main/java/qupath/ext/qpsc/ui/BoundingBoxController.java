@@ -5,10 +5,12 @@ import javafx.beans.value.ChangeListener;
 import javafx.geometry.Insets;
 import javafx.scene.control.*;
 import javafx.scene.layout.GridPane;
+import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 import javafx.stage.Modality;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import qupath.ext.qpsc.controller.MicroscopeController;
 import qupath.ext.qpsc.preferences.PersistentPreferences;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.utilities.MicroscopeConfigManager;
@@ -37,19 +39,6 @@ public class BoundingBoxController {
         }
     }
 
-    /**
-     * Show a dialog asking the user to define a rectangular bounding box
-     * (either by entering four comma-separated values or via four separate fields),
-     * plus an "In focus?" checkbox. Returns a CompletableFuture that completes
-     * with the BoundingBoxResult when the user clicks OK, or is cancelled if
-     * the user hits Cancel or closes the dialog.
-     *
-     * @return a CompletableFuture which yields the bounding box coordinates and focus flag
-     */
-    /**
-     * Shows the bounding box configuration dialog.
-     * @return CompletableFuture containing the BoundingBoxResult, or null if cancelled
-     */
     /**
      * Shows the bounding box configuration dialog.
      * @return CompletableFuture containing the BoundingBoxResult, or null if cancelled
@@ -92,10 +81,13 @@ public class BoundingBoxController {
             TabPane tabs = new TabPane();
             tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
 
-            // CSV Tab
-            Tab csvTab = new Tab("CSV Entry");
+            // CSV Tab with colored label
+            Tab csvTab = new Tab();
+            Label csvTabLabel = new Label("CSV Entry");
+            csvTabLabel.setStyle("-fx-text-fill: #4a90e2;"); // Pale blue
+            csvTab.setGraphic(csvTabLabel);
             try {
-                csvTab.setText(res.getString("boundingBox.tab.csv"));
+                csvTabLabel.setText(res.getString("boundingBox.tab.csv"));
             } catch (MissingResourceException e) {
                 // Use default if key not found
             }
@@ -111,52 +103,151 @@ public class BoundingBoxController {
 
             Label csvInstructions = new Label("Enter as: x1,y1,x2,y2 (e.g., -5000,-5000,5000,5000)");
             csvInstructions.setStyle("-fx-font-size: 11px; -fx-text-fill: gray;");
-            VBox csvContent = new VBox(5, csvField, csvInstructions);
+
+            // Add two position buttons for CSV tab
+            Button csvGetFirstPosButton = new Button("Get First Stage Position");
+            csvGetFirstPosButton.setOnAction(e -> {
+                try {
+                    double[] coords = MicroscopeController.getInstance().getStagePositionXY();
+                    if (coords != null && coords.length >= 2) {
+                        // Get current CSV values
+                        String currentCsv = csvField.getText().trim();
+                        String[] parts = currentCsv.split(",");
+
+                        if (parts.length == 0 || currentCsv.isEmpty()) {
+                            // Empty field, just set first position
+                            csvField.setText(String.format("%.2f,%.2f", coords[0], coords[1]));
+                        } else if (parts.length == 2) {
+                            // Already have 2 values, keep them and add placeholder for second position
+                            csvField.setText(String.format("%.2f,%.2f", coords[0], coords[1]));
+                        } else if (parts.length == 4) {
+                            // Update only x1,y1 keeping x2,y2
+                            csvField.setText(String.format("%.2f,%.2f,%s,%s",
+                                    coords[0], coords[1], parts[2].trim(), parts[3].trim()));
+                        } else {
+                            // 1 or 3 values - replace with just first position
+                            csvField.setText(String.format("%.2f,%.2f", coords[0], coords[1]));
+                        }
+                        logger.info("Updated first position from stage: X={}, Y={}", coords[0], coords[1]);
+                    }
+                } catch (Exception ex) {
+                    logger.error("Failed to get stage position", ex);
+                    UIFunctions.showAlertDialog("Failed to get stage position: " + ex.getMessage());
+                }
+            });
+
+            Button csvGetSecondPosButton = new Button("Get Second Stage Position");
+            csvGetSecondPosButton.setOnAction(e -> {
+                try {
+                    double[] coords = MicroscopeController.getInstance().getStagePositionXY();
+                    if (coords != null && coords.length >= 2) {
+                        String currentCsv = csvField.getText().trim();
+                        String[] parts = currentCsv.split(",");
+
+                        if (parts.length == 2) {
+                            // Have x1,y1 - add x2,y2
+                            csvField.setText(String.format("%s,%s,%.2f,%.2f",
+                                    parts[0].trim(), parts[1].trim(), coords[0], coords[1]));
+                            logger.info("Added second position from stage: X={}, Y={}", coords[0], coords[1]);
+                        } else if (parts.length == 4) {
+                            // Have all four values - replace x2,y2
+                            csvField.setText(String.format("%s,%s,%.2f,%.2f",
+                                    parts[0].trim(), parts[1].trim(), coords[0], coords[1]));
+                            logger.info("Updated second position from stage: X={}, Y={}", coords[0], coords[1]);
+                        } else if (parts.length == 3) {
+                            // Three values - show warning
+                            UIFunctions.showAlertDialog("Invalid coordinate format: found 3 values, expected 2 or 4");
+                        } else {
+                            // 0 or 1 values - need first position first
+                            UIFunctions.showAlertDialog("Please get the first stage position before setting the second position");
+                        }
+                    }
+                } catch (Exception ex) {
+                    logger.error("Failed to get stage position", ex);
+                    UIFunctions.showAlertDialog("Failed to get stage position: " + ex.getMessage());
+                }
+            });
+
+            // Arrange buttons horizontally
+            HBox csvButtonBox = new HBox(10, csvGetFirstPosButton, csvGetSecondPosButton);
+
+            VBox csvContent = new VBox(5, csvField, csvInstructions, csvButtonBox);
             csvContent.setPadding(new Insets(10));
             csvTab.setContent(csvContent);
 
-            // Fields Tab
-            Tab fieldsTab = new Tab("Individual Fields");
-            try {
-                fieldsTab.setText(res.getString("boundingBox.tab.fields"));
-            } catch (MissingResourceException e) {
-                // Use default if key not found
-            }
-            GridPane fieldGrid = new GridPane();
-            fieldGrid.setHgap(10);
-            fieldGrid.setVgap(10);
-            fieldGrid.setPadding(new Insets(10));
+            // Center + Size Tab (replacing the Individual Fields tab) with colored label
+            Tab centerSizeTab = new Tab();
+            Label centerSizeTabLabel = new Label("Center + Size");
+            centerSizeTabLabel.setStyle("-fx-text-fill: #f5a623;"); // Pale orange
+            centerSizeTab.setGraphic(centerSizeTabLabel);
+            GridPane centerGrid = new GridPane();
+            centerGrid.setHgap(10);
+            centerGrid.setVgap(10);
+            centerGrid.setPadding(new Insets(10));
 
-            TextField x1Field = new TextField();
-            TextField y1Field = new TextField();
-            TextField x2Field = new TextField();
-            TextField y2Field = new TextField();
+            // Center point fields
+            TextField centerXField = new TextField();
+            TextField centerYField = new TextField();
+            centerXField.setPromptText("Center X");
+            centerYField.setPromptText("Center Y");
+            centerXField.setPrefWidth(150);
+            centerYField.setPrefWidth(150);
 
-            x1Field.setPromptText("X1");
-            y1Field.setPromptText("Y1");
-            x2Field.setPromptText("X2");
-            y2Field.setPromptText("Y2");
+            // Size fields
+            TextField widthField = new TextField();
+            TextField heightField = new TextField();
+            widthField.setPromptText("Width");
+            heightField.setPromptText("Height");
+            widthField.setPrefWidth(150);
+            heightField.setPrefWidth(150);
 
-            x1Field.setPrefWidth(150);
-            y1Field.setPrefWidth(150);
-            x2Field.setPrefWidth(150);
-            y2Field.setPrefWidth(150);
+            // Layout the center + size controls
+            centerGrid.add(new Label("Center Point:"), 0, 0);
+            centerGrid.add(new Label("X:"), 1, 0);
+            centerGrid.add(centerXField, 2, 0);
+            centerGrid.add(new Label("Y:"), 3, 0);
+            centerGrid.add(centerYField, 4, 0);
 
-            fieldGrid.add(new Label("Upper Left:"), 0, 0);
-            fieldGrid.add(new Label("X1:"), 1, 0);
-            fieldGrid.add(x1Field, 2, 0);
-            fieldGrid.add(new Label("Y1:"), 3, 0);
-            fieldGrid.add(y1Field, 4, 0);
+            centerGrid.add(new Label("Size:"), 0, 1);
+            centerGrid.add(new Label("Width:"), 1, 1);
+            centerGrid.add(widthField, 2, 1);
+            centerGrid.add(new Label("Height:"), 3, 1);
+            centerGrid.add(heightField, 4, 1);
 
-            fieldGrid.add(new Label("Lower Right:"), 0, 1);
-            fieldGrid.add(new Label("X2:"), 1, 1);
-            fieldGrid.add(x2Field, 2, 1);
-            fieldGrid.add(new Label("Y2:"), 3, 1);
-            fieldGrid.add(y2Field, 4, 1);
+            // Add "Get Current Position" button for center point
+            Button centerGetPosButton = new Button("Get Current Position");
+            centerGetPosButton.setOnAction(e -> {
+                try {
+                    double[] coords = MicroscopeController.getInstance().getStagePositionXY();
+                    if (coords != null && coords.length >= 2) {
+                        centerXField.setText(String.format("%.2f", coords[0]));
+                        centerYField.setText(String.format("%.2f", coords[1]));
+                        logger.info("Updated center position from stage: X={}, Y={}", coords[0], coords[1]);
 
-            fieldsTab.setContent(fieldGrid);
+                        // If width/height are empty, set defaults
+                        if (widthField.getText().trim().isEmpty()) {
+                            widthField.setText("2000");
+                        }
+                        if (heightField.getText().trim().isEmpty()) {
+                            heightField.setText("2000");
+                        }
+                    }
+                } catch (Exception ex) {
+                    logger.error("Failed to get stage position", ex);
+                    UIFunctions.showAlertDialog("Failed to get stage position: " + ex.getMessage());
+                }
+            });
 
-            tabs.getTabs().addAll(csvTab, fieldsTab);
+            // Add calculated bounds display
+            Label calculatedBoundsLabel = new Label("Calculated bounds: ");
+            calculatedBoundsLabel.setStyle("-fx-font-size: 11px; -fx-text-fill: gray;");
+
+            centerGrid.add(centerGetPosButton, 0, 2, 2, 1);
+            centerGrid.add(calculatedBoundsLabel, 0, 3, 5, 1);
+
+            centerSizeTab.setContent(centerGrid);
+
+            tabs.getTabs().addAll(csvTab, centerSizeTab);
 
             // 4) In-focus checkbox - initialized with saved value
             String inFocusLabel = "Keep stage in focus while moving";
@@ -240,50 +331,93 @@ public class BoundingBoxController {
             errorLabel.setWrapText(true);
             errorLabel.setVisible(false);
 
-            // 7) Field synchronization
-            // When CSV changes, update individual fields
-            csvField.textProperty().addListener((obs, old, newVal) -> {
-                if (newVal == null || newVal.trim().isEmpty()) {
-                    x1Field.clear();
-                    y1Field.clear();
-                    x2Field.clear();
-                    y2Field.clear();
-                    return;
-                }
+            // 7) Field synchronization between tabs
 
-                String[] parts = newVal.split(",");
-                if (parts.length == 4) {
-                    try {
-                        x1Field.setText(parts[0].trim());
-                        y1Field.setText(parts[1].trim());
-                        x2Field.setText(parts[2].trim());
-                        y2Field.setText(parts[3].trim());
-                    } catch (Exception e) {
-                        // Invalid format, clear fields
-                        x1Field.clear();
-                        y1Field.clear();
-                        x2Field.clear();
-                        y2Field.clear();
+            // Update listener for center+size to CSV conversion
+            ChangeListener<String> centerSizeListener = (obs, old, newVal) -> {
+                try {
+                    String centerXStr = centerXField.getText().trim();
+                    String centerYStr = centerYField.getText().trim();
+                    String widthStr = widthField.getText().trim();
+                    String heightStr = heightField.getText().trim();
+
+                    if (!centerXStr.isEmpty() && !centerYStr.isEmpty() &&
+                            !widthStr.isEmpty() && !heightStr.isEmpty()) {
+
+                        double centerX = Double.parseDouble(centerXStr);
+                        double centerY = Double.parseDouble(centerYStr);
+                        double width = Double.parseDouble(widthStr);
+                        double height = Double.parseDouble(heightStr);
+
+                        // Calculate corners from center and size
+                        // Assuming positive direction means x2 > x1 and y2 > y1
+                        double x1 = centerX - width / 2;
+                        double y1 = centerY - height / 2;
+                        double x2 = centerX + width / 2;
+                        double y2 = centerY + height / 2;
+
+                        // Update CSV field
+                        csvField.setText(String.format("%.2f,%.2f,%.2f,%.2f", x1, y1, x2, y2));
+
+                        // Update calculated bounds display
+                        calculatedBoundsLabel.setText(String.format(
+                                "Calculated bounds: (%.2f, %.2f) to (%.2f, %.2f)",
+                                x1, y1, x2, y2));
                     }
-                }
-            });
-
-            // When individual fields change, update CSV
-            ChangeListener<String> fieldListener = (obs, old, newVal) -> {
-                String x1 = x1Field.getText().trim();
-                String y1 = y1Field.getText().trim();
-                String x2 = x2Field.getText().trim();
-                String y2 = y2Field.getText().trim();
-
-                if (!x1.isEmpty() && !y1.isEmpty() && !x2.isEmpty() && !y2.isEmpty()) {
-                    csvField.setText(String.format("%s,%s,%s,%s", x1, y1, x2, y2));
+                } catch (NumberFormatException e) {
+                    // Invalid input, ignore
                 }
             };
 
-            x1Field.textProperty().addListener(fieldListener);
-            y1Field.textProperty().addListener(fieldListener);
-            x2Field.textProperty().addListener(fieldListener);
-            y2Field.textProperty().addListener(fieldListener);
+            centerXField.textProperty().addListener(centerSizeListener);
+            centerYField.textProperty().addListener(centerSizeListener);
+            widthField.textProperty().addListener(centerSizeListener);
+            heightField.textProperty().addListener(centerSizeListener);
+
+            // Update center+size fields when CSV changes
+            csvField.textProperty().addListener((obs, old, newVal) -> {
+                if (tabs.getSelectionModel().getSelectedItem() == csvTab &&
+                        newVal != null && !newVal.trim().isEmpty()) {
+                    String[] parts = newVal.split(",");
+                    if (parts.length == 4) {
+                        try {
+                            double x1 = Double.parseDouble(parts[0].trim());
+                            double y1 = Double.parseDouble(parts[1].trim());
+                            double x2 = Double.parseDouble(parts[2].trim());
+                            double y2 = Double.parseDouble(parts[3].trim());
+
+                            // Calculate center and size
+                            double centerX = (x1 + x2) / 2;
+                            double centerY = (y1 + y2) / 2;
+                            double width = Math.abs(x2 - x1);
+                            double height = Math.abs(y2 - y1);
+
+                            // Temporarily remove listeners to avoid feedback loop
+                            centerXField.textProperty().removeListener(centerSizeListener);
+                            centerYField.textProperty().removeListener(centerSizeListener);
+                            widthField.textProperty().removeListener(centerSizeListener);
+                            heightField.textProperty().removeListener(centerSizeListener);
+
+                            centerXField.setText(String.format("%.2f", centerX));
+                            centerYField.setText(String.format("%.2f", centerY));
+                            widthField.setText(String.format("%.2f", width));
+                            heightField.setText(String.format("%.2f", height));
+
+                            // Re-add listeners
+                            centerXField.textProperty().addListener(centerSizeListener);
+                            centerYField.textProperty().addListener(centerSizeListener);
+                            widthField.textProperty().addListener(centerSizeListener);
+                            heightField.textProperty().addListener(centerSizeListener);
+
+                            calculatedBoundsLabel.setText(String.format(
+                                    "Calculated bounds: (%.2f, %.2f) to (%.2f, %.2f)",
+                                    x1, y1, x2, y2));
+                        } catch (Exception e) {
+                            // Invalid format, ignore
+                        }
+                    }
+                }
+            });
 
             // Initialize fields from saved CSV if present
             if (savedBounds != null && !savedBounds.trim().isEmpty()) {

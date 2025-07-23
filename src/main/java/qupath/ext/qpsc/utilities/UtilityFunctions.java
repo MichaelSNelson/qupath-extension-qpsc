@@ -41,20 +41,25 @@ public class UtilityFunctions {
     private static final ResourceBundle res = ResourceBundle.getBundle("qupath.ext.qpsc.ui.strings");
 
     /**
-     * Stitches all tiles under the given imaging mode folder into a single OME TIFF,
-     * renames it to include sample, mode and annotationName, then imports & opens it
-     * in the given QuPath project (respecting X/Y inversion prefs).
+     * Stitches all tiles under the given imaging mode folder into one or more OME TIFF files,
+     * renames them to include sample, mode and annotation/angle information, then imports & opens
+     * them in the given QuPath project (respecting X/Y inversion prefs).
+     *
+     * <p>When the matching string is "." (indicating batch processing of multiple subdirectories),
+     * this method will find and rename all generated OME-TIFF files, preserving the subdirectory
+     * name (e.g., angle) in the final filename.</p>
      *
      * @param projectsFolderPath  Root folder containing per sample subfolders.
      * @param sampleLabel         Subfolder name for this sample.
-     * @param imagingModeWithIndex Subfolder name under sampleLabel, e.g. "4x_bf_1".
-     * @param annotationName      "bounds " or any annotation identifier.
+     * @param imagingModeWithIndex Subfolder name under sampleLabel, e.g. "PPM_10x_1".
+     * @param annotationName      "bounds" or any annotation identifier.
+     * @param matchingString      Pattern to match subdirectories (use "." for all).
      * @param qupathGUI           QuPathGUI instance (to open the new image).
      * @param project             QuPath Project to update.
      * @param compression         OME pyramid compression type, e.g. "DEFAULT".
      * @param pixelSizeMicrons    Pixel size (µm) for the final volume metadata.
      * @param downsample          Downsample factor for pyramid generation.
-     * @return Absolute path to the stitched OME TIFF.
+     * @return Absolute path to the last stitched OME TIFF processed.
      * @throws IOException If stitching or file I/O fails.
      */
     public static String stitchImagesAndUpdateProject(
@@ -62,7 +67,7 @@ public class UtilityFunctions {
             String sampleLabel,
             String imagingModeWithIndex,
             String annotationName,
-            String matchingString,  // NEW PARAMETER
+            String matchingString,
             QuPathGUI qupathGUI,
             Project<BufferedImage> project,
             String compression,
@@ -80,6 +85,21 @@ public class UtilityFunctions {
         logger.info("Stitching tiles in '{}' → output in '{}'", tileFolder, stitchedFolder);
         logger.info("Using matching string: '{}'", matchingString);
 
+        // Track files before stitching for batch operations
+        Set<String> existingFiles = new HashSet<>();
+        if (matchingString.equals(".")) {
+            File outputDir = new File(stitchedFolder);
+            if (outputDir.exists()) {
+                File[] existing = outputDir.listFiles((dir, name) -> name.endsWith(".ome.tif"));
+                if (existing != null) {
+                    for (File f : existing) {
+                        existingFiles.add(f.getName());
+                    }
+                }
+            }
+            logger.info("Found {} existing OME-TIFF files before stitching", existingFiles.size());
+        }
+
         // Run the core stitching routine with the explicit matching string
         StitchingConfig config = new StitchingConfig(
                 "Coordinates in TileConfiguration.txt file",
@@ -88,7 +108,7 @@ public class UtilityFunctions {
                 compression,
                 pixelSizeMicrons,
                 downsample,
-                matchingString,  // Use the provided matching string
+                matchingString,
                 1.0
         );
 
@@ -100,76 +120,155 @@ public class UtilityFunctions {
             throw new IOException("Stitching workflow returned null - no tiles were stitched");
         }
 
-        // Defensive check for extension
-        if (outPath.endsWith(".ome") && !outPath.endsWith(".ome.tif")) {
-            logger.warn("Stitching returned .ome without .tif, appending .tif extension");
-            outPath = outPath + ".tif";
-        }
+        final String lastProcessedPath;
 
-        // 3) Rename according to sample/mode/annotation
-        File orig = new File(outPath);
-        // For angle-based stitching, include the matching string (angle) in the filename
-        String baseName;
-        if (!matchingString.equals(annotationName)) {
-            // This is angle-based stitching
-            baseName = sampleLabel + "_" + imagingModeWithIndex + "_" + matchingString + ".ome.tif";
-        } else {
-            // Standard stitching
-            baseName = sampleLabel + "_" + imagingModeWithIndex
-                    + (annotationName.equals("bounds") ? "" : "_" + annotationName)
-                    + ".ome.tif";
-        }
+        // Handle batch processing (matching string = ".")
+        if (matchingString.equals(".")) {
+            logger.info("Batch stitching detected, looking for all newly created files...");
 
-        File renamed = new File(orig.getParent(), baseName);
-        if (orig.renameTo(renamed)) {
-            outPath = renamed.getAbsolutePath();
-            logger.info("Renamed stitched file → {}", baseName);
-            logger.info("Full renamed path: {}", outPath);
-        }
+            File outputDir = new File(stitchedFolder);
+            File[] allOmeTiffs = outputDir.listFiles((dir, name) ->
+                    name.endsWith(".ome.tif") && !existingFiles.contains(name));
 
-        final String finalOut = outPath;  // for use in the lambda below
+            if (allOmeTiffs == null || allOmeTiffs.length == 0) {
+                throw new IOException("No new OME-TIFF files found after batch stitching");
+            }
 
-        // 4) Import & open on the FX thread
-        Platform.runLater(() -> {
-            ResourceBundle res = ResourceBundle.getBundle("qupath.ext.qpsc.ui.strings");
+            logger.info("Found {} new OME-TIFF files to rename and import", allOmeTiffs.length);
+            String lastPath = null;
 
-            // 4a) Read inversion prefs
-            boolean invertedX = QPPreferenceDialog.getInvertedXProperty();
-            boolean invertedY = QPPreferenceDialog.getInvertedYProperty();
+            // Process each newly created file
+            for (File stitchedFile : allOmeTiffs) {
+                String originalName = stitchedFile.getName();
+                // Extract the angle/subdirectory name from the filename (e.g., "-5.0.ome.tif" -> "-5.0")
+                String angleOrSubdir = originalName.replace(".ome.tif", "");
 
-            try {
-                // 4b) Add to project (handles flipping)
-                QPProjectFunctions.addImageToProject(
-                        new File(finalOut),
-                        project,
-                        invertedX,
-                        invertedY);
+                // Create the full name with sample, mode, and angle
+                String baseName = sampleLabel + "_" + imagingModeWithIndex + "_" + angleOrSubdir + ".ome.tif";
+                File renamed = new File(stitchedFile.getParent(), baseName);
 
-                // 4c) Find and open the newly added entry
-                List<ProjectImageEntry<BufferedImage>> images = project.getImageList();
-                images.stream()
-                        .filter(e -> new File(e.getImageName()).getName()
-                                .equals(new File(finalOut).getName()))
-                        .findFirst()
-                        .ifPresent(qupathGUI::openImageEntry);
+                if (stitchedFile.renameTo(renamed)) {
+                    lastPath = renamed.getAbsolutePath();
+                    logger.info("Renamed {} → {}", originalName, baseName);
 
-                // 4d) Ensure project is active & refreshed
+                    // Import this file to the project
+                    final String pathToImport = lastPath;
+                    Platform.runLater(() -> {
+                        try {
+                            // Read inversion prefs
+                            boolean invertedX = QPPreferenceDialog.getInvertedXProperty();
+                            boolean invertedY = QPPreferenceDialog.getInvertedYProperty();
+
+                            // Add to project
+                            QPProjectFunctions.addImageToProject(
+                                    new File(pathToImport),
+                                    project,
+                                    invertedX,
+                                    invertedY);
+
+                            // Optionally open the first image
+                            if (allOmeTiffs[0].getName().equals(originalName)) {
+                                List<ProjectImageEntry<BufferedImage>> images = project.getImageList();
+                                images.stream()
+                                        .filter(e -> new File(e.getImageName()).getName()
+                                                .equals(new File(pathToImport).getName()))
+                                        .findFirst()
+                                        .ifPresent(qupathGUI::openImageEntry);
+                            }
+                        } catch (IOException e) {
+                            logger.error("Failed to import {}: {}", pathToImport, e.getMessage());
+                        }
+                    });
+                } else {
+                    logger.error("Failed to rename {} to {}", originalName, baseName);
+                }
+            }
+
+            lastProcessedPath = lastPath;
+
+            // Update project on FX thread
+            Platform.runLater(() -> {
                 qupathGUI.setProject(project);
                 qupathGUI.refreshProject();
 
-                // 4e) Notify success
                 qupath.fx.dialogs.Dialogs.showInfoNotification(
                         res.getString("stitching.success.title"),
-                        res.getString("stitching.success.message"));
+                        String.format("Successfully stitched and imported %d images", allOmeTiffs.length));
+            });
 
-            } catch (IOException e) {
-                UIFunctions.notifyUserOfError(
-                        "Failed to import stitched image:\n" + e.getMessage(),
-                        res.getString("stitching.error.title"));
+        } else {
+            // Single file processing (original behavior)
+
+            // Defensive check for extension
+            if (outPath.endsWith(".ome") && !outPath.endsWith(".ome.tif")) {
+                logger.warn("Stitching returned .ome without .tif, appending .tif extension");
+                outPath = outPath + ".tif";
             }
-        });
 
-        return outPath;
+            // Rename according to sample/mode/annotation
+            File orig = new File(outPath);
+            String baseName;
+            if (!matchingString.equals(annotationName)) {
+                // This is angle-based stitching with specific angle
+                baseName = sampleLabel + "_" + imagingModeWithIndex + "_" + matchingString + ".ome.tif";
+            } else {
+                // Standard stitching
+                baseName = sampleLabel + "_" + imagingModeWithIndex
+                        + (annotationName.equals("bounds") ? "" : "_" + annotationName)
+                        + ".ome.tif";
+            }
+
+            File renamed = new File(orig.getParent(), baseName);
+            if (orig.renameTo(renamed)) {
+                outPath = renamed.getAbsolutePath();
+                logger.info("Renamed stitched file → {}", baseName);
+                logger.info("Full renamed path: {}", outPath);
+            }
+
+            lastProcessedPath = outPath;
+
+            // Import & open on the FX thread
+            Platform.runLater(() -> {
+                ResourceBundle res = ResourceBundle.getBundle("qupath.ext.qpsc.ui.strings");
+
+                // Read inversion prefs
+                boolean invertedX = QPPreferenceDialog.getInvertedXProperty();
+                boolean invertedY = QPPreferenceDialog.getInvertedYProperty();
+
+                try {
+                    // Add to project (handles flipping)
+                    QPProjectFunctions.addImageToProject(
+                            new File(lastProcessedPath),
+                            project,
+                            invertedX,
+                            invertedY);
+
+                    // Find and open the newly added entry
+                    List<ProjectImageEntry<BufferedImage>> images = project.getImageList();
+                    images.stream()
+                            .filter(e -> new File(e.getImageName()).getName()
+                                    .equals(new File(lastProcessedPath).getName()))
+                            .findFirst()
+                            .ifPresent(qupathGUI::openImageEntry);
+
+                    // Ensure project is active & refreshed
+                    qupathGUI.setProject(project);
+                    qupathGUI.refreshProject();
+
+                    // Notify success
+                    qupath.fx.dialogs.Dialogs.showInfoNotification(
+                            res.getString("stitching.success.title"),
+                            res.getString("stitching.success.message"));
+
+                } catch (IOException e) {
+                    UIFunctions.notifyUserOfError(
+                            "Failed to import stitched image:\n" + e.getMessage(),
+                            res.getString("stitching.error.title"));
+                }
+            });
+        }
+
+        return lastProcessedPath;
     }
 
     public static String stitchImagesAndUpdateProject(

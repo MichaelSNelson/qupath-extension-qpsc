@@ -212,100 +212,57 @@ public class BoundingBoxWorkflow {
                                             return;
                                         }
 
-                                        // Schedule stitching for each angle
-                                        List<CompletableFuture<Void>> stitchingFutures = new ArrayList<>();
+                                        CompletableFuture<Void> stitchFuture = CompletableFuture.runAsync(() -> {
+                                            try {
+                                                Platform.runLater(() ->
+                                                        qupath.fx.dialogs.Dialogs.showInfoNotification(
+                                                                "Stitching",
+                                                                "Stitching " + sample.sampleName() + " for all angles…"));
 
-                                        if (rotationAngles != null && !rotationAngles.isEmpty()) {
-                                            // Multiple angles - stitch each separately
-                                            for (Double angle : rotationAngles) {
-                                                CompletableFuture<Void> stitchFuture = CompletableFuture.runAsync(() -> {
-                                                    try {
-                                                        Platform.runLater(() ->
-                                                                qupath.fx.dialogs.Dialogs.showInfoNotification(
-                                                                        "Stitching",
-                                                                        "Stitching " + sample.sampleName() + " at angle " + angle + "…"));
+                                                // For rotation workflows, pass "." to match all angle subfolders
+                                                String matchingPattern = (rotationAngles != null && !rotationAngles.isEmpty()) ? "." : boundsMode;
 
-                                                        String angleFolder = angleToFolder(angle);
-                                                        logger.info("Stitching angle folder: {}", angleFolder);
+                                                String outPath = UtilityFunctions.stitchImagesAndUpdateProject(
+                                                        projectsFolder,
+                                                        sample.sampleName(),
+                                                        modeWithIndex,
+                                                        boundsMode,
+                                                        matchingPattern,  // "." will match all angle subfolders
+                                                        qupathGUI,
+                                                        project,
+                                                        String.valueOf(QPPreferenceDialog.getCompressionTypeProperty()),
+                                                        pixelSize,
+                                                        1
+                                                );
 
-                                                        // For angle-based stitching, we need to pass:
-                                                        // - The parent folder (PPM_10x_1) as base
-                                                        // - "bounds" as annotation name (gets appended to create tile folder)
-                                                        // - The angle folder name as matching string
-                                                        String outPath = UtilityFunctions.stitchImagesAndUpdateProject(
-                                                                projectsFolder,
-                                                                sample.sampleName(),
-                                                                modeWithIndex,      // e.g., "PPM_10x_1"
-                                                                boundsMode,         // "bounds"
-                                                                angleFolder,        // e.g., "0.0", "-5.0", "5.0"
-                                                                qupathGUI,
-                                                                project,
-                                                                String.valueOf(QPPreferenceDialog.getCompressionTypeProperty()),
-                                                                pixelSize,
-                                                                1
-                                                        );
+                                                // Note: outPath will be the last stitched file path when multiple angles are processed
+                                                // The stitchImagesAndUpdateProject method handles importing all generated files to the project
+                                                logger.info("Stitching completed. Last output path: {}", outPath);
 
-                                                        Platform.runLater(() ->
-                                                                qupath.fx.dialogs.Dialogs.showInfoNotification(
-                                                                        "Stitching complete",
-                                                                        "Output: " + outPath));
+                                                Platform.runLater(() ->
+                                                        qupath.fx.dialogs.Dialogs.showInfoNotification(
+                                                                "Stitching complete",
+                                                                "All angles stitched successfully"));
 
-                                                    } catch (Exception e) {
-                                                        logger.error("Stitching failed for angle " + angle, e);
-                                                        Platform.runLater(() ->
-                                                                UIFunctions.notifyUserOfError(
-                                                                        "Stitching failed for angle " + angle + ":\n" + e.getMessage(),
-                                                                        "Stitching Error"));
-                                                    }
-                                                }, STITCH_EXECUTOR);
-                                                stitchingFutures.add(stitchFuture);
-                                            }                                        } else {
-                                            // No rotation - single stitch
-                                            CompletableFuture<Void> stitchFuture = CompletableFuture.runAsync(() -> {
-                                                try {
-                                                    Platform.runLater(() ->
-                                                            qupath.fx.dialogs.Dialogs.showInfoNotification(
-                                                                    "Stitching",
-                                                                    "Stitching " + sample.sampleName() + "…"));
+                                            } catch (Exception e) {
+                                                logger.error("Stitching failed", e);
+                                                Platform.runLater(() ->
+                                                        UIFunctions.notifyUserOfError(
+                                                                "Stitching failed:\n" + e.getMessage(),
+                                                                "Stitching Error"));
+                                            }
+                                        }, STITCH_EXECUTOR);
 
-                                                    String outPath = UtilityFunctions.stitchImagesAndUpdateProject(
-                                                            projectsFolder,
-                                                            sample.sampleName(),
-                                                            modeWithIndex,
-                                                            "bounds",
-                                                            qupathGUI,
-                                                            project,
-                                                            String.valueOf(QPPreferenceDialog.getCompressionTypeProperty()),
-                                                            pixelSize,
-                                                            1
-                                                    );
-
-                                                    Platform.runLater(() ->
-                                                            qupath.fx.dialogs.Dialogs.showInfoNotification(
-                                                                    "Stitching complete",
-                                                                    "Output: " + outPath));
-
-                                                } catch (Exception e) {
-                                                    Platform.runLater(() ->
-                                                            UIFunctions.notifyUserOfError(
-                                                                    "Stitching failed:\n" + e.getMessage(),
-                                                                    "Stitching Error"));
-                                                }
-                                            }, STITCH_EXECUTOR);
-                                            stitchingFutures.add(stitchFuture);
-                                        }
-
-                                        // After all stitching completes, handle cleanup
-                                        CompletableFuture.allOf(stitchingFutures.toArray(new CompletableFuture[0]))
-                                                .thenRun(() -> {
-                                                    String handling = QPPreferenceDialog.getTileHandlingMethodProperty();
-                                                    if ("Delete".equals(handling)) {
-                                                        UtilityFunctions.deleteTilesAndFolder(tempTileDir);
-                                                    } else if ("Zip".equals(handling)) {
-                                                        UtilityFunctions.zipTilesAndMove(tempTileDir);
-                                                        UtilityFunctions.deleteTilesAndFolder(tempTileDir);
-                                                    }
-                                                });
+// After stitching completes, handle cleanup
+                                        stitchFuture.thenRun(() -> {
+                                            String handling = QPPreferenceDialog.getTileHandlingMethodProperty();
+                                            if ("Delete".equals(handling)) {
+                                                UtilityFunctions.deleteTilesAndFolder(tempTileDir);
+                                            } else if ("Zip".equals(handling)) {
+                                                UtilityFunctions.zipTilesAndMove(tempTileDir);
+                                                UtilityFunctions.deleteTilesAndFolder(tempTileDir);
+                                            }
+                                        });
 
                                     } catch (Exception e) {
                                         logger.error("Acquisition failed", e);
@@ -314,15 +271,17 @@ public class BoundingBoxWorkflow {
                                                         "Failed to launch acquisition:\n" + e.getMessage(),
                                                         res.getString("acquisition.error.title")));
                                     }
-                                });
+                                }); // This closes the acquisition CompletableFuture.runAsync
 
-                            })
+                            }) // This closes the thenAccept from rotationAngles
                             .exceptionally(ex -> {
                                 logger.error("Rotation workflow failed", ex);
                                 return null;
                             });
-                });
-    }
+
+                }); // This closes another thenAccept
+    } // This closes the thenAccept from the dialog chain
+
 
     private static String angleToFolder(double angle) {
 //        if (angle == 0.0) return "0";
