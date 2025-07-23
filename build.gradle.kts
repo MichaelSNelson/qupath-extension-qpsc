@@ -65,6 +65,7 @@ dependencies {
 //For troubleshooting deprecation warnings,
 tasks.withType<JavaCompile> {
     options.compilerArgs.add("-Xlint:deprecation")
+    options.compilerArgs.add("-Xlint:unchecked")
 }
 tasks.test {
     useJUnitPlatform()
