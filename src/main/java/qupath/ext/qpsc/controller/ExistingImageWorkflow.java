@@ -445,7 +445,22 @@ public class ExistingImageWorkflow {
     }
 
     /**
-     * Process existing alignment workflow
+     * Processes the existing alignment workflow after green box detection.
+     * Creates a full-resolution to stage transform by combining the detected green box
+     * with the saved general macro-to-stage transform.
+     *
+     * <p>This method handles the critical transformation chain:
+     * <pre>
+     * Full-res pixels → Macro (flipped/cropped) → Macro (original) → Stage micrometers
+     * </pre>
+     *
+     * <p>The saved transform expects macro coordinates in the original (unflipped) coordinate system,
+     * while the green box detection operates on the flipped/cropped macro image as displayed to the user.
+     *
+     * @param gui QuPath GUI instance
+     * @param alignContext Context containing alignment settings and green box detection results
+     * @param projectInfo Project information including paths and settings
+     * @return CompletableFuture that completes when alignment processing is done
      */
     private static CompletableFuture<Void> processExistingAlignment(
             QuPathGUI gui, AlignmentContext alignContext, ProjectInfo projectInfo) {
@@ -454,12 +469,10 @@ public class ExistingImageWorkflow {
 
         // Get the base transform (macro→stage)
         AffineTransform macroToStageTransform = alignContext.context.alignment.selectedTransform().getTransform();
-
         logger.info("Loaded macro→stage transform: {}", macroToStageTransform);
 
         // Get or create annotations first
         List<PathObject> annotations = ensureAnnotationsExist(gui, alignContext.pixelSize);
-
         if (annotations.isEmpty()) {
             logger.warn("No annotations available");
             return CompletableFuture.completedFuture(null);
@@ -474,19 +487,24 @@ public class ExistingImageWorkflow {
                 greenBox.getBoundsX(), greenBox.getBoundsY(),
                 greenBox.getBoundsWidth(), greenBox.getBoundsHeight());
 
-        // Create transform that maps full-res → macro (displayed/flipped) coordinates
-        double scaleX = fullResWidth / greenBox.getBoundsWidth();
-        double scaleY = fullResHeight / greenBox.getBoundsHeight();
+        // Step 1: Create transform from full-res to macro (flipped/cropped)
+        AffineTransform macroFlippedToFullRes = TransformationFunctions.calculateMacroFlippedToFullResTransform(
+                greenBox, fullResWidth, fullResHeight);
 
-        AffineTransform fullResToMacroFlipped = new AffineTransform();
-        // Scale first, then translate
-        fullResToMacroFlipped.scale(1.0/scaleX, 1.0/scaleY);
-        fullResToMacroFlipped.translate(greenBox.getBoundsX() * scaleX, greenBox.getBoundsY() * scaleY);
+        // Get the inverse to go from full-res to macro
+        AffineTransform fullResToMacroFlipped;
+        try {
+            fullResToMacroFlipped = macroFlippedToFullRes.createInverse();
+        } catch (Exception e) {
+            logger.error("Failed to invert transform", e);
+            Platform.runLater(() -> UIFunctions.notifyUserOfError(
+                    "Failed to create coordinate transform. The green box detection may be invalid.",
+                    "Transform Error"
+            ));
+            return CompletableFuture.completedFuture(null);
+        }
 
-        logger.info("Full-res→Macro(flipped) transform: scale({}, {}), translate({}, {})",
-                1.0/scaleX, 1.0/scaleY, greenBox.getBoundsX() * scaleX, greenBox.getBoundsY() * scaleY);
-
-        // Now we need to convert from flipped macro coordinates to original macro coordinates
+        // Step 2: Create transform from macro (flipped) to macro (original)
         AffineTransform macroFlippedToOriginal = new AffineTransform();
         boolean flipX = QPPreferenceDialog.getFlipMacroXProperty();
         boolean flipY = QPPreferenceDialog.getFlipMacroYProperty();
@@ -500,24 +518,84 @@ public class ExistingImageWorkflow {
             macroFlippedToOriginal.scale(1, -1);
         }
 
-        // Combine all transforms: full-res → macro(flipped) → macro(original) → stage
+        // Step 3: Combine all transforms: full-res → macro(flipped) → macro(original) → stage
         AffineTransform fullResToStage = new AffineTransform(macroToStageTransform);
         fullResToStage.concatenate(macroFlippedToOriginal);
         fullResToStage.concatenate(fullResToMacroFlipped);
 
         logger.info("Created full-res→stage transform: {}", fullResToStage);
 
-        // Validate with a test point
-        double[] testPoint = {fullResWidth/2, fullResHeight/2};  // Center of full-res image
-        double[] stagePoint = TransformationFunctions.transformQuPathFullResToStage(testPoint, fullResToStage);
-        logger.info("Test: Full-res center ({}, {}) → Stage ({}, {})",
-                testPoint[0], testPoint[1], stagePoint[0], stagePoint[1]);
+        // Get stage limits from configuration
+        MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(
+                QPPreferenceDialog.getMicroscopeConfigFileProperty());
+
+        double stageXMin = mgr.getDouble("stage", "xlimit", "low");
+        double stageXMax = mgr.getDouble("stage", "xlimit", "high");
+        double stageYMin = mgr.getDouble("stage", "ylimit", "low");
+        double stageYMax = mgr.getDouble("stage", "ylimit", "high");
+
+        logger.info("Stage limits from config - X: [{}, {}], Y: [{}, {}]",
+                stageXMin, stageXMax, stageYMin, stageYMax);
+
+        // Validate the transform
+        boolean isValid = TransformationFunctions.validateTransform(
+                fullResToStage,
+                fullResWidth,
+                fullResHeight,
+                stageXMin, stageXMax,
+                stageYMin, stageYMax
+        );
+
+        if (!isValid) {
+            logger.error("Transform validation failed - produces out-of-bounds coordinates!");
+
+            // Test some specific points to show the user what's wrong
+            double[][] testPoints = {
+                    {fullResWidth/2, fullResHeight/2},  // Center
+                    {0, 0},                              // Top-left
+                    {fullResWidth, fullResHeight}       // Bottom-right
+            };
+
+            StringBuilder errorDetails = new StringBuilder();
+            for (double[] point : testPoints) {
+                double[] stagePoint = TransformationFunctions.transformQuPathFullResToStage(point, fullResToStage);
+                errorDetails.append(String.format("Full-res (%.0f, %.0f) → Stage (%.1f, %.1f)\n",
+                        point[0], point[1], stagePoint[0], stagePoint[1]));
+            }
+
+            final String details = errorDetails.toString();
+            Platform.runLater(() -> UIFunctions.notifyUserOfError(
+                    "The alignment transform would produce coordinates outside stage limits.\n\n" +
+                            "Stage limits: X[" + stageXMin + " to " + stageXMax + "], Y[" + stageYMin + " to " + stageYMax + "]\n\n" +
+                            "Sample transform results:\n" + details + "\n" +
+                            "Please create a new alignment for this slide.",
+                    "Invalid Transform"
+            ));
+            return CompletableFuture.completedFuture(null);
+        }
 
         // Set this as the current transform
         MicroscopeController.getInstance().setCurrentTransform(fullResToStage);
 
+        // Transform tile configurations to stage coordinates
+        String tempTileDir = (String) projectInfo.details.get("tempTileDirectory");
+        try {
+            logger.info("Transforming tile configurations in: {}", tempTileDir);
+            List<String> modifiedDirs = TransformationFunctions.transformTileConfiguration(
+                    tempTileDir, fullResToStage);
+            logger.info("Transformed tile configurations for directories: {}", modifiedDirs);
+        } catch (IOException e) {
+            logger.error("Failed to transform tile configurations", e);
+            Platform.runLater(() -> UIFunctions.notifyUserOfError(
+                    "Failed to transform tile coordinates to stage coordinates: " + e.getMessage(),
+                    "Transform Error"
+            ));
+            return CompletableFuture.completedFuture(null);
+        }
+
         // Check if we have a slide-specific alignment already
-        AffineTransform slideTransform = AffineTransformManager.loadSlideAlignment(project, alignContext.context.sample.sampleName());
+        AffineTransform slideTransform = AffineTransformManager.loadSlideAlignment(
+                project, alignContext.context.sample.sampleName());
 
         if (slideTransform != null) {
             logger.info("Found existing slide-specific alignment");
@@ -1152,7 +1230,30 @@ public class ExistingImageWorkflow {
     }
 
     /**
-     * Process annotations for acquisition and stitching
+     * Processes annotations for acquisition and stitching in a sequential manner.
+     * Each annotation is fully acquired before moving to the next to prevent
+     * hardware conflicts from concurrent stage movements.
+     *
+     * <p>The workflow for each annotation is:
+     * <ol>
+     *   <li>Launch acquisition via CLI</li>
+     *   <li>Monitor progress until completion</li>
+     *   <li>Perform stitching (can overlap with next acquisition)</li>
+     *   <li>Import results to project</li>
+     * </ol>
+     *
+     * <p>While acquisitions are sequential, stitching operations can run in parallel
+     * using the dedicated STITCH_EXECUTOR to maximize throughput.
+     *
+     * @param gui QuPath GUI instance
+     * @param sample Sample setup information
+     * @param projectInfo Project details including paths
+     * @param annotations List of annotations to acquire
+     * @param macroPixelSize Pixel size of the macro image in micrometers
+     * @param transform Affine transform from full-res to stage coordinates
+     * @param rotationAngles List of rotation angles for multi-angle acquisition
+     * @param rotationManager Manager for rotation-specific settings
+     * @return CompletableFuture that completes when all acquisitions and stitching are done
      */
     private static CompletableFuture<Void> processAnnotationsForAcquisition(
             QuPathGUI gui,
@@ -1192,39 +1293,214 @@ public class ExistingImageWorkflow {
 
         logger.info("Found {} valid annotations for acquisition", currentAnnotations.size());
 
-        // Process each annotation
-        List<CompletableFuture<Void>> acquisitionFutures = currentAnnotations.stream()
-                .map(annotation -> processAnnotation(
-                        annotation, sample, projectsFolder, modeWithIndex,
-                        configFile, rotationAngles, rotationManager, pixelSize,
-                        gui, project
-                ))
-                .collect(Collectors.toList());
+        // Track all stitching futures separately
+        List<CompletableFuture<Void>> stitchingFutures = new ArrayList<>();
 
-        // Wait for all to complete
-        return CompletableFuture.allOf(acquisitionFutures.toArray(new CompletableFuture[0]))
-                .thenRun(() -> {
-                    logger.info("All acquisitions completed");
+        // Process each annotation sequentially
+        CompletableFuture<Object> acquisitionChain = CompletableFuture.completedFuture(null);
 
-                    // Handle tile cleanup
-                    String tempTileDir = (String) projectInfo.details.get("tempTileDirectory");
-                    String handling = QPPreferenceDialog.getTileHandlingMethodProperty();
-                    if ("Delete".equals(handling)) {
-                        UtilityFunctions.deleteTilesAndFolder(tempTileDir);
-                    } else if ("Zip".equals(handling)) {
-                        UtilityFunctions.zipTilesAndMove(tempTileDir);
-                        UtilityFunctions.deleteTilesAndFolder(tempTileDir);
-                    }
-                    // Note: "None" option requires no action
+        for (int i = 0; i < currentAnnotations.size(); i++) {
+            final PathObject annotation = currentAnnotations.get(i);
+            final int annotationIndex = i + 1;
+            final int totalAnnotations = currentAnnotations.size();
 
-                    Platform.runLater(() -> {
-                        Alert alert = new Alert(Alert.AlertType.INFORMATION);
-                        alert.setTitle("Workflow Complete");
-                        alert.setHeaderText("Acquisition workflow completed successfully");
-                        alert.setContentText("All annotations have been acquired and stitched.");
-                        alert.showAndWait();
-                    });
+            acquisitionChain = acquisitionChain.thenCompose(v -> {
+                logger.info("Processing annotation {} of {}: {}",
+                        annotationIndex, totalAnnotations, annotation.getName());
+
+                // Update progress on UI
+                Platform.runLater(() -> {
+                    String message = String.format("Acquiring annotation %d of %d: %s",
+                            annotationIndex, totalAnnotations, annotation.getName());
+                    Dialogs.showInfoNotification("Acquisition Progress", message);
                 });
+
+                // Perform acquisition (blocking)
+                return performAnnotationAcquisition(
+                        annotation, sample, projectsFolder, modeWithIndex,
+                        configFile, rotationAngles
+                ).thenCompose(acquisitionResult -> {
+                    if (!acquisitionResult) {
+                        logger.error("Acquisition failed for annotation: {}", annotation.getName());
+                        return CompletableFuture.completedFuture(null);
+                    }
+
+                    // Launch stitching asynchronously (non-blocking)
+                    CompletableFuture<Void> stitchFuture = performAnnotationStitching(
+                            annotation, sample, projectsFolder, modeWithIndex,
+                            rotationAngles, rotationManager, pixelSize, gui, project
+                    );
+                    stitchingFutures.add(stitchFuture);
+
+                    // Return immediately to continue with next acquisition
+                    return CompletableFuture.completedFuture(null);
+                });
+            }).exceptionally(ex -> {
+                logger.error("Error processing annotation: " + annotation.getName(), ex);
+                Platform.runLater(() -> UIFunctions.notifyUserOfError(
+                        "Error processing annotation " + annotation.getName() + ": " + ex.getMessage(),
+                        "Acquisition Error"
+                ));
+                return null;
+            });
+        }
+
+        // After all acquisitions are done, wait for all stitching to complete
+        return acquisitionChain.thenCompose(v -> {
+            logger.info("All acquisitions completed. Waiting for {} stitching operations to complete...",
+                    stitchingFutures.size());
+
+            return CompletableFuture.allOf(stitchingFutures.toArray(new CompletableFuture[0]));
+        }).thenRun(() -> {
+            logger.info("All acquisitions and stitching completed");
+
+            // Handle tile cleanup
+            String tempTileDir = (String) projectInfo.details.get("tempTileDirectory");
+            String handling = QPPreferenceDialog.getTileHandlingMethodProperty();
+
+            Platform.runLater(() -> {
+                if ("Delete".equals(handling)) {
+                    UtilityFunctions.deleteTilesAndFolder(tempTileDir);
+                    logger.info("Deleted temporary tiles");
+                } else if ("Zip".equals(handling)) {
+                    UtilityFunctions.zipTilesAndMove(tempTileDir);
+                    UtilityFunctions.deleteTilesAndFolder(tempTileDir);
+                    logger.info("Zipped and archived temporary tiles");
+                }
+                // Note: "None" option requires no action
+
+                Alert alert = new Alert(Alert.AlertType.INFORMATION);
+                alert.setTitle("Workflow Complete");
+                alert.setHeaderText("Acquisition workflow completed successfully");
+                alert.setContentText("All annotations have been acquired and stitched.");
+                alert.showAndWait();
+            });
+        });
+    }
+
+    /**
+     * Performs acquisition for a single annotation.
+     * This is a blocking operation that waits for the CLI to complete.
+     *
+     * @return CompletableFuture with true if successful, false otherwise
+     */
+    private static CompletableFuture<Boolean> performAnnotationAcquisition(
+            PathObject annotation,
+            SampleSetupController.SampleSetupResult sample,
+            String projectsFolder,
+            String modeWithIndex,
+            String configFile,
+            List<Double> rotationAngles) {
+
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                List<String> cliArgs = new ArrayList<>(Arrays.asList(
+                        res.getString("command.acquisitionWorkflow"),
+                        configFile,
+                        projectsFolder,
+                        sample.sampleName(),
+                        modeWithIndex,
+                        annotation.getName()
+                ));
+
+                // Add rotation angles if present
+                if (rotationAngles != null && !rotationAngles.isEmpty()) {
+                    String anglesStr = rotationAngles.stream()
+                            .map(String::valueOf)
+                            .collect(Collectors.joining(" ", "(", ")"));
+                    cliArgs.add(anglesStr);
+                }
+
+                logger.info("Starting acquisition with args: {}", cliArgs);
+
+                int timeoutSeconds = 60;
+                if (rotationAngles != null && !rotationAngles.isEmpty()) {
+                    timeoutSeconds = 60 * rotationAngles.size();
+                }
+
+                CliExecutor.ExecResult result = CliExecutor.execComplexCommand(
+                        timeoutSeconds,
+                        res.getString("acquisition.cli.progressRegex"),
+                        cliArgs.toArray(new String[0])
+                );
+
+                if (result.exitCode() != 0) {
+                    String errorDetails = String.valueOf(result.stderr());
+                    if (errorDetails == null || errorDetails.trim().isEmpty()) {
+                        errorDetails = "No error details available from acquisition script";
+                    }
+                    logger.error("Acquisition failed with exit code {} for annotation '{}'. Error: {}",
+                            result.exitCode(), annotation.getName(), errorDetails);
+
+                    String finalErrorDetails = errorDetails;
+                    Platform.runLater(() -> UIFunctions.notifyUserOfError(
+                            "Acquisition failed for " + annotation.getName() + ":\n\n" + finalErrorDetails,
+                            "Acquisition Error"
+                    ));
+                    return false;
+                }
+
+                logger.info("Acquisition completed successfully for {}", annotation.getName());
+                return true;
+
+            } catch (Exception e) {
+                logger.error("Acquisition failed for {}", annotation.getName(), e);
+                String errorMessage = e.getMessage();
+                if (errorMessage == null || errorMessage.isEmpty()) {
+                    errorMessage = "Unknown error during acquisition";
+                }
+
+                final String finalErrorMessage = errorMessage;
+                Platform.runLater(() ->
+                        UIFunctions.notifyUserOfError(
+                                "Acquisition failed for " + annotation.getName() + ":\n\n" + finalErrorMessage,
+                                "Acquisition Error"
+                        )
+                );
+                return false;
+            }
+        });
+    }
+
+    /**
+     * Performs stitching for a single annotation.
+     * This runs asynchronously on the STITCH_EXECUTOR, which is single-threaded
+     * to ensure only one stitching operation runs at a time (memory constraint).
+     *
+     * @return CompletableFuture that completes when stitching is done
+     */
+    private static CompletableFuture<Void> performAnnotationStitching(
+            PathObject annotation,
+            SampleSetupController.SampleSetupResult sample,
+            String projectsFolder,
+            String modeWithIndex,
+            List<Double> rotationAngles,
+            RotationManager rotationManager,
+            double pixelSize,
+            QuPathGUI gui,
+            Project<BufferedImage> project) {
+
+        if (rotationAngles != null && !rotationAngles.isEmpty()) {
+            // Stitch each angle SEQUENTIALLY (not in parallel)
+            CompletableFuture<Void> stitchChain = CompletableFuture.completedFuture(null);
+
+            for (Double angle : rotationAngles) {
+                stitchChain = stitchChain.thenCompose(v ->
+                        stitchAnnotationAngle(
+                                annotation, angle, sample, projectsFolder,
+                                modeWithIndex, rotationManager, pixelSize, gui, project
+                        )
+                );
+            }
+
+            return stitchChain;
+        } else {
+            // Single stitch
+            return stitchAnnotation(
+                    annotation, null, sample, projectsFolder,
+                    modeWithIndex, null, pixelSize, gui, project
+            );
+        }
     }
 
     /**

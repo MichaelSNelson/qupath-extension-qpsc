@@ -153,13 +153,14 @@ public class UtilityFunctions {
 
                     // Import this file to the project
                     final String pathToImport = lastPath;
+
                     Platform.runLater(() -> {
                         try {
-                            // Read inversion prefs
-                            boolean invertedX = QPPreferenceDialog.getInvertedXProperty();
-                            boolean invertedY = QPPreferenceDialog.getInvertedYProperty();
+                            // Are acquired images in the correct orientation for stitching?
+                            boolean invertedX = false;
+                            boolean invertedY = true;
 
-                            // Add to project
+                            // Add to project with calculated flip values
                             QPProjectFunctions.addImageToProject(
                                     new File(pathToImport),
                                     project,
@@ -232,8 +233,10 @@ public class UtilityFunctions {
                 ResourceBundle res = ResourceBundle.getBundle("qupath.ext.qpsc.ui.strings");
 
                 // Read inversion prefs
-                boolean invertedX = QPPreferenceDialog.getInvertedXProperty();
-                boolean invertedY = QPPreferenceDialog.getInvertedYProperty();
+                // WARNING - UNTESTED ON ENOUGH DIFFERENT SYSTEMS TO VALIDATE THAT THIS IS ALL CORRECT
+                //TODO FIGURE OUT WHY AND POSSIBLY ADD EXTRA QPPREFERENCES
+                boolean invertedX = false;
+                boolean invertedY = true;
 
                 try {
                     // Add to project (handles flipping)

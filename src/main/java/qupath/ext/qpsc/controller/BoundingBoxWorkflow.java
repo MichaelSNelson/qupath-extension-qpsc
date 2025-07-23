@@ -74,6 +74,8 @@ public class BoundingBoxWorkflow {
                     // 3) Read persistent prefs
                     String projectsFolder = QPPreferenceDialog.getProjectsFolderProperty();
                     double overlapPercent = QPPreferenceDialog.getTileOverlapPercentProperty();
+
+                    //TODO FIX THIS?? not sure if these are the right properties to use here.
                     boolean invertX = QPPreferenceDialog.getInvertedXProperty();
                     boolean invertY = QPPreferenceDialog.getInvertedYProperty();
 

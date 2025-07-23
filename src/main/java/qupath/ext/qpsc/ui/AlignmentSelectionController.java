@@ -32,7 +32,52 @@ public class AlignmentSelectionController {
             AffineTransformManager.TransformPreset selectedTransform,
             boolean refinementRequested
     ) {}
+    /**
+     * Updates the transform information display based on the selected transform.
+     * Extracted to a separate method to avoid code duplication between initial display
+     * and selection change handling.
+     *
+     * @param transformInfo The TextArea to update
+     * @param selectedTransform The selected transform preset, or null if none selected
+     */
+    private static void updateTransformInfoDisplay(TextArea transformInfo,
+                                                   AffineTransformManager.TransformPreset selectedTransform) {
+        if (selectedTransform != null) {
+            StringBuilder info = new StringBuilder();
+            info.append("Transform: ").append(selectedTransform.getName()).append("\n");
+            info.append("Created: ").append(selectedTransform.getCreatedDate()).append("\n");
 
+            if (selectedTransform.getNotes() != null && !selectedTransform.getNotes().isEmpty()) {
+                info.append("Notes: ").append(selectedTransform.getNotes()).append("\n");
+            }
+
+            // Add transform matrix details
+            var transform = selectedTransform.getTransform();
+            info.append("\nTransform matrix:\n");
+            double[] matrix = new double[6];
+            transform.getMatrix(matrix);
+            info.append(String.format("  [%.4f, %.4f, %.4f]\n", matrix[0], matrix[2], matrix[4]));
+            info.append(String.format("  [%.4f, %.4f, %.4f]\n", matrix[1], matrix[3], matrix[5]));
+
+            // Add scale information
+            info.append(String.format("\nScale: X=%.4f, Y=%.4f µm/pixel\n",
+                    transform.getScaleX(), transform.getScaleY()));
+
+            // Add green box parameters if available
+            if (selectedTransform.getGreenBoxParams() != null) {
+                var params = selectedTransform.getGreenBoxParams();
+                info.append("\nGreen Box Parameters:\n");
+                info.append(String.format("  Green threshold: %.2f\n", params.greenThreshold));
+                info.append(String.format("  Min saturation: %.2f\n", params.saturationMin));
+                info.append(String.format("  Brightness: %.2f - %.2f\n",
+                        params.brightnessMin, params.brightnessMax));
+            }
+
+            transformInfo.setText(info.toString());
+        } else {
+            transformInfo.setText("No transform selected");
+        }
+    }
     /**
      * Shows the alignment selection dialog.
      *
@@ -175,6 +220,19 @@ public class AlignmentSelectionController {
                         detailsArea.clear();
                     }
                 });
+
+// RIGHT AFTER the listener above, add this line to populate the initial selection:
+// Trigger initial update for the already selected item
+                if (transformCombo.getValue() != null) {
+                    detailsArea.setText(String.format(
+                            "Microscope: %s\nMounting: %s\nCreated: %s\nNotes: %s",
+                            transformCombo.getValue().getMicroscope(),
+                            transformCombo.getValue().getMountingMethod(),
+                            transformCombo.getValue().getCreatedDate(),
+                            transformCombo.getValue().getNotes()
+                    ));
+                }
+
 
                 // Refinement checkbox
                 CheckBox refineCheckBox = new CheckBox("Refine alignment with single tile");

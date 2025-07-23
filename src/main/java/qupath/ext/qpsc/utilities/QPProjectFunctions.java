@@ -355,14 +355,44 @@ public class QPProjectFunctions {
     }
 
     /**
-     * Adds an image file to the given project, applying flips if requested.
-     * This method preserves associated images (like macro images) when adding to the project.
+     * Adds an image file to the specified QuPath project, with optional horizontal and vertical flipping.
+     *
+     * <p>This method handles two scenarios:</p>
+     * <ol>
+     *   <li><b>No flipping required:</b> The image is added directly to the project using its original
+     *       ImageServerBuilder. This preserves all associated images (e.g., macro/label images) that
+     *       may be embedded in the file.</li>
+     *   <li><b>Flipping required:</b> A TransformedServerBuilder is used to apply the necessary
+     *       affine transformations. However, this approach cannot preserve associated images due to
+     *       limitations in how QuPath handles transformed servers.</li>
+     * </ol>
+     *
+     * <p><b>Important Note on Associated Images:</b> When flipping is applied, any associated images
+     * (such as macro overview images commonly found in whole slide images) will be lost. This is a
+     * known limitation of using TransformedServerBuilder in QuPath.</p>
+     *
+     * <p><b>Coordinate System:</b> The flipping transformations assume a standard image coordinate
+     * system where (0,0) is at the top-left corner, X increases to the right, and Y increases
+     * downward.</p>
+     *
+     * @param imageFile The image file to add to the project. Must be a valid image file that
+     *                  QuPath can read (e.g., TIFF, OME-TIFF, SVS, etc.).
+     * @param project The QuPath project to which the image will be added. Must not be null.
+     * @param isSlideFlippedX If true, the image will be flipped horizontally (mirrored around the Y-axis).
+     * @param isSlideFlippedY If true, the image will be flipped vertically (mirrored around the X-axis).
+     * @return true if the image was successfully added to the project, false if the project was null.
+     * @throws IOException If there's an error reading the image file or adding it to the project.
+     *
+     * @see qupath.lib.images.servers.TransformedServerBuilder
+     * @see java.awt.geom.AffineTransform
      */
     public static boolean addImageToProject(
             File imageFile,
             Project<BufferedImage> project,
             boolean isSlideFlippedX,
             boolean isSlideFlippedY) throws IOException {
+
+        // Validate project parameter
         if (project == null) {
             logger.warn("Cannot add image: project is null");
             return false;
@@ -371,22 +401,34 @@ public class QPProjectFunctions {
         logger.info("Adding image to project: {} (flipX={}, flipY={})",
                 imageFile.getName(), isSlideFlippedX, isSlideFlippedY);
 
+        // Build an ImageServer for the image file
         String imageUri = imageFile.toURI().toString();
         ImageServer<BufferedImage> server = ImageServers.buildServer(imageUri);
 
-        // Check if we need to apply transforms
+        // Check if we need to apply any transformations
         if (!isSlideFlippedX && !isSlideFlippedY) {
-            // No transforms needed - add directly to preserve all associated images
+            // === PATH 1: No transformations needed ===
+            // This is the preferred path as it preserves all image metadata and associated images
             logger.info("No flips needed, adding image directly to preserve associated images");
+
+            // Add the image using its original builder
             ProjectImageEntry<BufferedImage> entry = project.addImage(server.getBuilder());
 
+            // Read the image data and set up basic properties
             ImageData<BufferedImage> imageData = entry.readImageData();
+
+            // Generate a thumbnail for image type estimation
             var regionStore = QPEx.getQuPath().getImageRegionStore();
             var thumb = regionStore.getThumbnail(imageData.getServer(), 0, 0, true);
+
+            // Estimate and set the image type (e.g., BRIGHTFIELD_H_E, FLUORESCENCE, etc.)
             var imageType = GuiTools.estimateImageType(imageData.getServer(), thumb);
             imageData.setImageType(imageType);
+
+            // Set a user-friendly name for the image in the project
             entry.setImageName(imageFile.getName());
 
+            // Sync changes and save the image data
             project.syncChanges();
             entry.saveImageData(imageData);
 
@@ -394,22 +436,45 @@ public class QPProjectFunctions {
             return true;
         }
 
-        // If we need to flip, we have to use the TransformedServerBuilder
-        // but this will lose associated images
+        // === PATH 2: Transformations needed ===
+        // We need to flip the image, which requires creating a transformed server
         logger.warn("Applying flips to image - associated images (macro) will not be preserved in the project");
 
+        // Create an affine transformation for the flipping
         AffineTransform transform = new AffineTransform();
+
+        // Calculate scale factors:
+        // - For flipping horizontally (around Y-axis): scale X by -1
+        // - For flipping vertically (around X-axis): scale Y by -1
+        // - No flipping: scale by 1 (identity)
         double scaleX = isSlideFlippedX ? -1 : 1;
         double scaleY = isSlideFlippedY ? -1 : 1;
-        transform.scale(scaleX, scaleY);
-        if (isSlideFlippedX) transform.translate(-server.getWidth(), 0);
-        if (isSlideFlippedY) transform.translate(0, -server.getHeight());
 
+        // Apply the scaling transformation
+        // This creates a flip around the origin (0,0)
+        transform.scale(scaleX, scaleY);
+
+        // CRITICAL: After flipping, we need to translate the image back into view
+        // When we flip horizontally (scaleX = -1), the image moves to negative X coordinates
+        // We must translate by the full width to bring it back to positive coordinates
+        if (isSlideFlippedX) {
+            transform.translate(-server.getWidth(), 0);
+        }
+
+        // Similarly for vertical flipping, translate by the full height
+        if (isSlideFlippedY) {
+            transform.translate(0, -server.getHeight());
+        }
+
+        // Create a transformed server that applies our affine transformation
         ImageServer<BufferedImage> flipped = new TransformedServerBuilder(server)
                 .transform(transform)
                 .build();
+
+        // Add the transformed server to the project
         ProjectImageEntry<BufferedImage> entry = project.addImage(flipped.getBuilder());
 
+        // Set up the image data (same process as no-flip path)
         ImageData<BufferedImage> imageData = entry.readImageData();
         var regionStore = QPEx.getQuPath().getImageRegionStore();
         var thumb = regionStore.getThumbnail(imageData.getServer(), 0, 0, true);
@@ -417,6 +482,7 @@ public class QPProjectFunctions {
         imageData.setImageType(imageType);
         entry.setImageName(imageFile.getName());
 
+        // Save the changes
         project.syncChanges();
         entry.saveImageData(imageData);
 
