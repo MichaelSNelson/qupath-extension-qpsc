@@ -191,10 +191,7 @@ public class TilingUtilities {
      * @param filterROI optional ROI to filter tiles (only tiles intersecting this ROI are kept)
      * @throws IOException if unable to write the configuration file
      */
-    /**
-     * Core tiling algorithm that generates a grid of tiles and writes the configuration.
-     * Simplified to remove axis inversion handling which should be done at transform time.
-     */
+
     private static void createTileGrid(
             double startX, double startY,
             double width, double height,

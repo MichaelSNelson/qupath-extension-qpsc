@@ -38,7 +38,7 @@ import static qupath.ext.qpsc.utilities.AffineTransformManager.saveSlideAlignmen
  * - Path B: Create new alignment through manual annotation workflow
  *
  * @author Mike Nelson
- * @version 2.0 - Updated for new alignment system with proper coordinate transformations
+ * @version 2.2 - Fixed tile coordinate transformation to stage coordinates
  */
 public class ExistingImageWorkflow {
     private static final Logger logger = LoggerFactory.getLogger(ExistingImageWorkflow.class);
@@ -64,8 +64,9 @@ public class ExistingImageWorkflow {
      * 6. Acquisition and stitching
      */
     public static void run() {
+        logger.info("************************************");
         logger.info("Starting Existing Image Workflow...");
-
+        logger.info("************************************");
         QuPathGUI gui = QuPathGUI.getInstance();
 
         // Verify we have an open image
@@ -300,7 +301,7 @@ public class ExistingImageWorkflow {
         int macroWidth = croppedMacroImage.getWidth();
         int macroHeight = croppedMacroImage.getHeight();
 
-        // Show green box preview with the cropped and flipped image
+        // Show enhanced green box preview with update button
         return GreenBoxPreviewController.showPreviewDialog(displayMacroImage, params)
                 .thenApply(greenBoxResult -> {
                     if (greenBoxResult == null) return null;
@@ -451,11 +452,11 @@ public class ExistingImageWorkflow {
      *
      * <p>This method handles the critical transformation chain:
      * <pre>
-     * Full-res pixels → Macro (flipped/cropped) → Macro (original) → Stage micrometers
+     * Full-res pixels → Macro (flipped/cropped) → Stage micrometers
      * </pre>
      *
-     * <p>The saved transform expects macro coordinates in the original (unflipped) coordinate system,
-     * while the green box detection operates on the flipped/cropped macro image as displayed to the user.
+     * <p>The saved transform expects macro coordinates in the displayed (flipped/cropped) coordinate system,
+     * which is exactly what we have after green box detection.
      *
      * @param gui QuPath GUI instance
      * @param alignContext Context containing alignment settings and green box detection results
@@ -487,41 +488,29 @@ public class ExistingImageWorkflow {
                 greenBox.getBoundsX(), greenBox.getBoundsY(),
                 greenBox.getBoundsWidth(), greenBox.getBoundsHeight());
 
-        // Step 1: Create transform from full-res to macro (flipped/cropped)
-        AffineTransform macroFlippedToFullRes = TransformationFunctions.calculateMacroFlippedToFullResTransform(
-                greenBox, fullResWidth, fullResHeight);
+        // Create full-res to macro transform
+        double scaleX = greenBox.getBoundsWidth() / fullResWidth;
+        double scaleY = greenBox.getBoundsHeight() / fullResHeight;
 
-        // Get the inverse to go from full-res to macro
-        AffineTransform fullResToMacroFlipped;
-        try {
-            fullResToMacroFlipped = macroFlippedToFullRes.createInverse();
-        } catch (Exception e) {
-            logger.error("Failed to invert transform", e);
-            Platform.runLater(() -> UIFunctions.notifyUserOfError(
-                    "Failed to create coordinate transform. The green box detection may be invalid.",
-                    "Transform Error"
-            ));
-            return CompletableFuture.completedFuture(null);
-        }
+        AffineTransform fullResToMacro = new AffineTransform();
+        fullResToMacro.translate(greenBox.getBoundsX(), greenBox.getBoundsY());
+        fullResToMacro.scale(scaleX, scaleY);
 
-        // Step 2: Create transform from macro (flipped) to macro (original)
-        AffineTransform macroFlippedToOriginal = new AffineTransform();
-        boolean flipX = QPPreferenceDialog.getFlipMacroXProperty();
-        boolean flipY = QPPreferenceDialog.getFlipMacroYProperty();
+        logger.info("FullRes→Macro transform: {}", fullResToMacro);
 
-        if (flipX) {
-            macroFlippedToOriginal.translate(alignContext.macroWidth, 0);
-            macroFlippedToOriginal.scale(-1, 1);
-        }
-        if (flipY) {
-            macroFlippedToOriginal.translate(0, alignContext.macroHeight);
-            macroFlippedToOriginal.scale(1, -1);
-        }
+        // Test this transform
+        double[] origin = {0, 0};
+        double[] corner = {fullResWidth, fullResHeight};
+        double[] originInMacro = new double[2];
+        double[] cornerInMacro = new double[2];
+        fullResToMacro.transform(origin, 0, originInMacro, 0, 1);
+        fullResToMacro.transform(corner, 0, cornerInMacro, 0, 1);
+        logger.info("Transform verification: full-res (0,0) → macro {}, full-res ({},{}) → macro {}",
+                Arrays.toString(originInMacro), fullResWidth, fullResHeight, Arrays.toString(cornerInMacro));
 
-        // Step 3: Combine all transforms: full-res → macro(flipped) → macro(original) → stage
+        // Now combine with macro→stage
         AffineTransform fullResToStage = new AffineTransform(macroToStageTransform);
-        fullResToStage.concatenate(macroFlippedToOriginal);
-        fullResToStage.concatenate(fullResToMacroFlipped);
+        fullResToStage.concatenate(fullResToMacro);
 
         logger.info("Created full-res→stage transform: {}", fullResToStage);
 
@@ -577,21 +566,8 @@ public class ExistingImageWorkflow {
         // Set this as the current transform
         MicroscopeController.getInstance().setCurrentTransform(fullResToStage);
 
-        // Transform tile configurations to stage coordinates
-        String tempTileDir = (String) projectInfo.details.get("tempTileDirectory");
-        try {
-            logger.info("Transforming tile configurations in: {}", tempTileDir);
-            List<String> modifiedDirs = TransformationFunctions.transformTileConfiguration(
-                    tempTileDir, fullResToStage);
-            logger.info("Transformed tile configurations for directories: {}", modifiedDirs);
-        } catch (IOException e) {
-            logger.error("Failed to transform tile configurations", e);
-            Platform.runLater(() -> UIFunctions.notifyUserOfError(
-                    "Failed to transform tile coordinates to stage coordinates: " + e.getMessage(),
-                    "Transform Error"
-            ));
-            return CompletableFuture.completedFuture(null);
-        }
+        // IMPORTANT: We will transform tiles AFTER they are created, not the TileConfiguration files
+        // The TileConfiguration files should remain in QuPath coordinates for stitching
 
         // Check if we have a slide-specific alignment already
         AffineTransform slideTransform = AffineTransformManager.loadSlideAlignment(
@@ -760,6 +736,13 @@ public class ExistingImageWorkflow {
 
         // Run tissue detection if configured
         String tissueScript = QPPreferenceDialog.getTissueDetectionScriptProperty();
+
+        // If no script is configured, prompt user to select one
+        if (tissueScript == null || tissueScript.isBlank()) {
+            tissueScript = promptForTissueDetectionScript();
+
+        }
+
         if (tissueScript != null && !tissueScript.isBlank()) {
             try {
                 double pixelSize = gui.getImageData().getServer()
@@ -795,6 +778,58 @@ public class ExistingImageWorkflow {
         }
 
         return annotations;
+    }
+
+    /**
+     * Prompt user to select a tissue detection script
+     */
+    private static String promptForTissueDetectionScript() {
+        CompletableFuture<String> future = new CompletableFuture<>();
+
+        Platform.runLater(() -> {
+            // First check if user wants to use tissue detection
+            var useDetection = Dialogs.showYesNoDialog(
+                    "Tissue Detection",
+                    "Would you like to run automatic tissue detection?\n\n" +
+                            "This will create annotations for tissue regions."
+            );
+
+            if (!useDetection) {
+                future.complete(null);
+                return;
+            }
+
+            // Show file chooser
+            javafx.stage.FileChooser fileChooser = new javafx.stage.FileChooser();
+            fileChooser.setTitle("Select Tissue Detection Script");
+            fileChooser.getExtensionFilters().addAll(
+                    new javafx.stage.FileChooser.ExtensionFilter("Groovy Scripts", "*.groovy"),
+                    new javafx.stage.FileChooser.ExtensionFilter("All Files", "*.*")
+            );
+
+            // Set initial directory if possible
+            String lastScript = QPPreferenceDialog.getTissueDetectionScriptProperty();
+            if (lastScript != null && !lastScript.isBlank()) {
+                File lastFile = new File(lastScript);
+                if (lastFile.getParentFile() != null && lastFile.getParentFile().exists()) {
+                    fileChooser.setInitialDirectory(lastFile.getParentFile());
+                }
+            }
+
+            File selectedFile = fileChooser.showOpenDialog(null);
+            if (selectedFile != null) {
+                future.complete(selectedFile.getAbsolutePath());
+            } else {
+                future.complete(null);
+            }
+        });
+
+        try {
+            return future.get();
+        } catch (InterruptedException | ExecutionException e) {
+            logger.error("Error selecting tissue detection script", e);
+            return null;
+        }
     }
 
     /**
@@ -836,7 +871,7 @@ public class ExistingImageWorkflow {
     }
 
     /**
-     * Create tiles for the given annotations
+     * Create tiles for the given annotations - tiles remain in QuPath coordinates
      */
     private static void createTilesForAnnotations(
             List<PathObject> annotations,
@@ -971,23 +1006,33 @@ public class ExistingImageWorkflow {
 
                 logger.info("Tile coordinates map to stage: ({}, {})", stageCoords[0], stageCoords[1]);
 
-                // Verify stage bounds
-                logger.info("Stage bounds check:");
-                logger.info("  X: {} (limits: -21000 to 33000) - {}",
-                        stageCoords[0],
-                        (stageCoords[0] >= -21000 && stageCoords[0] <= 33000) ? "OK" : "OUT OF BOUNDS!");
-                logger.info("  Y: {} (limits: -9000 to 11000) - {}",
-                        stageCoords[1],
-                        (stageCoords[1] >= -9000 && stageCoords[1] <= 11000) ? "OK" : "OUT OF BOUNDS!");
+                // Get stage bounds from config
+                MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(
+                        QPPreferenceDialog.getMicroscopeConfigFileProperty());
 
-                if (stageCoords[0] < -21000 || stageCoords[0] > 33000 ||
-                        stageCoords[1] < -9000 || stageCoords[1] > 11000) {
+                double stageXMin = mgr.getDouble("stage", "xlimit", "low");
+                double stageXMax = mgr.getDouble("stage", "xlimit", "high");
+                double stageYMin = mgr.getDouble("stage", "ylimit", "low");
+                double stageYMax = mgr.getDouble("stage", "ylimit", "high");
+
+                // Verify stage bounds for this specific coordinate
+                logger.info("Stage bounds check:");
+                logger.info("  X: {} (limits: {} to {}) - {}",
+                        stageCoords[0], stageXMin, stageXMax,
+                        (stageCoords[0] >= stageXMin && stageCoords[0] <= stageXMax) ? "OK" : "OUT OF BOUNDS!");
+                logger.info("  Y: {} (limits: {} to {}) - {}",
+                        stageCoords[1], stageYMin, stageYMax,
+                        (stageCoords[1] >= stageYMin && stageCoords[1] <= stageYMax) ? "OK" : "OUT OF BOUNDS!");
+
+                if (stageCoords[0] < stageXMin || stageCoords[0] > stageXMax ||
+                        stageCoords[1] < stageYMin || stageCoords[1] > stageYMax) {
                     Platform.runLater(() -> {
                         UIFunctions.notifyUserOfError(
                                 String.format("Selected tile is outside stage bounds!\n" +
                                                 "Tile would move to: (%.1f, %.1f)\n" +
-                                                "Stage limits: X: -21000 to 33000, Y: -9000 to 11000",
-                                        stageCoords[0], stageCoords[1]),
+                                                "Stage limits: X: %.0f to %.0f, Y: %.0f to %.0f",
+                                        stageCoords[0], stageCoords[1],
+                                        stageXMin, stageXMax, stageYMin, stageYMax),
                                 "Stage Bounds Error"
                         );
                     });
@@ -1155,7 +1200,7 @@ public class ExistingImageWorkflow {
                         String modeWithIndex = (String) projectInfo.details.get("imagingModeWithIndex");
 
                         List<PathObject> currentAnnotations = ensureAnnotationsReadyForAcquisition(
-                                gui, sample, tempTileDir, modeWithIndex, macroPixelSize);
+                                gui, sample, tempTileDir, modeWithIndex, macroPixelSize, transform);
 
                         if (currentAnnotations.isEmpty()) {
                             logger.warn("No annotations available for acquisition after tile regeneration");
@@ -1170,16 +1215,34 @@ public class ExistingImageWorkflow {
                     });
         });
     }
-
     /**
-     * Ensure annotations are ready for acquisition - regenerate tiles for current state
+     * Delete all tiles for a given modality
+     */
+    private static void deleteAllTiles(QuPathGUI gui, String modality) {
+        String modalityBase = modality.replaceAll("(_\\d+)$", "");
+
+        List<PathObject> tilesToRemove = gui.getViewer().getHierarchy().getDetectionObjects().stream()
+                .filter(o -> o.getPathClass() != null &&
+                        o.getPathClass().toString().contains(modalityBase))
+                .collect(Collectors.toList());
+
+        if (!tilesToRemove.isEmpty()) {
+            tilesToRemove.forEach(tile ->
+                    gui.getViewer().getHierarchy().removeObject(tile, false));
+            gui.getViewer().getHierarchy().fireHierarchyChangedEvent(gui.getViewer());
+            logger.info("Removed {} existing tiles for modality: {}", tilesToRemove.size(), modalityBase);
+        }
+    }
+    /**
+     * Ensure annotations are ready for acquisition - regenerate tiles and transform coordinates to stage
      */
     private static List<PathObject> ensureAnnotationsReadyForAcquisition(
             QuPathGUI gui,
             SampleSetupController.SampleSetupResult sample,
             String tempTileDirectory,
             String modeWithIndex,
-            double macroPixelSize) {
+            double macroPixelSize,
+            AffineTransform fullResToStage) {
 
         logger.info("Preparing annotations for acquisition...");
 
@@ -1197,6 +1260,9 @@ public class ExistingImageWorkflow {
         // Delete ALL existing tiles to avoid duplicates
         deleteAllTiles(gui, sample.modality());
 
+        // CRITICAL: Clean up stale folders from previous tile creation
+        cleanupStaleFolders(tempTileDirectory, currentAnnotations);
+
         // Get settings
         boolean invertedX = QPPreferenceDialog.getInvertedXProperty();
         boolean invertedY = QPPreferenceDialog.getInvertedYProperty();
@@ -1205,27 +1271,79 @@ public class ExistingImageWorkflow {
         createTilesForAnnotations(currentAnnotations, sample, tempTileDirectory,
                 modeWithIndex, macroPixelSize, invertedX, invertedY);
 
-        logger.info("Created tiles for {} annotations", currentAnnotations.size());
+        // CRITICAL: Transform the TileConfiguration files to stage coordinates
+        try {
+            logger.info("Transforming tile configurations in: {}", tempTileDirectory);
+            List<String> modifiedDirs = TransformationFunctions.transformTileConfiguration(
+                    tempTileDirectory, fullResToStage);
+            logger.info("Transformed tile configurations for directories: {}", modifiedDirs);
+        } catch (IOException e) {
+            logger.error("Failed to transform tile configurations", e);
+            Platform.runLater(() -> UIFunctions.notifyUserOfError(
+                    "Failed to transform tile coordinates to stage coordinates: " + e.getMessage(),
+                    "Transform Error"
+            ));
+            return Collections.emptyList();
+        }
+
+        logger.info("Created and transformed tiles for {} annotations", currentAnnotations.size());
 
         return currentAnnotations;
     }
 
     /**
-     * Delete all tiles for a given modality
+     * Clean up folders from previous tile creation that no longer have corresponding annotations
      */
-    private static void deleteAllTiles(QuPathGUI gui, String modality) {
-        String modalityBase = modality.replaceAll("(_\\d+)$", "");
+    private static void cleanupStaleFolders(String tempTileDirectory, List<PathObject> currentAnnotations) {
+        try {
+            File tempDir = new File(tempTileDirectory);
+            if (!tempDir.exists() || !tempDir.isDirectory()) {
+                return;
+            }
 
-        List<PathObject> tilesToRemove = gui.getViewer().getHierarchy().getDetectionObjects().stream()
-                .filter(o -> o.getPathClass() != null &&
-                        o.getPathClass().toString().contains(modalityBase))
-                .collect(Collectors.toList());
+            // Get current annotation names
+            Set<String> currentAnnotationNames = currentAnnotations.stream()
+                    .map(PathObject::getName)
+                    .filter(name -> name != null && !name.trim().isEmpty())
+                    .collect(Collectors.toSet());
 
-        if (!tilesToRemove.isEmpty()) {
-            tilesToRemove.forEach(tile ->
-                    gui.getViewer().getHierarchy().removeObject(tile, false));
-            gui.getViewer().getHierarchy().fireHierarchyChangedEvent(gui.getViewer());
-            logger.info("Removed {} existing tiles for modality: {}", tilesToRemove.size(), modalityBase);
+            // Check each subdirectory
+            File[] subdirs = tempDir.listFiles(File::isDirectory);
+            if (subdirs != null) {
+                for (File subdir : subdirs) {
+                    String dirName = subdir.getName();
+
+                    // Skip "bounds" directory (used by BoundingBoxWorkflow)
+                    if ("bounds".equals(dirName)) {
+                        continue;
+                    }
+
+                    // If this directory doesn't match any current annotation, delete it
+                    if (!currentAnnotationNames.contains(dirName)) {
+                        logger.info("Removing stale folder from previous tile creation: {}", dirName);
+                        deleteDirectoryRecursively(subdir);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logger.error("Error cleaning up stale folders", e);
+        }
+    }
+
+    /**
+     * Recursively delete a directory and all its contents
+     */
+    private static void deleteDirectoryRecursively(File dir) {
+        if (dir.isDirectory()) {
+            File[] files = dir.listFiles();
+            if (files != null) {
+                for (File file : files) {
+                    deleteDirectoryRecursively(file);
+                }
+            }
+        }
+        if (!dir.delete()) {
+            logger.warn("Failed to delete: {}", dir.getAbsolutePath());
         }
     }
 
@@ -1504,117 +1622,6 @@ public class ExistingImageWorkflow {
     }
 
     /**
-     * Process a single annotation through acquisition and stitching
-     */
-    private static CompletableFuture<Void> processAnnotation(
-            PathObject annotation,
-            SampleSetupController.SampleSetupResult sample,
-            String projectsFolder,
-            String modeWithIndex,
-            String configFile,
-            List<Double> rotationAngles,
-            RotationManager rotationManager,
-            double pixelSize,
-            QuPathGUI gui,
-            Project<BufferedImage> project) {
-
-        String annotationName = annotation.getName();
-        logger.info("Processing annotation: {}", annotationName);
-
-        // Launch acquisition
-        return CompletableFuture.supplyAsync(() -> {
-            try {
-                List<String> cliArgs = new ArrayList<>(Arrays.asList(
-                        res.getString("command.acquisitionWorkflow"),
-                        configFile,
-                        projectsFolder,
-                        sample.sampleName(),
-                        modeWithIndex,
-                        annotationName
-                ));
-
-                // Add rotation angles if present
-                if (rotationAngles != null && !rotationAngles.isEmpty()) {
-                    String anglesStr = rotationAngles.stream()
-                            .map(String::valueOf)
-                            .collect(Collectors.joining(" ", "(", ")"));
-                    cliArgs.add(anglesStr);
-                }
-
-                logger.info("Starting acquisition with args: {}", cliArgs);
-
-                int timeoutSeconds = 60;
-                if (rotationAngles != null && !rotationAngles.isEmpty()) {
-                    timeoutSeconds = 60 * rotationAngles.size();
-                }
-
-                CliExecutor.ExecResult result = CliExecutor.execComplexCommand(
-                        timeoutSeconds,
-                        res.getString("acquisition.cli.progressRegex"),
-                        cliArgs.toArray(new String[0])
-                );
-
-                if (result.exitCode() != 0) {
-                    String errorDetails = String.valueOf(result.stderr());
-                    if (errorDetails == null || errorDetails.trim().isEmpty()) {
-                        errorDetails = "No error details available from acquisition script";
-                    }
-                    logger.error("Acquisition failed with exit code {} for annotation '{}'. Error: {}",
-                            result.exitCode(), annotationName, errorDetails);
-                    throw new RuntimeException("Acquisition failed for " + annotationName +
-                            " with exit code " + result.exitCode() + ":\n" + errorDetails);
-                }
-
-                logger.info("Acquisition completed for {}", annotationName);
-                return null;
-
-            } catch (Exception e) {
-                logger.error("Acquisition failed for {}", annotationName, e);
-                String errorMessage = e.getMessage();
-                if (errorMessage == null || errorMessage.isEmpty()) {
-                    errorMessage = "Unknown error during acquisition";
-                }
-
-                // Extract just the meaningful part of the error if it's wrapped
-                if (errorMessage.contains(":\n")) {
-                    String[] parts = errorMessage.split(":\n", 2);
-                    if (parts.length > 1) {
-                        errorMessage = parts[1].trim();
-                    }
-                }
-
-                final String finalErrorMessage = errorMessage;
-                Platform.runLater(() ->
-                        UIFunctions.notifyUserOfError(
-                                "Acquisition failed for " + annotationName + ":\n\n" + finalErrorMessage,
-                                "Acquisition Error"
-                        )
-                );
-                throw new RuntimeException(e);
-            }
-        }).thenCompose(v -> {
-            // Schedule stitching
-            if (rotationAngles != null && !rotationAngles.isEmpty()) {
-                // Stitch each angle
-                List<CompletableFuture<Void>> stitchFutures = rotationAngles.stream()
-                        .map(angle -> stitchAnnotationAngle(
-                                annotation, angle, sample, projectsFolder,
-                                modeWithIndex, rotationManager, pixelSize, gui, project
-                        ))
-                        .collect(Collectors.toList());
-
-                return CompletableFuture.allOf(stitchFutures.toArray(new CompletableFuture[0]));
-            } else {
-                // Single stitch
-                return stitchAnnotation(
-                        annotation, null, sample, projectsFolder,
-                        modeWithIndex, null, pixelSize, gui, project
-                );
-            }
-        });
-    }
-
-    /**
      * Stitch a single annotation/angle combination
      */
     private static CompletableFuture<Void> stitchAnnotation(
@@ -1639,11 +1646,15 @@ public class ExistingImageWorkflow {
 
                 logger.info("Stitching {} for modality {}", annotationName, modalityName);
 
+                // The key fix: For ExistingImageWorkflow without rotation, the tiles are directly
+                // in the annotation folder, so we need to pass the parent folder (modeWithIndex)
+                // and use the annotation name as the matching string
                 String outPath = UtilityFunctions.stitchImagesAndUpdateProject(
                         projectsFolder,
                         sample.sampleName(),
                         modalityName,
                         annotationName,
+                        annotationName,  // Use annotation name as matching string
                         gui,
                         project,
                         String.valueOf(QPPreferenceDialog.getCompressionTypeProperty()),
