@@ -87,7 +87,7 @@ public class MicroscopeSocketClient implements AutoCloseable {
         MOVEZ("movez___"),
         /** Move XY stage */
         MOVE("move____"),
-        /** Get rotation angle */
+        /** Get rotation angle in ticks */
         GETR("getr____"),
         /** Move rotation stage */
         MOVER("mover___"),
@@ -242,9 +242,9 @@ public class MicroscopeSocketClient implements AutoCloseable {
     }
 
     /**
-     * Gets the current rotation angle of the stage.
+     * Gets the current rotation angle (in ticks) of the stage.
      *
-     * @return Rotation angle in degrees
+     * @return Rotation angle in ticks (double the angle)
      * @throws IOException if communication fails
      */
     public double getStageR() throws IOException {
@@ -254,7 +254,7 @@ public class MicroscopeSocketClient implements AutoCloseable {
         buffer.order(ByteOrder.BIG_ENDIAN);
 
         float angle = buffer.getFloat();
-        logger.debug("Stage rotation angle: {}", angle);
+        logger.debug("Stage rotation ticks: {}", angle);
         return angle;
     }
 

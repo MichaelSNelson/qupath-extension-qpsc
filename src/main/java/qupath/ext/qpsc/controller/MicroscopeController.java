@@ -169,9 +169,9 @@ public class MicroscopeController {
     }
 
     /**
-     * Queries the current rotation angle from the stage.
+     * Queries the current rotation angle (in ticks) from the stage.
      *
-     * @return The rotation angle in degrees
+     * @return The rotation angle in ticks
      * @throws IOException if communication fails
      * @throws InterruptedException if the operation is interrupted
      */
@@ -182,7 +182,7 @@ public class MicroscopeController {
 
         try {
             double angle = socketClient.getStageR();
-            logger.info("Stage rotation angle: {}", angle);
+            logger.info("Stage rotation angle: {} ticks", angle);
             return angle;
         } catch (IOException e) {
             handleSocketError(e, "Failed to get stage rotation angle");
@@ -252,7 +252,7 @@ public class MicroscopeController {
     /**
      * Rotates the stage to the given angle.
      *
-     * @param angle The target rotation angle in degrees
+     * @param angle The target rotation angle in ticks
      */
     public void moveStageR(double angle) {
         if (!useSocketConnection) {
@@ -262,7 +262,7 @@ public class MicroscopeController {
 
         try {
             socketClient.moveStageR(angle);
-            logger.info("Successfully rotated stage to angle: {}", angle);
+            logger.info("Successfully rotated stage to {} ticks", angle);
         } catch (IOException e) {
             handleSocketError(e, "Failed to rotate stage");
             moveStageRCLI(angle);

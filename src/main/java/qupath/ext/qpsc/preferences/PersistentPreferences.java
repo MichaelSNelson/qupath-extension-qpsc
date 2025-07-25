@@ -341,7 +341,7 @@ public class PersistentPreferences {
         lastTransformNameSaved.setValue(name);
     }
 
-    // ================== PPM ANGLE SELECTION ==================
+    // ================== PPM TICK SELECTION ==================
     private static final StringProperty ppmMinusSelectedSaved =
             PathPrefs.createPersistentPreference("PPMMinusSelected", "true");
 
