@@ -84,14 +84,12 @@ public class UIFunctions {
      *
      * @param progressCounter Thread-safe counter (incremented externally as work completes).
      * @param totalFiles      The max value of progressCounter.
-     * @param process         The background Process to watch for liveness (can be null).
      * @param timeoutMs       If no progress for this many ms, bar will auto-terminate.
      * @return a ProgressHandle you can .close() when you're done.
      */
     public static ProgressHandle showProgressBarAsync(
             AtomicInteger progressCounter,
             int totalFiles,
-            Process process,
             int timeoutMs) {
 
         final ProgressHandle[] handleHolder = new ProgressHandle[1];
@@ -102,14 +100,14 @@ public class UIFunctions {
             ProgressBar progressBar = new ProgressBar(0);
             progressBar.setPrefWidth(300);
             Label timeLabel = new Label("Estimating time…");
-            Label progressLabel = new Label("Processed 0 of " + totalFiles);
-            Label statusLabel = new Label("Monitoring file creation...");
+            Label progressLabel = new Label("Tiles acquired: 0 of " + totalFiles);
+            Label statusLabel = new Label("Acquisition in progress...");
 
             VBox vbox = new VBox(10, progressBar, progressLabel, timeLabel, statusLabel);
             vbox.setStyle("-fx-padding: 10;");
 
             stage.initModality(Modality.NONE);
-            stage.setTitle("Microscope acquisition progress");
+            stage.setTitle("Microscope Acquisition Progress");
             stage.setScene(new Scene(vbox));
             stage.setAlwaysOnTop(true);
             stage.show();
@@ -149,21 +147,41 @@ public class UIFunctions {
                 // Update UI
                 double fraction = totalFiles > 0 ? current / (double) totalFiles : 0.0;
                 progressBar.setProgress(fraction);
-                progressLabel.setText("Processed " + current + " of " + totalFiles);
+                progressLabel.setText("Tiles acquired: " + current + " of " + totalFiles);
 
-                // Update status based on process state
-                if (process != null && !process.isAlive()) {
-                    statusLabel.setText("Acquisition complete, waiting for files...");
+                // Update status message based on progress
+                if (current == 0) {
+                    statusLabel.setText("Waiting for acquisition to start...");
+                } else if (current < totalFiles) {
+                    statusLabel.setText("Acquiring tiles...");
+                } else {
+                    statusLabel.setText("Acquisition complete!");
                 }
 
                 // Calculate time estimate
                 if (startTime.get() > 0 && current > 0 && current < totalFiles) {
                     long elapsed = now - startTime.get();
                     long remMs = (long) ((elapsed / (double) current) * (totalFiles - current));
-                    timeLabel.setText("Remaining: " + (remMs / 1000) + " s");
+
+                    // Format time more nicely
+                    long remSeconds = remMs / 1000;
+                    if (remSeconds < 60) {
+                        timeLabel.setText("Time remaining: " + remSeconds + " seconds");
+                    } else {
+                        long minutes = remSeconds / 60;
+                        long seconds = remSeconds % 60;
+                        timeLabel.setText(String.format("Time remaining: %d min %d sec", minutes, seconds));
+                    }
                 } else if (current >= totalFiles) {
-                    timeLabel.setText("Complete!");
-                    statusLabel.setText("All files detected");
+                    long totalTime = now - startTime.get();
+                    long totalSeconds = totalTime / 1000;
+                    if (totalSeconds < 60) {
+                        timeLabel.setText("Completed in " + totalSeconds + " seconds");
+                    } else {
+                        long minutes = totalSeconds / 60;
+                        long seconds = totalSeconds % 60;
+                        timeLabel.setText(String.format("Completed in %d min %d sec", minutes, seconds));
+                    }
                 }
 
                 // Check completion conditions
@@ -179,7 +197,7 @@ public class UIFunctions {
                     if (stalled) {
                         logger.warn("Progress stalled: no new files for {} ms (current: {}, total: {})",
                                 timeSinceProgress, current, totalFiles);
-                        statusLabel.setText("Timeout - no new files detected");
+                        statusLabel.setText("Timeout - acquisition may have stalled");
                         statusLabel.setTextFill(Color.RED);
                     }
                 }

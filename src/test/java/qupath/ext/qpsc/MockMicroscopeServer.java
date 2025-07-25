@@ -306,7 +306,7 @@ public class MockMicroscopeServer implements AutoCloseable {
                     new StagePosition(pos.x, pos.y, pos.z, r)
             );
 
-            logger.info("Rotated to angle {} for client {}", r, clientId);
+            logger.info("Rotated to tick {} for client {}", r, clientId);
         }
 
         private void handleAcquire() throws IOException {

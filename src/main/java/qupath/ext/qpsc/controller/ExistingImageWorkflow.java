@@ -3,7 +3,6 @@ package qupath.ext.qpsc.controller;
 import javafx.animation.PauseTransition;
 import javafx.application.Platform;
 import javafx.scene.control.*;
-import javafx.stage.Modality;
 import javafx.util.Duration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,8 +26,6 @@ import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.stream.Collectors;
-
-import static qupath.ext.qpsc.utilities.AffineTransformManager.saveSlideAlignment;
 
 /**
  * ExistingImageWorkflow - Handles acquisition workflows for images already open in QuPath.
@@ -1188,12 +1185,18 @@ public class ExistingImageWorkflow {
                 return CompletableFuture.completedFuture(null);
             }
 
-            // Get rotation angles
+            // Get rotation angles with exposure times
             RotationManager rotationManager = new RotationManager(sample.modality());
 
-            return rotationManager.getRotationAngles(sample.modality())
-                    .thenCompose(rotationAngles -> {
+            return rotationManager.getRotationTicksWithExposure(sample.modality())
+                    .thenCompose(angleExposures -> {
+                        // Extract just the angles for logging
+                        List<Double> rotationAngles = angleExposures.stream()
+                                .map(ae -> ae.ticks)
+                                .collect(Collectors.toList());
+
                         logger.info("Rotation angles: {}", rotationAngles);
+                        logger.info("With exposures: {}", angleExposures);
 
                         // IMPORTANT: Regenerate tiles for current annotations before acquisition
                         String tempTileDir = (String) projectInfo.details.get("tempTileDirectory");
@@ -1210,12 +1213,11 @@ public class ExistingImageWorkflow {
                         // Process annotations
                         return processAnnotationsForAcquisition(
                                 gui, sample, projectInfo, currentAnnotations,
-                                macroPixelSize, transform, rotationAngles, rotationManager
+                                macroPixelSize, transform, angleExposures, rotationManager
                         );
                     });
         });
-    }
-    /**
+    }    /**
      * Delete all tiles for a given modality
      */
     private static void deleteAllTiles(QuPathGUI gui, String modality) {
@@ -1233,6 +1235,7 @@ public class ExistingImageWorkflow {
             logger.info("Removed {} existing tiles for modality: {}", tilesToRemove.size(), modalityBase);
         }
     }
+
     /**
      * Ensure annotations are ready for acquisition - regenerate tiles and transform coordinates to stage
      */
@@ -1369,7 +1372,7 @@ public class ExistingImageWorkflow {
      * @param annotations List of annotations to acquire
      * @param macroPixelSize Pixel size of the macro image in micrometers
      * @param transform Affine transform from full-res to stage coordinates
-     * @param rotationAngles List of rotation angles for multi-angle acquisition
+     * @param angleExposures List of rotation angles for multi-angle acquisition
      * @param rotationManager Manager for rotation-specific settings
      * @return CompletableFuture that completes when all acquisitions and stitching are done
      */
@@ -1380,7 +1383,7 @@ public class ExistingImageWorkflow {
             List<PathObject> annotations,
             double macroPixelSize,
             AffineTransform transform,
-            List<Double> rotationAngles,
+            List<RotationManager.TickExposure> angleExposures,
             RotationManager rotationManager) {
 
         String configFile = QPPreferenceDialog.getMicroscopeConfigFileProperty();
@@ -1433,15 +1436,20 @@ public class ExistingImageWorkflow {
                     Dialogs.showInfoNotification("Acquisition Progress", message);
                 });
 
-                // Perform acquisition (blocking)
+                // Perform acquisition (blocking) with angle exposures
                 return performAnnotationAcquisition(
                         annotation, sample, projectsFolder, modeWithIndex,
-                        configFile, rotationAngles
+                        configFile, angleExposures
                 ).thenCompose(acquisitionResult -> {
                     if (!acquisitionResult) {
                         logger.error("Acquisition failed for annotation: {}", annotation.getName());
                         return CompletableFuture.completedFuture(null);
                     }
+
+                    // Extract just angles for stitching
+                    List<Double> rotationAngles = angleExposures.stream()
+                            .map(ae -> ae.ticks)
+                            .collect(Collectors.toList());
 
                     // Launch stitching asynchronously (non-blocking)
                     CompletableFuture<Void> stitchFuture = performAnnotationStitching(
@@ -1485,7 +1493,6 @@ public class ExistingImageWorkflow {
                     UtilityFunctions.deleteTilesAndFolder(tempTileDir);
                     logger.info("Zipped and archived temporary tiles");
                 }
-                // Note: "None" option requires no action
 
                 Alert alert = new Alert(Alert.AlertType.INFORMATION);
                 alert.setTitle("Workflow Complete");
@@ -1495,7 +1502,6 @@ public class ExistingImageWorkflow {
             });
         });
     }
-
     /**
      * Performs acquisition for a single annotation.
      * This is a blocking operation that waits for the CLI to complete.
@@ -1508,7 +1514,7 @@ public class ExistingImageWorkflow {
             String projectsFolder,
             String modeWithIndex,
             String configFile,
-            List<Double> rotationAngles) {
+            List<RotationManager.TickExposure> tickExposures) {
 
         return CompletableFuture.supplyAsync(() -> {
             try {
@@ -1521,10 +1527,10 @@ public class ExistingImageWorkflow {
                         annotation.getName()
                 ));
 
-                // Add rotation angles if present
-                if (rotationAngles != null && !rotationAngles.isEmpty()) {
-                    String anglesStr = rotationAngles.stream()
-                            .map(String::valueOf)
+                // Add rotation angles with exposures if present
+                if (tickExposures != null && !tickExposures.isEmpty()) {
+                    String anglesStr = tickExposures.stream()
+                            .map(ae -> ae.ticks + "," + ae.exposureMs)
                             .collect(Collectors.joining(" ", "(", ")"));
                     cliArgs.add(anglesStr);
                 }
@@ -1532,8 +1538,8 @@ public class ExistingImageWorkflow {
                 logger.info("Starting acquisition with args: {}", cliArgs);
 
                 int timeoutSeconds = 60;
-                if (rotationAngles != null && !rotationAngles.isEmpty()) {
-                    timeoutSeconds = 60 * rotationAngles.size();
+                if (tickExposures != null && !tickExposures.isEmpty()) {
+                    timeoutSeconds = 60 * tickExposures.size();
                 }
 
                 CliExecutor.ExecResult result = CliExecutor.execComplexCommand(
@@ -1579,7 +1585,6 @@ public class ExistingImageWorkflow {
             }
         });
     }
-
     /**
      * Performs stitching for a single annotation.
      * This runs asynchronously on the STITCH_EXECUTOR, which is single-threaded
@@ -1641,7 +1646,7 @@ public class ExistingImageWorkflow {
                 String modalityName = modeWithIndex;
 
                 if (angle != null && rotationManager != null) {
-                    modalityName += rotationManager.getAngleSuffix(sample.modality(), angle);
+                    modalityName += rotationManager.getTickSuffix(sample.modality(), angle);
                 }
 
                 logger.info("Stitching {} for modality {}", annotationName, modalityName);

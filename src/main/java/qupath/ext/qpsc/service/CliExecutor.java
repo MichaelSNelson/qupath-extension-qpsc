@@ -19,6 +19,7 @@ import java.io.*;
 import java.util.regex.Pattern;
 import java.util.regex.Matcher;
 import java.util.stream.Stream;
+import java.util.concurrent.CountDownLatch;
 
 import qupath.ext.qpsc.utilities.MinorFunctions;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
@@ -40,7 +41,8 @@ public class CliExecutor {
             int            exitCode,
             boolean        timedOut,
             StringBuilder  stdout,
-            StringBuilder  stderr
+            StringBuilder  stderr,
+            boolean        allFilesFound  // NEW: indicates if file monitoring completed successfully
     ) { }
 
     public static int execCommandExitCode(String... args)
@@ -102,6 +104,7 @@ public class CliExecutor {
 
     /**
      * Runs a CLI command with an inactivity timeout and optional progress monitoring.
+     * MODIFIED: Now waits for all expected files before returning.
      */
     public static ExecResult execComplexCommand(
             int inactivityTimeoutSec,
@@ -144,10 +147,12 @@ public class CliExecutor {
         // --- Inactivity timer ---
         AtomicLong lastProgressTime = new AtomicLong(System.currentTimeMillis());
         AtomicBoolean timedOut = new AtomicBoolean(false);
+        AtomicBoolean allFilesFound = new AtomicBoolean(false);
 
         // Set up file-based progress monitoring
         Path baseDir = null;
         Set<Path> tileDirs = new HashSet<>();
+        CountDownLatch fileMonitorComplete = new CountDownLatch(1);
 
         if (args.length >= 6) {  // We have enough args to construct a path
             baseDir = Paths.get(args[2], args[3], args[4]); // projects/sample/mode
@@ -182,11 +187,11 @@ public class CliExecutor {
 
             // Start progress bar if we have tiles to monitor
             if (totalTifs > 0) {
-                progressHandle = UIFunctions.showProgressBarAsync(tifCounter, totalTifs, process,
+                progressHandle = UIFunctions.showProgressBarAsync(tifCounter, totalTifs,
                         inactivityTimeoutSec * 1000);
                 logger.info("Started progress bar for {} expected tiles", totalTifs);
 
-// Create monitoring thread
+                // Create monitoring thread
                 final Set<Path> finalTileDirs = new HashSet<>(tileDirs);
                 final int expectedFiles = totalTifs;
 
@@ -245,8 +250,6 @@ public class CliExecutor {
                                             int newCount = tifCounter.incrementAndGet();
                                             lastProgressTime.set(System.currentTimeMillis());
                                             logger.info("NEW TIF DETECTED: {}", p.getFileName());
-                                            //logger.info("  - Counter incremented from {} to {}", oldCount, newCount);
-                                            //logger.info("  - Total found so far: {}/{}", newCount, expectedFiles);
                                         }
                                     }
                                 } else if (checkCount == 1 || checkCount % 40 == 0) {
@@ -264,9 +267,10 @@ public class CliExecutor {
                                 logger.info("==========================");
                             }
 
-                            // Check if we should stop
-                            if (!process.isAlive() && seenFiles.size() >= expectedFiles) {
-                                logger.info("Process ended and all files found, stopping monitor");
+                            // Check if we found all files
+                            if (seenFiles.size() >= expectedFiles) {
+                                logger.info("All {} expected files found!", expectedFiles);
+                                allFilesFound.set(true);
                                 break;
                             }
 
@@ -278,6 +282,7 @@ public class CliExecutor {
 
                     logger.info("File monitor thread ending - found {}/{} files",
                             seenFiles.size(), expectedFiles);
+                    fileMonitorComplete.countDown();
                 }, "TIF-File-Monitor");
                 fileMonitor.setDaemon(true);
                 fileMonitor.start();
@@ -291,14 +296,6 @@ public class CliExecutor {
                 while ((line = outR.readLine()) != null) {
                     out.append(line).append('\n');
                     logger.debug("CLI stdout: {}", line);
-
-                    // Check for progress pattern in output
-                    //commented out for double counting
-//                    if (tilesPat != null && tilesPat.matcher(line).find()) {
-//                        int count = tifCounter.incrementAndGet();
-//                        lastProgressTime.set(System.currentTimeMillis());
-//                        logger.debug("Progress from stdout regex: {}", count);
-//                    }
 
                     // Reset timer on any output to prevent premature timeout
                     lastProgressTime.set(System.currentTimeMillis());
@@ -322,7 +319,7 @@ public class CliExecutor {
         // ---- Timeout Thread ----
         Thread timeoutThread = new Thread(() -> {
             try {
-                while (process.isAlive()) {
+                while (process.isAlive() || !allFilesFound.get()) {
                     long now = System.currentTimeMillis();
                     long idle = (now - lastProgressTime.get()) / 1000L;
 
@@ -345,6 +342,21 @@ public class CliExecutor {
         process.waitFor();
         tOut.join();
         tErr.join();
+
+        // IMPORTANT: Wait for file monitoring to complete if we're expecting files
+        if (totalTifs > 0) {
+            logger.info("Process exited, waiting for all {} files to be found...", totalTifs);
+            try {
+                // Wait for file monitor with a reasonable timeout
+                if (!fileMonitorComplete.await(300, TimeUnit.SECONDS)) {
+                    logger.warn("File monitoring did not complete within timeout");
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                logger.warn("Interrupted while waiting for file monitoring");
+            }
+        }
+
         timeoutThread.join(100);
 
         if (progressHandle != null) {
@@ -352,7 +364,7 @@ public class CliExecutor {
             progressHandle.close();
         }
 
-        return new ExecResult(process.exitValue(), timedOut.get(), out, err);
+        return new ExecResult(process.exitValue(), timedOut.get(), out, err, allFilesFound.get());
     }
 
     /**

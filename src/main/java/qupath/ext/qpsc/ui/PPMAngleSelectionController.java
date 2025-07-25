@@ -18,19 +18,19 @@ import java.util.ResourceBundle;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * Controller for PPM angle selection dialog.
+ * Controller for PPM tick (2 * angle) selection dialog.
  * Allows users to select which polarization angles to acquire.
  */
 public class PPMAngleSelectionController {
 
     private static final Logger logger = LoggerFactory.getLogger(PPMAngleSelectionController.class);
     /**
-     * Shows a dialog for selecting PPM acquisition angles.
+     * Shows a dialog for selecting PPM acquisition angles in ticks.
      * Allows users to choose which polarization angles to acquire from the configured range.
      *
-     * @param plusAngle The positive rotation angle from config (in degrees)
-     * @param minusAngle The negative rotation angle from config (in degrees)
-     * @return CompletableFuture with list of selected angles in degrees, or cancelled if user cancels
+     * @param plusAngle The positive rotation angle from config (in ticks)
+     * @param minusAngle The negative rotation angle from config (in ticks)
+     * @return CompletableFuture with list of selected angles in ticks, or cancelled if user cancels
      */
     public static CompletableFuture<List<Double>> showDialog(double plusAngle, double minusAngle) {
         CompletableFuture<List<Double>> future = new CompletableFuture<>();
@@ -41,35 +41,35 @@ public class PPMAngleSelectionController {
             Dialog<List<Double>> dialog = new Dialog<>();
             dialog.initModality(Modality.APPLICATION_MODAL);
             dialog.setTitle("PPM Angle Selection");
-            dialog.setHeaderText("Select polarization angles for acquisition:");
+            dialog.setHeaderText("Select polarization angles (in tick marks) for acquisition:");
 
             // Create checkboxes for each angle option with saved preferences
-            CheckBox minusCheck = new CheckBox(String.format("%.1f degrees", minusAngle));
-            CheckBox zeroCheck = new CheckBox("0 degrees");
-            CheckBox plusCheck = new CheckBox(String.format("%.1f degrees", plusAngle));
+            CheckBox minusCheck = new CheckBox(String.format("%.1f 'degrees'", minusAngle));
+            CheckBox zeroCheck = new CheckBox("0 'degrees'");
+            CheckBox plusCheck = new CheckBox(String.format("%.1f 'degrees'", plusAngle));
 
             // Load saved selections
             minusCheck.setSelected(PersistentPreferences.getPPMMinusSelected());
             zeroCheck.setSelected(PersistentPreferences.getPPMZeroSelected());
             plusCheck.setSelected(PersistentPreferences.getPPMPlusSelected());
 
-            logger.info("PPM angle dialog initialized with saved preferences: minus={}, zero={}, plus={}",
+            logger.info("PPM tick dialog initialized with saved preferences: minus={}, zero={}, plus={}",
                     minusCheck.isSelected(), zeroCheck.isSelected(), plusCheck.isSelected());
 
             // Save preferences when changed
             minusCheck.selectedProperty().addListener((obs, old, selected) -> {
                 PersistentPreferences.setPPMMinusSelected(selected);
-                logger.debug("PPM minus angle selection updated to: {}", selected);
+                logger.debug("PPM minus tick selection updated to: {}", selected);
             });
 
             zeroCheck.selectedProperty().addListener((obs, old, selected) -> {
                 PersistentPreferences.setPPMZeroSelected(selected);
-                logger.debug("PPM zero angle selection updated to: {}", selected);
+                logger.debug("PPM zero tick selection updated to: {}", selected);
             });
 
             plusCheck.selectedProperty().addListener((obs, old, selected) -> {
                 PersistentPreferences.setPPMPlusSelected(selected);
-                logger.debug("PPM plus angle selection updated to: {}", selected);
+                logger.debug("PPM plus tick selection updated to: {}", selected);
             });
 
             // Info label

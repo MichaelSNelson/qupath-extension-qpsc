@@ -285,11 +285,11 @@ public class BoundingBoxController {
                 Map<String, Object> ppmPlus = (Map<String, Object>) ppmConfigMap.get("ppm_plus");
                 Map<String, Object> ppmMinus = (Map<String, Object>) ppmConfigMap.get("ppm_minus");
 
-                if (ppmPlus != null && ppmPlus.containsKey("degrees")) {
-                    defaultPlus = ((Number) ppmPlus.get("degrees")).doubleValue();
+                if (ppmPlus != null && ppmPlus.containsKey("ticks")) {
+                    defaultPlus = ((Number) ppmPlus.get("ticks")).doubleValue();
                 }
-                if (ppmMinus != null && ppmMinus.containsKey("degrees")) {
-                    defaultMinus = ((Number) ppmMinus.get("degrees")).doubleValue();
+                if (ppmMinus != null && ppmMinus.containsKey("ticks")) {
+                    defaultMinus = ((Number) ppmMinus.get("ticks")).doubleValue();
                 }
 
                 Label ppmLabel = new Label("PPM Polarization Angles:");
@@ -302,12 +302,12 @@ public class BoundingBoxController {
                 angleGrid.setVgap(5);
                 angleGrid.setDisable(true);
 
-                Label plusLabel = new Label("Plus angle (degrees):");
+                Label plusLabel = new Label("Plus angle (ticks):");
                 Spinner<Double> plusSpinner = new Spinner<>(-180.0, 180.0, defaultPlus, 0.5);
                 plusSpinner.setEditable(true);
                 plusSpinner.setPrefWidth(100);
 
-                Label minusLabel = new Label("Minus angle (degrees):");
+                Label minusLabel = new Label("Minus angle (ticks):");
                 Spinner<Double> minusSpinner = new Spinner<>(-180.0, 180.0, defaultMinus, 0.5);
                 minusSpinner.setEditable(true);
                 minusSpinner.setPrefWidth(100);
