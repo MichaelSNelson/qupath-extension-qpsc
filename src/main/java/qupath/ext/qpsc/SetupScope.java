@@ -4,6 +4,7 @@ import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
 import javafx.scene.control.Menu;
 import javafx.scene.control.MenuItem;
+import javafx.scene.control.SeparatorMenuItem;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qupath.ext.qpsc.controller.QPScopeController;
@@ -26,7 +27,7 @@ import qupath.ext.qpsc.utilities.MicroscopeConfigManager;
  * This class retains the core template functionality:
  *   - It loads metadata (name, description, version) from a resource bundle.
  *   - It defines the required QuPath version and GitHub repository (for update checking).
- *   - It registers a menu item in QuPath’s Extensions menu.
+ *   - It registers a menu item in QuPath's Extensions menu.
  * <p>
  * When the user selects the menu item, it delegates to QPScopeController.startWorkflow()
  * to begin the microscope control workflow.
@@ -97,17 +98,19 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 		// Create or get the top level Extensions > QP Scope menu
 		var extensionMenu = qupath.getMenu("Extensions>" + EXTENSION_NAME, true);
 
+		// === WORKFLOW MENU ITEMS ===
+
 		// 1) Start with a bounding box workflow
 		MenuItem boundingBoxOption = new MenuItem(res.getString("menu.boundingbox"));
 		boundingBoxOption.setDisable(!configValid);
 		boundingBoxOption.setOnAction(e ->
-                {
-                    try {
-                        QPScopeController.getInstance().startWorkflow("boundingBox");
-                    } catch (IOException ex) {
-                        throw new RuntimeException(ex);
-                    }
-                }
+				{
+					try {
+						QPScopeController.getInstance().startWorkflow("boundingBox");
+					} catch (IOException ex) {
+						throw new RuntimeException(ex);
+					}
+				}
 		);
 
 		// 2) Start with existing image (only enabled if an image is open & config is valid)
@@ -127,21 +130,21 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 				)
 		);
 		existingImageOption.setOnAction(e ->
-                {
-                    try {
-                        QPScopeController.getInstance().startWorkflow("existingImage");
-                    } catch (IOException ex) {
-                        throw new RuntimeException(ex);
-                    }
-                }
+				{
+					try {
+						QPScopeController.getInstance().startWorkflow("existingImage");
+					} catch (IOException ex) {
+						throw new RuntimeException(ex);
+					}
+				}
 		);
+
 		// 3) Microscope alignment workflow (only enabled if image has macro)
 		MenuItem alignmentOption = new MenuItem(res.getString("menu.microscopeAlignment"));
 
 		logger.info("Creating microscope alignment menu item. Config valid: {}", configValid);
 
-
-// Create a simple binding like existing image uses
+		// Create a simple binding like existing image uses
 		alignmentOption.disableProperty().bind(
 				Bindings.createBooleanBinding(
 						() -> {
@@ -188,19 +191,31 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 			}
 		});
 
+		// === UTILITY MENU ITEMS ===
 
-		// 3) Basic stage control (test only)
+		// 4) Basic stage control (test only)
 		MenuItem stageControlOption = new MenuItem(res.getString("menu.stagecontrol"));
 		stageControlOption.setOnAction(e ->
-                {
-                    try {
-                        QPScopeController.getInstance().startWorkflow("basicStageInterface");
-                    } catch (IOException ex) {
-                        throw new RuntimeException(ex);
-                    }
-                }
+				{
+					try {
+						QPScopeController.getInstance().startWorkflow("basicStageInterface");
+					} catch (IOException ex) {
+						throw new RuntimeException(ex);
+					}
+				}
 		);
-		// 4) Testing #TODO remove before release
+
+		// 5) Server Connection Settings
+		MenuItem serverConnectionOption = new MenuItem("Server Connection Settings...");
+		serverConnectionOption.setOnAction(e -> {
+			try {
+				QPScopeController.getInstance().startWorkflow("serverConnection");
+			} catch (IOException ex) {
+				throw new RuntimeException(ex);
+			}
+		});
+
+		// 6) Testing (TODO: remove before release)
 		MenuItem testOption = new MenuItem("Test");
 		testOption.setOnAction(e ->
 				{
@@ -211,38 +226,19 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 					}
 				}
 		);
-//		MenuItem testRefreshOption = new MenuItem("Test Macro Detection");
-//		testRefreshOption.setOnAction(e -> {
-//			var data = qupath.getImageData();
-//			if (data == null) {
-//				logger.info("TEST: No image data");
-//			} else {
-//				var server = data.getServer();
-//				if (server == null) {
-//					logger.info("TEST: No server");
-//				} else {
-//					try {
-//						var list = server.getAssociatedImageList();
-//						logger.info("TEST: Associated images = {}", list);
-//						logger.info("TEST: Contains macro = {}", list != null && list.contains("macro"));
-//
-//						// Force re-evaluation of bindings
-//						Platform.runLater(() -> {
-//							alignmentOption.disableProperty().get(); // Force evaluation
-//							logger.info("TEST: Macro menu disabled = {}", alignmentOption.isDisable());
-//						});
-//					} catch (Exception ex) {
-//						logger.error("TEST: Error", ex);
-//					}
-//				}
-//			}
-//		});
-		// Add them straight to the QP Scope menu
+
+		// Add all menu items with proper organization
 		extensionMenu.getItems().addAll(
+				// Main workflows
 				boundingBoxOption,
 				existingImageOption,
-				alignmentOption,  // Add this line
+				alignmentOption,
+				new SeparatorMenuItem(),  // Visual separator
+				// Utilities
 				stageControlOption,
+				serverConnectionOption,
+				new SeparatorMenuItem(),  // Visual separator
+				// Development/Testing
 				testOption
 		);
 

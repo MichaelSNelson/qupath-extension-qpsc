@@ -1,57 +1,120 @@
 package qupath.ext.qpsc.controller;
 
 import java.awt.geom.AffineTransform;
+import java.io.IOException;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.nio.file.Files;
-import java.nio.file.Path;
 
+import qupath.ext.qpsc.preferences.PersistentPreferences;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
-import qupath.ext.qpsc.service.CliExecutor;
+import qupath.ext.qpsc.service.microscope.MicroscopeSocketClient;
 import qupath.ext.qpsc.utilities.MicroscopeConfigManager;
-import qupath.lib.gui.QuPathGUI;
 import qupath.ext.qpsc.utilities.TransformationFunctions;
-import qupath.ext.qpsc.utilities.UtilityFunctions;
 import qupath.ext.qpsc.ui.UIFunctions;
+import qupath.lib.gui.QuPathGUI;
 import qupath.lib.objects.PathObject;
 
-
 /**
- * MicroscopeController
+ * Central controller for microscope operations, providing high-level methods
+ * for stage control and coordinate transformation.
  *
- * <p>Thin adapter to your microscope’s CLI:
- *   - Wraps command line calls (e.g. "smartpath getStagePositionForQuPath ").
- *   - Exposes typed methods like moveStageXY, getStagePositionZ, moveStageP.
- *   - Handles timeouts and error pop-ups so higher layers don’t worry about CLI details.
+ * <p>This controller acts as a facade for the microscope hardware, managing:
+ * <ul>
+ *   <li>Socket-based communication with the Python microscope server</li>
+ *   <li>Coordinate transformations between QuPath and stage coordinates</li>
+ *   <li>Stage movement and position queries</li>
+ *   <li>Error handling and user notifications</li>
+ * </ul>
+ *
+ * <p>The controller uses a singleton pattern to ensure a single connection
+ * to the microscope server throughout the application lifecycle.</p>
+ *
+ * @author Mike Nelson
+ * @since 1.0
  */
-
-
 public class MicroscopeController {
+    private static final Logger logger = LoggerFactory.getLogger(MicroscopeController.class);
 
-    private static final Logger logger =
-            LoggerFactory.getLogger(QPScopeController.class);
+    /** Singleton instance */
     private static MicroscopeController instance;
 
-    // Store whatever you need here: e.g. the last used transformation, Python script path, etc.
-    private AffineTransform currentTransform;
-    private static final ResourceBundle BUNDLE =
-            ResourceBundle.getBundle("qupath.ext.qpsc.ui.strings");
+    /** Socket client for server communication */
+    private final MicroscopeSocketClient socketClient;
 
-    // now load from strings.properties
-    private static final String CMD_GET_STAGE_XY  = BUNDLE.getString("command.getStagePositionXY");
-    private static final String CMD_GET_STAGE_Z   = BUNDLE.getString("command.getStagePositionZ");
-    private static final String CMD_GET_STAGE_P   = BUNDLE.getString("command.getStagePositionP");
+    /** Current affine transform for coordinate conversion */
+    private final AtomicReference<AffineTransform> currentTransform = new AtomicReference<>();
 
-    private static final String CMD_MOVE_STAGE_XY = BUNDLE.getString("command.moveStageXY");
-    private static final String CMD_MOVE_STAGE_Z  = BUNDLE.getString("command.moveStageZ");
-    private static final String CMD_MOVE_STAGE_P  = BUNDLE.getString("command.moveStageP");
+    /** Flag to track if we should use socket or fall back to CLI */
+    private volatile boolean useSocketConnection = true;
 
+    /** Resource bundle for command strings */
+    private static final ResourceBundle BUNDLE = ResourceBundle.getBundle("qupath.ext.qpsc.ui.strings");
 
+    /**
+     * Private constructor for singleton pattern.
+     * Initializes the socket connection to the microscope server.
+     */
+    private MicroscopeController() {
+        // Get connection parameters from preferences
+        String host = QPPreferenceDialog.getMicroscopeServerHost();
+        int port = QPPreferenceDialog.getMicroscopeServerPort();
+        boolean autoConnect = QPPreferenceDialog.getAutoConnectToServer();
+
+        // Get advanced settings from persistent preferences
+        int connectTimeout = PersistentPreferences.getSocketConnectionTimeoutMs();
+        int readTimeout = PersistentPreferences.getSocketReadTimeoutMs();
+        int maxReconnects = PersistentPreferences.getSocketMaxReconnectAttempts();
+        long reconnectDelay = PersistentPreferences.getSocketReconnectDelayMs();
+        long healthCheckInterval = PersistentPreferences.getSocketHealthCheckIntervalMs();
+
+        // Check if socket connection is enabled
+        this.useSocketConnection = QPPreferenceDialog.getUseSocketConnection();
+
+        // Initialize socket client with configuration from preferences
+        this.socketClient = new MicroscopeSocketClient(
+                host,
+                port,
+                connectTimeout,
+                readTimeout,
+                maxReconnects,
+                reconnectDelay,
+                healthCheckInterval
+        );
+
+        // Attempt initial connection if auto-connect is enabled
+        if (autoConnect && useSocketConnection) {
+            try {
+                socketClient.connect();
+                logger.info("Successfully connected to microscope server at {}:{}", host, port);
+                PersistentPreferences.setSocketLastConnectionStatus("Connected");
+                PersistentPreferences.setSocketLastConnectionTime(
+                        new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new java.util.Date())
+                );
+            } catch (IOException e) {
+                logger.warn("Failed to connect to microscope server on startup: {}", e.getMessage());
+                logger.info("Will attempt to connect when first command is sent");
+                PersistentPreferences.setSocketLastConnectionStatus("Failed: " + e.getMessage());
+            }
+        }
+
+        // Register shutdown hook to cleanly disconnect
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            try {
+                socketClient.close();
+            } catch (Exception e) {
+                logger.debug("Error closing socket client during shutdown", e);
+            }
+        }));
+    }
+
+    /**
+     * Gets the singleton instance of the MicroscopeController.
+     *
+     * @return The singleton instance
+     */
     public static synchronized MicroscopeController getInstance() {
         if (instance == null) {
             instance = new MicroscopeController();
@@ -60,229 +123,231 @@ public class MicroscopeController {
     }
 
     /**
-     * Query the microscope for its current X,Y stage position.
+     * Queries the microscope for its current X,Y stage position.
      *
-     * @return a two element array [x, y] in microns
-     * @throws IOException if the CLI returns non zero or unparsable output
-     * @throws InterruptedException if the process is interrupted
+     * @return A two-element array [x, y] in microns
+     * @throws IOException if communication fails
+     * @throws InterruptedException if the operation is interrupted
      */
     public double[] getStagePositionXY() throws IOException, InterruptedException {
-        String out = CliExecutor.execCommandAndGetOutput(10, CMD_GET_STAGE_XY);
-        logger.info("getStagePositionXY raw output: {}", out);
-
-        // Strip parentheses and commas, then split on whitespace
-        String cleaned = out.replaceAll("[(),]", "").trim();
-        String[] parts = cleaned.split("\\s+");
-        if (parts.length < 2) {
-            logger.error("Unexpected output format for XY position: {}", out);
-            throw new IOException("Unexpected output for XY position: " + out);
+        if (!useSocketConnection) {
+            // Fall back to CLI if socket is disabled
+            return getStagePositionXYCLI();
         }
 
         try {
-            logger.info("XY coordinates: "+parts[0]+"  "+ parts[1]);
-            return new double[]{
-                    Double.parseDouble(parts[0]),
-                    Double.parseDouble(parts[1])
-            };
-        } catch (NumberFormatException e) {
-            logger.error("Failed to parse stage position numbers from {}", out, e);
-            throw new IOException("Cannot parse stage position: " + out, e);
+            double[] position = socketClient.getStageXY();
+            logger.info("Stage XY position: ({}, {})", position[0], position[1]);
+            return position;
+        } catch (IOException e) {
+            handleSocketError(e, "Failed to get stage XY position");
+            // Retry with CLI fallback
+            return getStagePositionXYCLI();
         }
     }
 
     /**
-     * Query the microscope for its current Z stage position.
+     * Queries the microscope for its current Z stage position.
      *
-     * @return the Z coordinate in microns
-     * @throws IOException if the CLI returns non zero or unparsable output
-     * @throws InterruptedException if the process is interrupted
+     * @return The Z coordinate in microns
+     * @throws IOException if communication fails
+     * @throws InterruptedException if the operation is interrupted
      */
     public double getStagePositionZ() throws IOException, InterruptedException {
-        String out = CliExecutor.execCommandAndGetOutput(10, CMD_GET_STAGE_Z);
+        if (!useSocketConnection) {
+            return getStagePositionZCLI();
+        }
+
         try {
-            String z = out.trim();
-             logger.info("Z stage position um:" + z);
-            return Double.parseDouble(z);
-        } catch (NumberFormatException e) {
-            throw new IOException("Unexpected output for Z position: " + out, e);
+            double z = socketClient.getStageZ();
+            logger.info("Stage Z position: {}", z);
+            return z;
+        } catch (IOException e) {
+            handleSocketError(e, "Failed to get stage Z position");
+            return getStagePositionZCLI();
         }
     }
+
     /**
-     * Query the current polarizer (P) position from the stage.
-     * @return The P coordinate (degrees or whatever units your CLI returns).
+     * Queries the current rotation angle from the stage.
+     *
+     * @return The rotation angle in degrees
+     * @throws IOException if communication fails
+     * @throws InterruptedException if the operation is interrupted
      */
     public double getStagePositionR() throws IOException, InterruptedException {
-        String out = CliExecutor.execCommandAndGetOutput(10, CMD_GET_STAGE_P);
+        if (!useSocketConnection) {
+            return getStagePositionRCLI();
+        }
+
         try {
-            // Strip parentheses and commas, then split on whitespace
-            String cleaned = out.replaceAll("[(),]", "").trim();
-            logger.info("Rotational stage angle" + cleaned);
-             return Double.parseDouble(cleaned);
-        } catch (NumberFormatException e) {
-            throw new IOException("Unexpected output for P position: " + out, e);
+            double angle = socketClient.getStageR();
+            logger.info("Stage rotation angle: {}", angle);
+            return angle;
+        } catch (IOException e) {
+            handleSocketError(e, "Failed to get stage rotation angle");
+            return getStagePositionRCLI();
         }
     }
+
     /**
-     * Move the stage in X,Y only.  Z will not be touched.
+     * Moves the stage in X,Y only. Z position is not affected.
      *
-     * @param x target X in microns
-     * @param y target Y in microns
+     * @param x Target X coordinate in microns
+     * @param y Target Y coordinate in microns
      */
     public void moveStageXY(double x, double y) {
-        try {
-            CliExecutor.ExecResult res = CliExecutor.execComplexCommand(
-                    10,       // timeout in seconds
-                    null,     // no progress regex
-                    CMD_MOVE_STAGE_XY,
-                    "-x",
-                    Double.toString(x),
-                    "-y",
-                    Double.toString(y)
-            );
-            if (res.timedOut()) {
-                UIFunctions.notifyUserOfError(
-                        "Move XY command timed out:\n" + res.stderr(),
-                        "Stage Move XY");
-            } else if (res.exitCode() != 0) {
-                UIFunctions.notifyUserOfError(
-                        "Move XY returned exit code " + res.exitCode() + "\n" + res.stderr(),
-                        "Stage Move XY");
-            }
-        } catch (IOException | InterruptedException e) {
+        // Validate bounds
+        if (!isWithinBoundsXY(x, y)) {
             UIFunctions.notifyUserOfError(
-                    "Failed to run Move XY:\n" + e.getMessage(),
-                    "Stage Move XY");
+                    String.format("Target position (%.2f, %.2f) is outside stage limits", x, y),
+                    "Stage Limits Exceeded"
+            );
+            return;
+        }
+
+        if (!useSocketConnection) {
+            moveStageXYCLI(x, y);
+            return;
+        }
+
+        try {
+            socketClient.moveStageXY(x, y);
+            logger.info("Successfully moved stage to XY: ({}, {})", x, y);
+        } catch (IOException e) {
+            handleSocketError(e, "Failed to move stage XY");
+            moveStageXYCLI(x, y);
         }
     }
 
     /**
-     * Move the stage in Z only.
+     * Moves the stage in Z only.
      *
-     * @param z target Z in microns
+     * @param z Target Z coordinate in microns
      */
     public void moveStageZ(double z) {
-        try {
-            CliExecutor.ExecResult res = CliExecutor.execComplexCommand(
-                    10,       // timeout in seconds
-                    null,     // no progress regex
-                    CMD_MOVE_STAGE_Z,
-                    "-z",
-                    Double.toString(z)
-            );
-            if (res.timedOut()) {
-                UIFunctions.notifyUserOfError(
-                        "Move Z command timed out:\n" + res.stderr(),
-                        "Stage Move Z");
-            } else if (res.exitCode() != 0) {
-                UIFunctions.notifyUserOfError(
-                        "Move Z returned exit code " + res.exitCode() + "\n" + res.stderr(),
-                        "Stage Move Z");
-            }
-        } catch (IOException | InterruptedException e) {
+        // Validate bounds
+        if (!isWithinBoundsZ(z)) {
             UIFunctions.notifyUserOfError(
-                    "Failed to run Move Z:\n" + e.getMessage(),
-                    "Stage Move Z");
+                    String.format("Target Z position %.2f is outside stage limits", z),
+                    "Stage Limits Exceeded"
+            );
+            return;
+        }
+
+        if (!useSocketConnection) {
+            moveStageZCLI(z);
+            return;
+        }
+
+        try {
+            socketClient.moveStageZ(z);
+            logger.info("Successfully moved stage to Z: {}", z);
+        } catch (IOException e) {
+            handleSocketError(e, "Failed to move stage Z");
+            moveStageZCLI(z);
         }
     }
 
     /**
-     * Rotate the polarizer to the given angle p.
-     * @param r The target polarizer coordinate.
+     * Rotates the stage to the given angle.
+     *
+     * @param angle The target rotation angle in degrees
      */
-    public void moveStageR(double r) {
+    public void moveStageR(double angle) {
+        if (!useSocketConnection) {
+            moveStageRCLI(angle);
+            return;
+        }
+
         try {
-            var res = CliExecutor.execComplexCommand(
-                    10, null,
-                    CMD_MOVE_STAGE_P,
-                    "-angle",
-                    Double.toString(r)
-            );
-            if (res.timedOut()) {
-                UIFunctions.notifyUserOfError(
-                        "Move-P command timed out:\n" + res.stderr(),
-                        "Polarizer Move");
-            } else if (res.exitCode() != 0) {
-                UIFunctions.notifyUserOfError(
-                        "Move-P returned exit code " + res.exitCode() + "\n" + res.stderr(),
-                        "Polarizer Move");
-            }
-        } catch (Exception e) {
-            UIFunctions.notifyUserOfError(
-                    "Failed to run Move-P:\n" + e.getMessage(),
-                    "Polarizer Move");
+            socketClient.moveStageR(angle);
+            logger.info("Successfully rotated stage to angle: {}", angle);
+        } catch (IOException e) {
+            handleSocketError(e, "Failed to rotate stage");
+            moveStageRCLI(angle);
         }
     }
 
+    /**
+     * Starts an acquisition workflow on the microscope.
+     *
+     * @param yamlPath Path to YAML configuration
+     * @param projectsFolder Projects folder path
+     * @param sampleLabel Sample label
+     * @param scanType Scan type
+     * @param regionName Region name
+     * @param angles Rotation angles for acquisition
+     * @throws IOException if communication fails
+     */
+    public void startAcquisition(String yamlPath, String projectsFolder, String sampleLabel,
+                                 String scanType, String regionName, double[] angles) throws IOException {
+        if (!useSocketConnection) {
+            throw new IOException("Acquisition requires socket connection");
+        }
 
+        try {
+            socketClient.startAcquisition(yamlPath, projectsFolder, sampleLabel,
+                    scanType, regionName, angles);
+            logger.info("Started acquisition workflow");
+        } catch (IOException e) {
+            handleSocketError(e, "Failed to start acquisition");
+            throw e;
+        }
+    }
 
-    // TODO implement browser for QuPath image that moves microscope to locations
-    // These two functions form a base for that.
+    /**
+     * Moves the microscope stage to the center of the given tile.
+     *
+     * @param tile The tile to move to
+     */
     public void onMoveButtonClicked(PathObject tile) {
-        // 1) compute stageCoords from QuPath coords
+        if (currentTransform.get() == null) {
+            UIFunctions.notifyUserOfError(
+                    "No transformation set. Please run alignment workflow first.",
+                    "No Transform"
+            );
+            return;
+        }
+
+        // Compute stage coordinates from QuPath coordinates
+        double[] qpCoords = {tile.getROI().getCentroidX(), tile.getROI().getCentroidY()};
         double[] stageCoords = TransformationFunctions.transformQuPathFullResToStage(
-                new double[]{tile.getROI().getCentroidX(), tile.getROI().getCentroidY()},
-                currentTransform
+                qpCoords, currentTransform.get()
         );
 
-        // 2) apply any offset TODO remove
-//
-//        double[] currentOffset = getCurrentOffset();
-//        double[] adjusted = TransformationFunctions.applyOffset(stageCoords, currentOffset, true);
+        logger.info("Moving to tile center - QuPath: ({}, {}) -> Stage: ({}, {})",
+                qpCoords[0], qpCoords[1], stageCoords[0], stageCoords[1]);
 
-        // 3) actually move hardware
-        try {
-            moveStageXY(stageCoords[0], stageCoords[1]);
-            // maybe pop a confirmation dialog here
-        } catch (Exception e) {
-            UIFunctions.notifyUserOfError(
-                    "Failed to move stage:\n" + e.getMessage(),
-                    "Stage Move"
-            );
-        }
+        moveStageXY(stageCoords[0], stageCoords[1]);
     }
+
     /**
-     * Move the microscope stage to the center of the given tile.
-     * TODO automatically generated function, does not even remotely work
-     */
-    public void moveStageToSelectedTile(PathObject tile) throws IOException, InterruptedException {
-        // 1) extract QuPath coords
-        double x = tile.getROI().getCentroidX();
-        double y = tile.getROI().getCentroidY();
-        double [] qpCoords = new double []{x, y};
-
-        logger.info("Moving to QuPath coords: " + qpCoords);
-
-        // 2) transform into stage coords
-        double [] stageCoords = TransformationFunctions.transformQuPathFullResToStage(qpCoords, currentTransform);
-
-
-        logger.info("Transformed to stage coords: " + List.of(stageCoords[0], stageCoords[1]));
-
-        // 4) send to Python
-        //TODO this should be using CLIExecutor
-        UtilityFunctions.execCommand(
-                String.valueOf(List.of(String.valueOf(stageCoords[0]), String.valueOf(stageCoords[1]))),
-                "moveStageToCoordinates");
-
-        // 5) optionally update the GUI
-        QuPathGUI.getInstance().getViewer()
-                .setCenterPixelLocation(x, y);
-    }
-
-    /** If you ever want to update the scaling transform after alignment: */
-    public void setCurrentTransform(AffineTransform tx) {
-        this.currentTransform = tx;
-    }
-    /**
-     * Gets the current affine transform used for coordinate conversion between
-     * QuPath image coordinates and microscope stage coordinates.
+     * Sets the current affine transform for coordinate conversion.
      *
-     * @return The current AffineTransform, or null if none has been set
+     * @param transform The transform to use
+     */
+    public void setCurrentTransform(AffineTransform transform) {
+        this.currentTransform.set(transform);
+        logger.info("Updated current transform: {}", transform);
+    }
+
+    /**
+     * Gets the current affine transform.
+     *
+     * @return The current transform, or null if none set
      */
     public AffineTransform getCurrentTransform() {
-        return this.currentTransform;
+        return this.currentTransform.get();
     }
 
+    /**
+     * Checks if the given XY coordinates are within stage bounds.
+     *
+     * @param x X coordinate in microns
+     * @param y Y coordinate in microns
+     * @return true if within bounds, false otherwise
+     */
     public boolean isWithinBoundsXY(double x, double y) {
         String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
         var xlimits = MicroscopeConfigManager.getInstance(configPath).getSection("stage", "xlimit");
@@ -303,24 +368,180 @@ public class MicroscopeController {
 
         return withinX && withinY;
     }
+
+    /**
+     * Checks if the given Z coordinate is within stage bounds.
+     *
+     * @param z Z coordinate in microns
+     * @return true if within bounds, false otherwise
+     */
     public boolean isWithinBoundsZ(double z) {
         String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
         var zlimits = MicroscopeConfigManager.getInstance(configPath).getSection("stage", "zlimit");
 
-        if (zlimits == null ) {
-            logger.error("Stage limits missing from config");
+        if (zlimits == null) {
+            logger.error("Stage Z limits missing from config");
             return false;
         }
 
         double zLow = ((Number)zlimits.get("low")).doubleValue();
         double zHigh = ((Number)zlimits.get("high")).doubleValue();
 
-
-        boolean withinZ = (z >= Math.min(zLow, zHigh) && z <= Math.max(zLow, zHigh));
-
-
-        return withinZ ;
+        return (z >= Math.min(zLow, zHigh) && z <= Math.max(zLow, zHigh));
     }
 
-}
+    /**
+     * Checks if the socket client is connected.
+     *
+     * @return true if connected, false otherwise
+     */
+    public boolean isConnected() {
+        return socketClient.isConnected();
+    }
 
+    /**
+     * Manually connects to the microscope server.
+     *
+     * @throws IOException if connection fails
+     */
+    public void connect() throws IOException {
+        socketClient.connect();
+    }
+
+    /**
+     * Manually disconnects from the microscope server.
+     */
+    public void disconnect() {
+        socketClient.disconnect();
+    }
+
+    /**
+     * Enables or disables socket connection mode.
+     * When disabled, falls back to CLI commands.
+     *
+     * @param useSocket true to use socket, false for CLI
+     */
+    public void setUseSocketConnection(boolean useSocket) {
+        this.useSocketConnection = useSocket;
+        logger.info("Socket connection mode: {}", useSocket ? "ENABLED" : "DISABLED (using CLI)");
+    }
+
+    /**
+     * Handles socket errors and optionally falls back to CLI.
+     *
+     * @param e The exception that occurred
+     * @param operation Description of the failed operation
+     */
+    private void handleSocketError(IOException e, String operation) {
+        logger.error("{}: {}", operation, e.getMessage());
+
+        // Update connection status
+        PersistentPreferences.setSocketLastConnectionStatus("Error: " + e.getMessage());
+
+        if (PersistentPreferences.getSocketAutoFallbackToCLI()) {
+            logger.info("Falling back to CLI for this operation");
+        } else {
+            UIFunctions.notifyUserOfError(
+                    operation + "\n" + e.getMessage() +
+                            "\n\nConsider enabling CLI fallback in preferences.",
+                    "Communication Error"
+            );
+        }
+    }
+
+    // ========== CLI Fallback Methods ==========
+    // These methods are kept for backwards compatibility and fallback
+
+    private double[] getStagePositionXYCLI() throws IOException, InterruptedException {
+        String cmd = BUNDLE.getString("command.getStagePositionXY");
+        String out = qupath.ext.qpsc.service.CliExecutor.execCommandAndGetOutput(10, cmd);
+        logger.info("CLI getStagePositionXY output: {}", out);
+
+        String cleaned = out.replaceAll("[(),]", "").trim();
+        String[] parts = cleaned.split("\\s+");
+        if (parts.length < 2) {
+            throw new IOException("Unexpected output for XY position: " + out);
+        }
+
+        return new double[]{
+                Double.parseDouble(parts[0]),
+                Double.parseDouble(parts[1])
+        };
+    }
+
+    private double getStagePositionZCLI() throws IOException, InterruptedException {
+        String cmd = BUNDLE.getString("command.getStagePositionZ");
+        String out = qupath.ext.qpsc.service.CliExecutor.execCommandAndGetOutput(10, cmd);
+        return Double.parseDouble(out.trim());
+    }
+
+    private double getStagePositionRCLI() throws IOException, InterruptedException {
+        String cmd = BUNDLE.getString("command.getStagePositionP");
+        String out = qupath.ext.qpsc.service.CliExecutor.execCommandAndGetOutput(10, cmd);
+        String cleaned = out.replaceAll("[(),]", "").trim();
+        return Double.parseDouble(cleaned);
+    }
+
+    private void moveStageXYCLI(double x, double y) {
+        try {
+            String cmd = BUNDLE.getString("command.moveStageXY");
+            var res = qupath.ext.qpsc.service.CliExecutor.execComplexCommand(
+                    10, null, cmd, "-x", Double.toString(x), "-y", Double.toString(y)
+            );
+
+            if (res.timedOut() || res.exitCode() != 0) {
+                UIFunctions.notifyUserOfError(
+                        "CLI Move XY failed: " + res.stderr(),
+                        "Stage Move Error"
+                );
+            }
+        } catch (Exception e) {
+            UIFunctions.notifyUserOfError(
+                    "Failed to run Move XY: " + e.getMessage(),
+                    "Stage Move Error"
+            );
+        }
+    }
+
+    private void moveStageZCLI(double z) {
+        try {
+            String cmd = BUNDLE.getString("command.moveStageZ");
+            var res = qupath.ext.qpsc.service.CliExecutor.execComplexCommand(
+                    10, null, cmd, "-z", Double.toString(z)
+            );
+
+            if (res.timedOut() || res.exitCode() != 0) {
+                UIFunctions.notifyUserOfError(
+                        "CLI Move Z failed: " + res.stderr(),
+                        "Stage Move Error"
+                );
+            }
+        } catch (Exception e) {
+            UIFunctions.notifyUserOfError(
+                    "Failed to run Move Z: " + e.getMessage(),
+                    "Stage Move Error"
+            );
+        }
+    }
+
+    private void moveStageRCLI(double angle) {
+        try {
+            String cmd = BUNDLE.getString("command.moveStageP");
+            var res = qupath.ext.qpsc.service.CliExecutor.execComplexCommand(
+                    10, null, cmd, "-angle", Double.toString(angle)
+            );
+
+            if (res.timedOut() || res.exitCode() != 0) {
+                UIFunctions.notifyUserOfError(
+                        "CLI Move R failed: " + res.stderr(),
+                        "Stage Move Error"
+                );
+            }
+        } catch (Exception e) {
+            UIFunctions.notifyUserOfError(
+                    "Failed to run Move R: " + e.getMessage(),
+                    "Stage Move Error"
+            );
+        }
+    }
+}

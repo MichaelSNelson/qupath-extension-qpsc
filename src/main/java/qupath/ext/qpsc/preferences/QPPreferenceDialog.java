@@ -1,9 +1,6 @@
 package qupath.ext.qpsc.preferences;
 
-import javafx.beans.property.BooleanProperty;
-import javafx.beans.property.DoubleProperty;
-import javafx.beans.property.ObjectProperty;
-import javafx.beans.property.StringProperty;
+import javafx.beans.property.*;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import org.slf4j.Logger;
@@ -49,7 +46,17 @@ public class QPPreferenceDialog {
             PathPrefs.createPersistentPreference("isInvertedXProperty", false);
     private static final BooleanProperty invertedYProperty =
             PathPrefs.createPersistentPreference("isInvertedYProperty", true);
+    private static final StringProperty microscopeServerHostProperty =
+            PathPrefs.createPersistentPreference("microscope.server.host", "127.0.0.1");
 
+    private static final IntegerProperty microscopeServerPortProperty =
+            PathPrefs.createPersistentPreference("microscope.server.port", 5000);
+
+    private static final BooleanProperty useSocketConnectionProperty =
+            PathPrefs.createPersistentPreference("microscope.useSocketConnection", true);
+
+    private static final BooleanProperty autoConnectToServerProperty =
+            PathPrefs.createPersistentPreference("microscope.autoConnectToServer", true);
     private static final StringProperty microscopeConfigFileProperty =
             PathPrefs.createPersistentPreference(
                     "microscopeConfigFileProperty",
@@ -183,6 +190,29 @@ public class QPPreferenceDialog {
                 .category(CATEGORY)
                 .description("Compression for OME Pyramid output.")
                 .build());
+        items.add(new PropertyItemBuilder<>(useSocketConnectionProperty, Boolean.class)
+                .name("Use Socket Connection")
+                .category(CATEGORY)
+                .description("Use direct socket connection instead of CLI commands (faster but requires server)")
+                .build());
+
+        items.add(new PropertyItemBuilder<>(microscopeServerHostProperty, String.class)
+                .name("Microscope Server Host")
+                .category(CATEGORY)
+                .description("IP address or hostname of the microscope control server")
+                .build());
+
+        items.add(new PropertyItemBuilder<>(microscopeServerPortProperty, Integer.class)
+                .name("Microscope Server Port")
+                .category(CATEGORY)
+                .description("Port number for the microscope control server (default: 5000)")
+                .build());
+
+        items.add(new PropertyItemBuilder<>(autoConnectToServerProperty, Boolean.class)
+                .name("Auto-connect to Server")
+                .category(CATEGORY)
+                .description("Automatically connect to microscope server when QuPath starts")
+                .build());
     }
 
 
@@ -204,6 +234,37 @@ public class QPPreferenceDialog {
     }
     public static String getSelectedScannerProperty() {
         return selectedScannerProperty.get();
+    }
+    public static String getMicroscopeServerHost() {
+        return microscopeServerHostProperty.get();
+    }
+
+    public static void setMicroscopeServerHost(String host) {
+        microscopeServerHostProperty.set(host);
+    }
+
+    public static int getMicroscopeServerPort() {
+        return microscopeServerPortProperty.get();
+    }
+
+    public static void setMicroscopeServerPort(int port) {
+        microscopeServerPortProperty.set(port);
+    }
+
+    public static boolean getUseSocketConnection() {
+        return useSocketConnectionProperty.get();
+    }
+
+    public static void setUseSocketConnection(boolean useSocket) {
+        useSocketConnectionProperty.set(useSocket);
+    }
+
+    public static boolean getAutoConnectToServer() {
+        return autoConnectToServerProperty.get();
+    }
+
+    public static void setAutoConnectToServer(boolean autoConnect) {
+        autoConnectToServerProperty.set(autoConnect);
     }
 
     public static void setSelectedScannerProperty(String scanner) {

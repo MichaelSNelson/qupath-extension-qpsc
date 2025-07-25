@@ -408,4 +408,93 @@ public class PersistentPreferences {
     public static void setRefineAlignment(final boolean refine) {
         refineAlignmentSaved.setValue(String.valueOf(refine));
     }
+
+    // ================== SOCKET CONNECTION SETTINGS ==================
+    private static final StringProperty socketConnectionTimeoutMsSaved =
+            PathPrefs.createPersistentPreference("SocketConnectionTimeoutMs", "3000");
+
+    private static final StringProperty socketReadTimeoutMsSaved =
+            PathPrefs.createPersistentPreference("SocketReadTimeoutMs", "5000");
+
+    private static final StringProperty socketMaxReconnectAttemptsSaved =
+            PathPrefs.createPersistentPreference("SocketMaxReconnectAttempts", "3");
+
+    private static final StringProperty socketReconnectDelayMsSaved =
+            PathPrefs.createPersistentPreference("SocketReconnectDelayMs", "5000");
+
+    private static final StringProperty socketHealthCheckIntervalMsSaved =
+            PathPrefs.createPersistentPreference("SocketHealthCheckIntervalMs", "30000");
+
+    private static final StringProperty socketAutoFallbackToCLISaved =
+            PathPrefs.createPersistentPreference("SocketAutoFallbackToCLI", "true");
+
+    private static final StringProperty socketLastConnectionStatusSaved =
+            PathPrefs.createPersistentPreference("SocketLastConnectionStatus", "");
+
+    private static final StringProperty socketLastConnectionTimeSaved =
+            PathPrefs.createPersistentPreference("SocketLastConnectionTime", "");
+
+    public static int getSocketConnectionTimeoutMs() {
+        return Integer.parseInt(socketConnectionTimeoutMsSaved.getValue());
+    }
+
+    public static void setSocketConnectionTimeoutMs(int timeout) {
+        socketConnectionTimeoutMsSaved.setValue(String.valueOf(timeout));
+    }
+
+    public static int getSocketReadTimeoutMs() {
+        return Integer.parseInt(socketReadTimeoutMsSaved.getValue());
+    }
+
+    public static void setSocketReadTimeoutMs(int timeout) {
+        socketReadTimeoutMsSaved.setValue(String.valueOf(timeout));
+    }
+
+    public static int getSocketMaxReconnectAttempts() {
+        return Integer.parseInt(socketMaxReconnectAttemptsSaved.getValue());
+    }
+
+    public static void setSocketMaxReconnectAttempts(int attempts) {
+        socketMaxReconnectAttemptsSaved.setValue(String.valueOf(attempts));
+    }
+
+    public static long getSocketReconnectDelayMs() {
+        return Long.parseLong(socketReconnectDelayMsSaved.getValue());
+    }
+
+    public static void setSocketReconnectDelayMs(long delay) {
+        socketReconnectDelayMsSaved.setValue(String.valueOf(delay));
+    }
+
+    public static long getSocketHealthCheckIntervalMs() {
+        return Long.parseLong(socketHealthCheckIntervalMsSaved.getValue());
+    }
+
+    public static void setSocketHealthCheckIntervalMs(long interval) {
+        socketHealthCheckIntervalMsSaved.setValue(String.valueOf(interval));
+    }
+
+    public static boolean getSocketAutoFallbackToCLI() {
+        return Boolean.parseBoolean(socketAutoFallbackToCLISaved.getValue());
+    }
+
+    public static void setSocketAutoFallbackToCLI(boolean fallback) {
+        socketAutoFallbackToCLISaved.setValue(String.valueOf(fallback));
+    }
+
+    public static String getSocketLastConnectionStatus() {
+        return socketLastConnectionStatusSaved.getValue();
+    }
+
+    public static void setSocketLastConnectionStatus(String status) {
+        socketLastConnectionStatusSaved.setValue(status);
+    }
+
+    public static String getSocketLastConnectionTime() {
+        return socketLastConnectionTimeSaved.getValue();
+    }
+
+    public static void setSocketLastConnectionTime(String time) {
+        socketLastConnectionTimeSaved.setValue(time);
+    }
 }

@@ -3,7 +3,8 @@ package qupath.ext.qpsc.controller;
 import java.io.IOException;
 import java.util.concurrent.CompletableFuture;
 import java.util.logging.Logger;
-
+import qupath.ext.qpsc.ui.ServerConnectionController;
+import qupath.ext.qpsc.ui.StageMovementController;
 import qupath.ext.qpsc.ui.StageMovementController;
 
 /**
@@ -67,7 +68,12 @@ public class QPScopeController {
             case "boundingBox"  -> BoundingBoxWorkflow.run();
             case "existingImage"-> ExistingImageWorkflow.run();
             case "basicStageInterface"-> StageMovementController.showTestStageMovementDialog();
-            case "microscopeAlignment"       -> MicroscopeAlignmentWorkflow.run();  // Add this line
+            case "microscopeAlignment" -> MicroscopeAlignmentWorkflow.run();
+            case "serverConnection" -> ServerConnectionController.showDialog()
+                    .exceptionally(ex -> {
+                        logger.severe("Server connection dialog error: " + ex.getMessage());
+                        return null;
+                    });
             case "test" ->  TestWorkflow.run();
             default             -> logger.warning("Unknown workflow mode " + mode);
         }
