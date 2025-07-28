@@ -351,6 +351,8 @@ public class PersistentPreferences {
     private static final StringProperty ppmPlusSelectedSaved =
             PathPrefs.createPersistentPreference("PPMPlusSelected", "true");
 
+    private static final StringProperty ppmBrightfieldSelectedSaved =
+            PathPrefs.createPersistentPreference("PPMBrightfieldSelected", "false");
     public static boolean getPPMMinusSelected() {
         return Boolean.parseBoolean(ppmMinusSelectedSaved.getValue());
     }
@@ -373,6 +375,99 @@ public class PersistentPreferences {
 
     public static void setPPMPlusSelected(final boolean selected) {
         ppmPlusSelectedSaved.setValue(String.valueOf(selected));
+    }
+    /**
+     * Gets whether PPM brightfield is selected
+     * @return true if selected
+     */
+    public static boolean getPPMBrightfieldSelected() {
+        return Boolean.parseBoolean(ppmBrightfieldSelectedSaved.getValue());
+    }
+
+    /**
+     * Sets whether PPM brightfield is selected
+     * @param selected true to select
+     */
+    public static void setPPMBrightfieldSelected(final boolean selected) {
+        ppmBrightfieldSelectedSaved.setValue(String.valueOf(selected));
+    }
+    // ================== PPM EXPOSURE SETTINGS ==================
+// Exposure times in milliseconds for each PPM angle
+    private static final StringProperty ppmMinusExposureMsSaved =
+            PathPrefs.createPersistentPreference("PPMMinusExposureMs", "500");
+
+    private static final StringProperty ppmZeroExposureMsSaved =
+            PathPrefs.createPersistentPreference("PPMZeroExposureMs", "800");
+
+    private static final StringProperty ppmPlusExposureMsSaved =
+            PathPrefs.createPersistentPreference("PPMPlusExposureMs", "500");
+
+    private static final StringProperty ppmBrightfieldExposureMsSaved =
+            PathPrefs.createPersistentPreference("PPMBrightfieldExposureMs", "10");
+
+
+    /**
+     * Gets the exposure time in milliseconds for PPM minus angle
+     * @return exposure time in ms
+     */
+    public static int getPPMMinusExposureMs() {
+        return Integer.parseInt(ppmMinusExposureMsSaved.getValue());
+    }
+
+    /**
+     * Sets the exposure time in milliseconds for PPM minus angle
+     * @param exposureMs exposure time in ms
+     */
+    public static void setPPMMinusExposureMs(final int exposureMs) {
+        ppmMinusExposureMsSaved.setValue(String.valueOf(exposureMs));
+    }
+
+    /**
+     * Gets the exposure time in milliseconds for PPM zero angle
+     * @return exposure time in ms
+     */
+    public static int getPPMZeroExposureMs() {
+        return Integer.parseInt(ppmZeroExposureMsSaved.getValue());
+    }
+
+    /**
+     * Sets the exposure time in milliseconds for PPM zero angle
+     * @param exposureMs exposure time in ms
+     */
+    public static void setPPMZeroExposureMs(final int exposureMs) {
+        ppmZeroExposureMsSaved.setValue(String.valueOf(exposureMs));
+    }
+
+    /**
+     * Gets the exposure time in milliseconds for PPM plus angle
+     * @return exposure time in ms
+     */
+    public static int getPPMPlusExposureMs() {
+        return Integer.parseInt(ppmPlusExposureMsSaved.getValue());
+    }
+
+    /**
+     * Sets the exposure time in milliseconds for PPM plus angle
+     * @param exposureMs exposure time in ms
+     */
+    public static void setPPMPlusExposureMs(final int exposureMs) {
+        ppmPlusExposureMsSaved.setValue(String.valueOf(exposureMs));
+    }
+
+    /**
+     * Gets the exposure time in milliseconds for PPM brightfield
+     * @return exposure time in ms
+     */
+    public static int getPPMBrightfieldExposureMs() {
+        return Integer.parseInt(ppmBrightfieldExposureMsSaved.getValue());
+    }
+
+    /**
+     * Sets the exposure time in milliseconds for PPM brightfield
+     * @param exposureMs exposure time in ms
+     */
+    public static void setPPMBrightfieldExposureMs(final int exposureMs) {
+        ppmBrightfieldExposureMsSaved.setValue(String.valueOf(exposureMs));
     }
 
     // ================== ALIGNMENT SELECTION ==================

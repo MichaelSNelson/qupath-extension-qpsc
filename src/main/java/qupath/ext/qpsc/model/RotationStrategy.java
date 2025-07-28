@@ -2,6 +2,7 @@ package qupath.ext.qpsc.model;
 
 import qupath.ext.qpsc.model.RotationManager.TickExposure;
 import qupath.ext.qpsc.ui.PPMAngleSelectionController;
+import qupath.ext.qpsc.preferences.PersistentPreferences;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -105,32 +106,37 @@ class PPMRotationStrategy implements RotationStrategy {
 
     @Override
     public CompletableFuture<List<Double>> getRotationTicks() {
-        // Show dialog for angle selection, then extract just the angles
-        return PPMAngleSelectionController.showDialog(plusAngleExposure.ticks, minusAngleExposure.ticks);
+        // Show dialog for angle selection with exposure times
+        return PPMAngleSelectionController.showDialog(plusAngleExposure.ticks, minusAngleExposure.ticks)
+                .thenApply(result -> {
+                    if (result == null) {
+                        return new ArrayList<>();
+                    }
+                    return result.getAngles();
+                });
     }
 
     @Override
     public CompletableFuture<List<TickExposure>> getRotationTicksWithExposure() {
-        // Show dialog for angle selection, then map to AngleExposure objects
+        // Show dialog for angle selection with exposure times
         return PPMAngleSelectionController.showDialog(plusAngleExposure.ticks, minusAngleExposure.ticks)
-                .thenApply(selectedAngles -> {
-                    List<TickExposure> result = new ArrayList<>();
-                    for (Double angle : selectedAngles) {
-                        if (angle == minusAngleExposure.ticks) {
-                            result.add(minusAngleExposure);
-                        } else if (angle == 0.0) {
-                            result.add(zeroAngleExposure);
-                        } else if (angle == plusAngleExposure.ticks) {
-                            result.add(plusAngleExposure);
-                        }
+                .thenApply(result -> {
+                    if (result == null) {
+                        return new ArrayList<>();
                     }
-                    return result;
+
+                    List<TickExposure> tickExposures = new ArrayList<>();
+                    for (PPMAngleSelectionController.AngleExposure ae : result.angleExposures) {
+                        tickExposures.add(new TickExposure(ae.angle, ae.exposureMs));
+                    }
+                    return tickExposures;
                 });
     }
 
     @Override
     public String getAngleSuffix(double angle) {
         if (angle == 0) return "_0deg";
+        if (angle == 90) return "_90deg"; // For brightfield
         if (angle > 0) return "_p" + (int)angle;
         return "_m" + (int)Math.abs(angle);
     }

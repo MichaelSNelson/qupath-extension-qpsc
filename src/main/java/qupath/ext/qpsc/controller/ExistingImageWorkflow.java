@@ -1646,7 +1646,7 @@ public class ExistingImageWorkflow {
                 String modalityName = modeWithIndex;
 
                 if (angle != null && rotationManager != null) {
-                    modalityName += rotationManager.getTickSuffix(sample.modality(), angle);
+                    modalityName += rotationManager.getAngleSuffix(sample.modality(), angle);
                 }
 
                 logger.info("Stitching {} for modality {}", annotationName, modalityName);

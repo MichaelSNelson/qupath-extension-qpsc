@@ -2,6 +2,7 @@ package qupath.ext.qpsc.model;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import qupath.ext.qpsc.preferences.PersistentPreferences;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.utilities.MicroscopeConfigManager;
 
@@ -60,9 +61,6 @@ public class RotationManager {
             Double plusTick = null;
             Double minusTick = null;
             Double zeroTick = null;
-            Integer plusExposure = null;
-            Integer minusExposure = null;
-            Integer zeroExposure = null;
 
             // Read from global PPM section
             Map<String, Object> ppmPlus = (Map<String, Object>) ppmConfig.get("ppm_plus");
@@ -73,27 +71,20 @@ public class RotationManager {
                 if (ppmPlus.containsKey("tick")) {
                     plusTick = ((Number) ppmPlus.get("tick")).doubleValue();
                 }
-                if (ppmPlus.containsKey("exposure_ms")) {
-                    plusExposure = ((Number) ppmPlus.get("exposure_ms")).intValue();
-                }
             }
 
             if (ppmMinus != null) {
                 if (ppmMinus.containsKey("tick")) {
                     minusTick = ((Number) ppmMinus.get("tick")).doubleValue();
                 }
-                if (ppmMinus.containsKey("exposure_ms")) {
-                    minusExposure = ((Number) ppmMinus.get("exposure_ms")).intValue();
-                }
+
             }
 
             if (ppmZero != null) {
                 if (ppmZero.containsKey("tick")) {
                     zeroTick = ((Number) ppmZero.get("tick")).doubleValue();
                 }
-                if (ppmZero.containsKey("exposure_ms")) {
-                    zeroExposure = ((Number) ppmZero.get("exposure_ms")).intValue();
-                }
+
             }
 
             // Use defaults if not configured
@@ -106,17 +97,18 @@ public class RotationManager {
                 zeroTick = 0.0;
             }
 
-            // Default exposures if not specified
-            if (plusExposure == null) plusExposure = 500;
-            if (minusExposure == null) minusExposure = 500;
-            if (zeroExposure == null) zeroExposure = 800;
+            // Get exposure times from PersistentPreferences
+            int plusExposure = PersistentPreferences.getPPMPlusExposureMs();
+            int minusExposure = PersistentPreferences.getPPMMinusExposureMs();
+            int zeroExposure = PersistentPreferences.getPPMZeroExposureMs();
 
             strategies.add(new PPMRotationStrategy(
                     new TickExposure(plusTick, plusExposure),
                     new TickExposure(minusTick, minusExposure),
                     new TickExposure(zeroTick, zeroExposure)
             ));
-            logger.info("PPM angles configured: {} to {} ticks with exposures", minusTick, plusTick);
+
+            logger.info("PPM ticks configured");
         }
 
         // Check if this is a BF modality
@@ -126,29 +118,24 @@ public class RotationManager {
             // Get brightfield tick and exposure from PPM config
             Map<String, Object> ppmConfig = mgr.getPPMConfig();
             Map<String, Object> bfConfig = (Map<String, Object>) ppmConfig.get("brightfield");
-
+            //TODO these should be set in the controller dialog
             Double bfTick = 90.0; // default
-            Integer bfExposure = 10; // default
 
-            if (bfConfig != null) {
-                if (bfConfig.containsKey("tick")) {
-                    bfTick = ((Number) bfConfig.get("tick")).doubleValue();
-                }
-                if (bfConfig.containsKey("exposure_ms")) {
-                    bfExposure = ((Number) bfConfig.get("exposure_ms")).intValue();
-                }
+            if (bfConfig != null && bfConfig.containsKey("tick")) {
+                bfTick = ((Number) bfConfig.get("tick")).doubleValue();
             }
 
-            strategies.add(new BrightfieldRotationStrategy(new TickExposure(bfTick, bfExposure)));
-            logger.info("Brightfield tick configured: {} ticks with {} ms exposure", bfTick, bfExposure);
-        }
+            // Get exposure from PersistentPreferences
+            int bfExposure = PersistentPreferences.getPPMBrightfieldExposureMs();
 
+            strategies.add(new BrightfieldRotationStrategy(new TickExposure(bfTick, bfExposure)));
+            logger.info("Brightfield tick configured: {} degrees with {} ms exposure from preferences", bfTick, bfExposure);
+        }
         // Always add NoRotationStrategy as fallback
         strategies.add(new NoRotationStrategy());
 
         logger.info("Initialized rotation strategies for modality: {}", modality);
     }
-
     /**
      * Gets the rotation angles required for the current modality.
      * @param modalityName The modality name
@@ -201,13 +188,13 @@ public class RotationManager {
     /**
      * Gets the appropriate file suffix for a rotation angle.
      * @param modalityName The modality name
-     * @param angle The rotation angle
+     * @param tick The rotation angle
      * @return Suffix string
      */
-    public String getTickSuffix(String modalityName, double angle) {
+    public String getAngleSuffix(String modalityName, double tick) {
         for (RotationStrategy strategy : strategies) {
             if (strategy.appliesTo(modalityName)) {
-                return strategy.getAngleSuffix(angle);
+                return strategy.getAngleSuffix(tick);
             }
         }
         return "";
