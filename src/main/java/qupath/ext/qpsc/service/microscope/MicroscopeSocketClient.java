@@ -2,7 +2,10 @@ package qupath.ext.qpsc.service.microscope;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import qupath.ext.qpsc.service.AcquisitionCommandBuilder;
 
+import java.nio.charset.StandardCharsets;
+import java.util.function.Consumer;
 import java.io.*;
 import java.net.*;
 import java.nio.ByteBuffer;
@@ -96,7 +99,13 @@ public class MicroscopeSocketClient implements AutoCloseable {
         /** Disconnect client */
         DISCONNECT("quitclnt"),
         /** Start acquisition */
-        ACQUIRE("acquire_");
+        ACQUIRE("acquire_"),
+        /** Get acquisition status */
+        STATUS("status__"),
+        /** Get acquisition progress */
+        PROGRESS("progress"),
+        /** Cancel acquisition */
+        CANCEL("cancel__");
 
         private final byte[] value;
 
@@ -108,7 +117,55 @@ public class MicroscopeSocketClient implements AutoCloseable {
         }
 
         public byte[] getValue() {
-            return value.clone(); // Defensive copy
+            return value.clone();
+        }
+    }
+
+    /**
+     * Acquisition state enumeration matching the Python server states.
+     */
+    public enum AcquisitionState {
+        IDLE,
+        RUNNING,
+        CANCELLING,
+        CANCELLED,
+        COMPLETED,
+        FAILED;
+
+        /**
+         * Parse state from server response string.
+         * @param stateStr 16-byte padded state string from server
+         * @return Parsed acquisition state
+         */
+        public static AcquisitionState fromString(String stateStr) {
+            String trimmed = stateStr.trim().toUpperCase();
+            try {
+                return AcquisitionState.valueOf(trimmed);
+            } catch (IllegalArgumentException e) {
+                logger.warn("Unknown acquisition state: {}", trimmed);
+                return IDLE;
+            }
+        }
+    }
+    /**
+     * Represents acquisition progress information.
+     */
+    public static class AcquisitionProgress {
+        public final int current;
+        public final int total;
+
+        public AcquisitionProgress(int current, int total) {
+            this.current = current;
+            this.total = total;
+        }
+
+        public double getPercentage() {
+            return total > 0 ? (100.0 * current / total) : 0.0;
+        }
+
+        @Override
+        public String toString() {
+            return String.format("%d/%d (%.1f%%)", current, total, getPercentage());
         }
     }
 
@@ -306,54 +363,46 @@ public class MicroscopeSocketClient implements AutoCloseable {
     }
 
     /**
-     * Starts an acquisition workflow on the server.
+     * Starts an acquisition workflow on the server using a command builder.
+     * This single method handles all acquisition types with their specific parameters.
      *
-     * @param yamlPath Path to YAML configuration file
-     * @param projectsFolder Projects folder path
-     * @param sampleLabel Sample label
-     * @param scanType Scan type identifier
-     * @param regionName Region name
-     * @param angles Array of rotation angles
+     * @param builder Pre-configured acquisition command builder
      * @throws IOException if communication fails
      */
-    public void startAcquisition(String yamlPath, String projectsFolder, String sampleLabel,
-                                 String scanType, String regionName, double[] angles) throws IOException {
-        // Format angles as space-separated string in parentheses
-        StringBuilder anglesStr = new StringBuilder("(");
-        for (int i = 0; i < angles.length; i++) {
-            if (i > 0) anglesStr.append(" ");
-            anglesStr.append(angles[i]);
-        }
-        anglesStr.append(")");
+    public void startAcquisition(AcquisitionCommandBuilder builder) throws IOException {
+        String message = builder.buildSocketMessage() + " END_MARKER";
+        byte[] messageBytes = message.getBytes(StandardCharsets.UTF_8);
 
-        // Build comma-separated message with end marker
-        String message = String.join(",",
-                yamlPath,
-                projectsFolder,
-                sampleLabel,
-                scanType,
-                regionName,
-                anglesStr.toString()
-        ) + ",END_MARKER";
-
-        byte[] messageBytes = message.getBytes();
+        logger.info("Sending acquisition command:");
+        logger.info("  Message length: {} bytes", messageBytes.length);
+        logger.info("  Message content: {}", message);
 
         synchronized (socketLock) {
             ensureConnected();
 
             try {
-                // Send command
+                // Send command (8 bytes)
                 output.write(Command.ACQUIRE.getValue());
+                output.flush();
+                logger.debug("Sent ACQUIRE command (8 bytes)");
+
+                // Small delay to ensure command is processed
+                Thread.sleep(50);
+
                 // Send message
                 output.write(messageBytes);
                 output.flush();
+                logger.debug("Sent acquisition message ({} bytes)", messageBytes.length);
+
+                // Ensure all data is sent
+                output.flush();
 
                 lastActivityTime.set(System.currentTimeMillis());
-                logger.info("Started acquisition workflow: {}", scanType);
+                logger.info("Acquisition command sent successfully");
 
-            } catch (IOException e) {
-                handleIOException(e);
-                throw e;
+            } catch (IOException | InterruptedException e) {
+                handleIOException(new IOException("Failed to send acquisition command", e));
+                throw new IOException("Failed to send acquisition command", e);
             }
         }
     }
@@ -568,4 +617,130 @@ public class MicroscopeSocketClient implements AutoCloseable {
 
         logger.info("Microscope socket client closed");
     }
+    /**
+     * Gets the current acquisition status.
+     *
+     * @return Current acquisition state
+     * @throws IOException if communication fails
+     */
+    public AcquisitionState getAcquisitionStatus() throws IOException {
+        byte[] response = executeCommand(Command.STATUS, null, 16);
+        String stateStr = new String(response, StandardCharsets.UTF_8);
+        AcquisitionState state = AcquisitionState.fromString(stateStr);
+        logger.debug("Acquisition status: {}", state);
+        return state;
+    }
+
+    /**
+     * Gets the current acquisition progress.
+     *
+     * @return Acquisition progress (current/total images)
+     * @throws IOException if communication fails
+     */
+    public AcquisitionProgress getAcquisitionProgress() throws IOException {
+        byte[] response = executeCommand(Command.PROGRESS, null, 8);
+
+        ByteBuffer buffer = ByteBuffer.wrap(response);
+        buffer.order(ByteOrder.BIG_ENDIAN);
+
+        int current = buffer.getInt();
+        int total = buffer.getInt();
+
+        AcquisitionProgress progress = new AcquisitionProgress(current, total);
+        logger.debug("Acquisition progress: {}", progress);
+        return progress;
+    }
+
+    /**
+     * Cancels the currently running acquisition.
+     *
+     * @return true if cancellation was acknowledged
+     * @throws IOException if communication fails
+     */
+    public boolean cancelAcquisition() throws IOException {
+        byte[] response = executeCommand(Command.CANCEL, null, 3);
+        String ack = new String(response, StandardCharsets.UTF_8);
+        boolean cancelled = "ACK".equals(ack);
+        logger.info("Acquisition cancellation {}", cancelled ? "acknowledged" : "failed");
+        return cancelled;
+    }
+
+    /**
+     * Monitors acquisition progress until completion or timeout.
+     * Calls the progress callback periodically.
+     *
+     * @param progressCallback Callback for progress updates (can be null)
+     * @param pollIntervalMs Interval between progress checks in milliseconds
+     * @param timeoutMs Maximum time to wait in milliseconds (0 for no timeout)
+     * @return Final acquisition state
+     * @throws IOException if communication fails
+     * @throws InterruptedException if thread is interrupted
+     */
+    public AcquisitionState monitorAcquisition(
+            Consumer<AcquisitionProgress> progressCallback,
+            long pollIntervalMs,
+            long timeoutMs) throws IOException, InterruptedException {
+
+        long startTime = System.currentTimeMillis();
+        AcquisitionState lastState = AcquisitionState.IDLE;
+        int retryCount = 0;
+        final int maxInitialRetries = 3;
+
+        while (true) {
+            try {
+                // Check status
+                AcquisitionState currentState = getAcquisitionStatus();
+
+                // Reset retry count on successful read
+                retryCount = 0;
+
+                // Check if terminal state reached
+                if (currentState == AcquisitionState.COMPLETED ||
+                        currentState == AcquisitionState.FAILED ||
+                        currentState == AcquisitionState.CANCELLED) {
+                    logger.info("Acquisition reached terminal state: {}", currentState);
+                    return currentState;
+                }
+
+                // Get progress if running
+                if (currentState == AcquisitionState.RUNNING && progressCallback != null) {
+                    try {
+                        AcquisitionProgress progress = getAcquisitionProgress();
+                        progressCallback.accept(progress);
+                    } catch (IOException e) {
+                        logger.debug("Failed to get progress: {}", e.getMessage());
+                    }
+                }
+
+                // Check timeout
+                if (timeoutMs > 0 && System.currentTimeMillis() - startTime > timeoutMs) {
+                    logger.warn("Acquisition monitoring timed out after {} ms", timeoutMs);
+                    break;
+                }
+
+                // Log state changes
+                if (currentState != lastState) {
+                    logger.info("Acquisition state changed: {} -> {}", lastState, currentState);
+                    lastState = currentState;
+                }
+
+                Thread.sleep(pollIntervalMs);
+
+            } catch (IOException e) {
+                // Handle initial connection issues gracefully
+                if (retryCount < maxInitialRetries &&
+                        System.currentTimeMillis() - startTime < 10000) {
+                    retryCount++;
+                    logger.debug("Initial status check failed (attempt {}/{}), retrying: {}",
+                            retryCount, maxInitialRetries, e.getMessage());
+                    Thread.sleep(1000); // Wait a bit longer before retry
+                    continue;
+                }
+                throw e;
+            }
+        }
+
+        return lastState;
+    }
+
 }

@@ -60,13 +60,18 @@ public class UIFunctions {
     private static Stage progressBarStage;
 
 
+
     public static class ProgressHandle {
         private final Stage stage;
         private final Timeline timeline;
+        private final AtomicBoolean cancelled = new AtomicBoolean(false);
+        private Consumer<Void> cancelCallback;
+
         public ProgressHandle(Stage stage, Timeline timeline) {
             this.stage = stage;
             this.timeline = timeline;
         }
+
         public void close() {
             logger.info("ProgressHandle.close() called.");
             Platform.runLater(() -> {
@@ -74,23 +79,42 @@ public class UIFunctions {
                 stage.close();
             });
         }
+
+        public void setCancelCallback(Consumer<Void> callback) {
+            this.cancelCallback = callback;
+        }
+
+        public boolean isCancelled() {
+            return cancelled.get();
+        }
+
+        void triggerCancel() {
+            cancelled.set(true);
+            if (cancelCallback != null) {
+                cancelCallback.accept(null);
+            }
+        }
     }
+
     /**
-     * Show a progress bar that watches an AtomicInteger and updates itself periodically.
+     * Show a progress bar with cancel button that watches an AtomicInteger and updates itself periodically.
      * The progress bar will stay open until either:
      * - All expected files are found (progress reaches 100%)
      * - The timeout is reached with no progress
+     * - The user clicks Cancel
      * - It is explicitly closed via the returned handle
      *
      * @param progressCounter Thread-safe counter (incremented externally as work completes).
      * @param totalFiles      The max value of progressCounter.
      * @param timeoutMs       If no progress for this many ms, bar will auto-terminate.
-     * @return a ProgressHandle you can .close() when you're done.
+     * @param showCancelButton Whether to show a cancel button
+     * @return a ProgressHandle you can .close() when you're done, and set cancel callback on
      */
     public static ProgressHandle showProgressBarAsync(
             AtomicInteger progressCounter,
             int totalFiles,
-            int timeoutMs) {
+            int timeoutMs,
+            boolean showCancelButton) {
 
         final ProgressHandle[] handleHolder = new ProgressHandle[1];
 
@@ -105,6 +129,17 @@ public class UIFunctions {
 
             VBox vbox = new VBox(10, progressBar, progressLabel, timeLabel, statusLabel);
             vbox.setStyle("-fx-padding: 10;");
+            vbox.setAlignment(Pos.CENTER);
+
+            // Add cancel button if requested
+            final Button cancelButton;
+            if (showCancelButton) {
+                cancelButton = new Button("Cancel Acquisition");
+                cancelButton.setPrefWidth(150);
+                vbox.getChildren().addAll(new Separator(), cancelButton);
+            } else {
+                cancelButton = null;
+            }
 
             stage.initModality(Modality.NONE);
             stage.setTitle("Microscope Acquisition Progress");
@@ -184,6 +219,19 @@ public class UIFunctions {
                     }
                 }
 
+                // Check if cancelled
+                if (handleHolder[0] != null && handleHolder[0].isCancelled()) {
+                    logger.info("Progress bar cancelled by user");
+                    statusLabel.setText("Acquisition cancelled");
+                    statusLabel.setTextFill(Color.RED);
+                    timeline.stop();
+                    // Keep window open for 2 seconds to show cancelled status
+                    PauseTransition pause = new PauseTransition(Duration.seconds(2));
+                    pause.setOnFinished(e -> stage.close());
+                    pause.play();
+                    return;
+                }
+
                 // Check completion conditions
                 boolean complete = (current >= totalFiles);
                 boolean stalled = false;
@@ -221,8 +269,19 @@ public class UIFunctions {
             timeline.getKeyFrames().add(keyFrame);
             timeline.setCycleCount(Timeline.INDEFINITE);
 
-            // Store the ProgressHandle
-            handleHolder[0] = new ProgressHandle(stage, timeline);
+            // Create and store the ProgressHandle
+            ProgressHandle handle = new ProgressHandle(stage, timeline);
+            handleHolder[0] = handle;
+
+            // Set up cancel button action if present
+            if (cancelButton != null) {
+                cancelButton.setOnAction(e -> {
+                    logger.info("Cancel button clicked");
+                    cancelButton.setDisable(true);
+                    cancelButton.setText("Cancelling...");
+                    handle.triggerCancel();
+                });
+            }
 
             logger.info("Starting progress Timeline on FX thread");
             timeline.play();
@@ -239,7 +298,15 @@ public class UIFunctions {
         return handleHolder[0];
     }
 
-
+    /**
+     * Original method signature for backward compatibility
+     */
+    public static ProgressHandle showProgressBarAsync(
+            AtomicInteger progressCounter,
+            int totalFiles,
+            int timeoutMs) {
+        return showProgressBarAsync(progressCounter, totalFiles, timeoutMs, false);
+    }
     /**
      * Shows an error dialog on the JavaFX thread.
      */

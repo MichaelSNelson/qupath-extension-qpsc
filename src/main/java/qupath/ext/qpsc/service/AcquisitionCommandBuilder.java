@@ -8,18 +8,16 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 /**
- * Centralized builder for acquisition commands with flexible flag-based arguments.
- * Supports both CLI and socket-based communication with the microscope server.
+ * Centralized builder for acquisition commands for socket-based communication only.
  *
- * This builder allows for extensible command construction that can accommodate
- * different imaging modalities (brightfield, PPM, laser scanning, etc.) without
- * requiring changes to workflow code.
+ * This builder creates properly formatted messages for the microscope server,
+ * supporting different imaging modalities (brightfield, PPM, laser scanning, etc.)
+ * without requiring changes to workflow code.
  */
 public class AcquisitionCommandBuilder {
     private static final Logger logger = LoggerFactory.getLogger(AcquisitionCommandBuilder.class);
 
     // Required parameters
-    private String command;
     private String yamlPath;
     private String projectsFolder;
     private String sampleLabel;
@@ -41,9 +39,6 @@ public class AcquisitionCommandBuilder {
     private Double zEnd;
     private Double zStep;
 
-    // Legacy mode flag
-    private boolean useLegacyFormat = false;
-
     /**
      * Private constructor - use static builder() method
      */
@@ -57,11 +52,6 @@ public class AcquisitionCommandBuilder {
     }
 
     // Required parameter setters
-
-    public AcquisitionCommandBuilder command(String command) {
-        this.command = command;
-        return this;
-    }
 
     public AcquisitionCommandBuilder yamlPath(String yamlPath) {
         this.yamlPath = yamlPath;
@@ -123,18 +113,12 @@ public class AcquisitionCommandBuilder {
         return this;
     }
 
-    public AcquisitionCommandBuilder useLegacyFormat(boolean useLegacy) {
-        this.useLegacyFormat = useLegacy;
-        return this;
-    }
-
     /**
      * Validates that all required parameters are set
      */
     private void validate() {
         List<String> missing = new ArrayList<>();
 
-        if (command == null || command.isEmpty()) missing.add("command");
         if (yamlPath == null || yamlPath.isEmpty()) missing.add("yamlPath");
         if (projectsFolder == null || projectsFolder.isEmpty()) missing.add("projectsFolder");
         if (sampleLabel == null || sampleLabel.isEmpty()) missing.add("sampleLabel");
@@ -147,138 +131,92 @@ public class AcquisitionCommandBuilder {
     }
 
     /**
-     * Builds the command arguments for CLI execution
-     * @return List of command arguments
-     */
-    public List<String> buildCliArgs() {
-        validate();
-
-        List<String> args = new ArrayList<>();
-        args.add(command);
-
-        if (useLegacyFormat) {
-            // Legacy format: command yaml projects sample scanType region (angles)
-            args.add(yamlPath);
-            args.add(projectsFolder);
-            args.add(sampleLabel);
-            args.add(scanType);
-            args.add(regionName);
-
-            if (angleExposures != null && !angleExposures.isEmpty()) {
-                // Legacy format only supports angles, not exposures
-                String anglesStr = angleExposures.stream()
-                        .map(ae -> String.valueOf(ae.ticks))
-                        .collect(Collectors.joining(" ", "(", ")"));
-                args.add(anglesStr);
-            }
-        } else {
-            // New flag-based format
-            args.addAll(Arrays.asList(
-                    "--yaml", yamlPath,
-                    "--projects", projectsFolder,
-                    "--sample", sampleLabel,
-                    "--scan-type", scanType,
-                    "--region", regionName
-            ));
-
-            // Add optional parameters
-            if (angleExposures != null && !angleExposures.isEmpty()) {
-                // Format angles as parenthesized comma-separated list: (-5.0,0.0,5.0,90.0)
-                String anglesStr = angleExposures.stream()
-                        .map(ae -> String.valueOf(ae.ticks))
-                        .collect(Collectors.joining(",", "(", ")"));
-                args.add("--angles");
-                args.add(anglesStr);
-
-                // Format exposures as parenthesized comma-separated list: (500,800,500,10)
-                String exposuresStr = angleExposures.stream()
-                        .map(ae -> String.valueOf(ae.exposureMs))
-                        .collect(Collectors.joining(",", "(", ")"));
-                args.add("--exposures");
-                args.add(exposuresStr);
-            }
-
-            if (laserPower != null) {
-                args.addAll(Arrays.asList("--laser-power", String.valueOf(laserPower)));
-            }
-
-            if (laserWavelength != null) {
-                args.addAll(Arrays.asList("--laser-wavelength", String.valueOf(laserWavelength)));
-            }
-
-            if (dwellTime != null) {
-                args.addAll(Arrays.asList("--dwell-time", String.valueOf(dwellTime)));
-            }
-
-            if (averaging != null && averaging > 1) {
-                args.addAll(Arrays.asList("--averaging", String.valueOf(averaging)));
-            }
-
-            if (zStackEnabled) {
-                args.add("--z-stack");
-                args.addAll(Arrays.asList("--z-start", String.valueOf(zStart)));
-                args.addAll(Arrays.asList("--z-end", String.valueOf(zEnd)));
-                args.addAll(Arrays.asList("--z-step", String.valueOf(zStep)));
-            }
-        }
-
-        logger.info("Built command args: {}", args);
-        return args;
-    }
-
-    /**
      * Builds the message string for socket communication
-     * @return Message string with appropriate format
+     * @return Message string with flag-based format
      */
     public String buildSocketMessage() {
         validate();
 
-        if (useLegacyFormat) {
-            // Legacy comma-separated format
-            StringBuilder msg = new StringBuilder();
-            msg.append(yamlPath).append(",");
-            msg.append(projectsFolder).append(",");
-            msg.append(sampleLabel).append(",");
-            msg.append(scanType).append(",");
-            msg.append(regionName).append(",");
+        List<String> args = new ArrayList<>();
 
-            if (angleExposures != null && !angleExposures.isEmpty()) {
-                String anglesStr = angleExposures.stream()
-                        .map(ae -> String.valueOf(ae.ticks))
-                        .collect(Collectors.joining(" ", "(", ")"));
-                msg.append(anglesStr);
-            } else {
-                msg.append("()");
-            }
+        // Add required parameters with flags
+        args.addAll(Arrays.asList(
+                "--yaml", yamlPath,
+                "--projects", projectsFolder,
+                "--sample", sampleLabel,
+                "--scan-type", scanType,
+                "--region", regionName
+        ));
 
-            return msg.toString();
-        } else {
-            // New flag-based format - same as CLI args minus the command
-            List<String> args = buildCliArgs();
-            // Remove the command (first element)
-            args.remove(0);
-            // Join with spaces, properly quoting arguments that contain spaces or parentheses
-            return args.stream()
-                    .map(arg -> {
-                        // Quote arguments that contain spaces or special characters
-                        if (arg.contains(" ") || arg.contains("(") || arg.contains(")") || arg.contains(",")) {
-                            return "\"" + arg + "\"";
-                        }
-                        return arg;
-                    })
-                    .collect(Collectors.joining(" "));
+        // Add optional parameters
+        if (angleExposures != null && !angleExposures.isEmpty()) {
+            // Format angles as parenthesized comma-separated list: (-5.0,0.0,5.0,90.0)
+            String anglesStr = angleExposures.stream()
+                    .map(ae -> String.valueOf(ae.ticks))
+                    .collect(Collectors.joining(",", "(", ")"));
+            args.add("--angles");
+            args.add(anglesStr);
+
+            // Format exposures as parenthesized comma-separated list: (500,800,500,10)
+            String exposuresStr = angleExposures.stream()
+                    .map(ae -> String.valueOf(ae.exposureMs))
+                    .collect(Collectors.joining(",", "(", ")"));
+            args.add("--exposures");
+            args.add(exposuresStr);
         }
+
+        if (laserPower != null) {
+            args.addAll(Arrays.asList("--laser-power", String.valueOf(laserPower)));
+        }
+
+        if (laserWavelength != null) {
+            args.addAll(Arrays.asList("--laser-wavelength", String.valueOf(laserWavelength)));
+        }
+
+        if (dwellTime != null) {
+            args.addAll(Arrays.asList("--dwell-time", String.valueOf(dwellTime)));
+        }
+
+        if (averaging != null && averaging > 1) {
+            args.addAll(Arrays.asList("--averaging", String.valueOf(averaging)));
+        }
+
+        if (zStackEnabled) {
+            args.add("--z-stack");
+            args.addAll(Arrays.asList("--z-start", String.valueOf(zStart)));
+            args.addAll(Arrays.asList("--z-end", String.valueOf(zEnd)));
+            args.addAll(Arrays.asList("--z-step", String.valueOf(zStep)));
+        }
+
+        // Join with spaces, properly quoting arguments that contain spaces or special characters
+        String message = args.stream()
+                .map(arg -> {
+                    // For Windows paths, replace backslashes with forward slashes
+                    // Python handles both equally well
+                    if (arg.contains("\\")) {
+                        arg = arg.replace("\\", "/");
+                    }
+
+                    // Quote arguments that contain spaces or special characters
+                    if (arg.contains(" ") || arg.contains("(") || arg.contains(")") || arg.contains(",")) {
+                        return "\"" + arg + "\"";
+                    }
+                    return arg;
+                })
+                .collect(Collectors.joining(" "));
+
+        logger.info("Built socket message: {}", message);
+        return message;
     }
 
     /**
      * Creates a builder pre-configured for brightfield acquisition
      */
     public static AcquisitionCommandBuilder brightfieldBuilder(
-            String command, String yamlPath, String projectsFolder,
+            String yamlPath, String projectsFolder,
             String sampleLabel, String scanType, String regionName) {
 
         return builder()
-                .command(command)
                 .yamlPath(yamlPath)
                 .projectsFolder(projectsFolder)
                 .sampleLabel(sampleLabel)
@@ -290,12 +228,11 @@ public class AcquisitionCommandBuilder {
      * Creates a builder pre-configured for PPM acquisition
      */
     public static AcquisitionCommandBuilder ppmBuilder(
-            String command, String yamlPath, String projectsFolder,
+            String yamlPath, String projectsFolder,
             String sampleLabel, String scanType, String regionName,
             List<RotationManager.TickExposure> angleExposures) {
 
         return builder()
-                .command(command)
                 .yamlPath(yamlPath)
                 .projectsFolder(projectsFolder)
                 .sampleLabel(sampleLabel)
@@ -308,12 +245,11 @@ public class AcquisitionCommandBuilder {
      * Creates a builder pre-configured for laser scanning acquisition
      */
     public static AcquisitionCommandBuilder laserScanningBuilder(
-            String command, String yamlPath, String projectsFolder,
+            String yamlPath, String projectsFolder,
             String sampleLabel, String scanType, String regionName,
             double laserPower, int wavelength, double dwellTime) {
 
         return builder()
-                .command(command)
                 .yamlPath(yamlPath)
                 .projectsFolder(projectsFolder)
                 .sampleLabel(sampleLabel)

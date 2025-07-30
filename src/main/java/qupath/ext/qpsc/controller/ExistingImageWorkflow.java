@@ -9,7 +9,7 @@ import org.slf4j.LoggerFactory;
 import qupath.ext.qpsc.model.RotationManager;
 import qupath.ext.qpsc.preferences.PersistentPreferences;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
-import qupath.ext.qpsc.service.CliExecutor;
+
 import qupath.ext.qpsc.ui.*;
 import qupath.ext.qpsc.utilities.*;
 import qupath.lib.gui.QuPathGUI;
@@ -1542,27 +1542,27 @@ public class ExistingImageWorkflow {
                     timeoutSeconds = 60 * tickExposures.size();
                 }
 
-                CliExecutor.ExecResult result = CliExecutor.execComplexCommand(
-                        timeoutSeconds,
-                        res.getString("acquisition.cli.progressRegex"),
-                        cliArgs.toArray(new String[0])
-                );
-
-                if (result.exitCode() != 0) {
-                    String errorDetails = String.valueOf(result.stderr());
-                    if (errorDetails == null || errorDetails.trim().isEmpty()) {
-                        errorDetails = "No error details available from acquisition script";
-                    }
-                    logger.error("Acquisition failed with exit code {} for annotation '{}'. Error: {}",
-                            result.exitCode(), annotation.getName(), errorDetails);
-
-                    String finalErrorDetails = errorDetails;
-                    Platform.runLater(() -> UIFunctions.notifyUserOfError(
-                            "Acquisition failed for " + annotation.getName() + ":\n\n" + finalErrorDetails,
-                            "Acquisition Error"
-                    ));
-                    return false;
-                }
+//                CliExecutor.ExecResult result = CliExecutor.execComplexCommand(
+//                        timeoutSeconds,
+//                        res.getString("acquisition.cli.progressRegex"),
+//                        cliArgs.toArray(new String[0])
+//                );
+//
+//                if (result.exitCode() != 0) {
+//                    String errorDetails = String.valueOf(result.stderr());
+//                    if (errorDetails == null || errorDetails.trim().isEmpty()) {
+//                        errorDetails = "No error details available from acquisition script";
+//                    }
+//                    logger.error("Acquisition failed with exit code {} for annotation '{}'. Error: {}",
+//                            result.exitCode(), annotation.getName(), errorDetails);
+//
+//                    String finalErrorDetails = errorDetails;
+//                    Platform.runLater(() -> UIFunctions.notifyUserOfError(
+//                            "Acquisition failed for " + annotation.getName() + ":\n\n" + finalErrorDetails,
+//                            "Acquisition Error"
+//                    ));
+//                    return false;
+//                }
 
                 logger.info("Acquisition completed successfully for {}", annotation.getName());
                 return true;

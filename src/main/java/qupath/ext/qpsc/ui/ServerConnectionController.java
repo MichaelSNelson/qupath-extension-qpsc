@@ -37,11 +37,10 @@ import java.util.ResourceBundle;
  *   <li>Live connection testing with detailed feedback</li>
  *   <li>Connection status monitoring</li>
  *   <li>Advanced settings for reconnection and health checks</li>
- *   <li>Import/export of connection profiles</li>
  * </ul>
  *
  * @author Mike Nelson
- * @since 1.0
+ * @since 2.0
  */
 public class ServerConnectionController {
     private static final Logger logger = LoggerFactory.getLogger(ServerConnectionController.class);
@@ -53,9 +52,7 @@ public class ServerConnectionController {
     private Dialog<ButtonType> dialog;
     private TextField hostField;
     private Spinner<Integer> portSpinner;
-    private CheckBox useSocketCheckBox;
     private CheckBox autoConnectCheckBox;
-    private CheckBox autoFallbackCheckBox;
 
     // Advanced settings
     private Spinner<Integer> connectTimeoutSpinner;
@@ -152,17 +149,6 @@ public class ServerConnectionController {
 
         int row = 0;
 
-        // Connection mode
-        useSocketCheckBox = new CheckBox(res.getString("server.connection.useSocket"));
-        useSocketCheckBox.setTooltip(new Tooltip(
-                "Enable direct socket connection for better performance.\n" +
-                        "Disable to fall back to CLI commands."
-        ));
-        grid.add(useSocketCheckBox, 0, row++, 2, 1);
-
-        // Separator
-        grid.add(new Separator(), 0, row++, 2, 1);
-
         // Server settings
         Label serverLabel = new Label("Server Settings");
         serverLabel.setFont(Font.font(null, FontWeight.BOLD, 14));
@@ -189,13 +175,6 @@ public class ServerConnectionController {
         ));
         grid.add(autoConnectCheckBox, 0, row++, 2, 1);
 
-        // Auto-fallback
-        autoFallbackCheckBox = new CheckBox(res.getString("server.connection.autoFallback"));
-        autoFallbackCheckBox.setTooltip(new Tooltip(
-                "Automatically use CLI commands if socket connection fails"
-        ));
-        grid.add(autoFallbackCheckBox, 0, row++, 2, 1);
-
         // Separator
         grid.add(new Separator(), 0, row++, 2, 1);
 
@@ -218,16 +197,6 @@ public class ServerConnectionController {
         progressIndicator.setVisible(false);
         progressIndicator.setPrefSize(30, 30);
         grid.add(progressIndicator, 2, row - 1);
-
-        // Enable/disable fields based on socket checkbox
-        useSocketCheckBox.selectedProperty().addListener((obs, oldVal, newVal) -> {
-            boolean enabled = newVal;
-            hostField.setDisable(!enabled);
-            portSpinner.setDisable(!enabled);
-            autoConnectCheckBox.setDisable(!enabled);
-            testButton.setDisable(!enabled);
-            connectButton.setDisable(!enabled);
-        });
 
         tab.setContent(grid);
         return tab;
@@ -367,9 +336,7 @@ public class ServerConnectionController {
         // Main settings
         hostField.setText(QPPreferenceDialog.getMicroscopeServerHost());
         portSpinner.getValueFactory().setValue(QPPreferenceDialog.getMicroscopeServerPort());
-        useSocketCheckBox.setSelected(QPPreferenceDialog.getUseSocketConnection());
         autoConnectCheckBox.setSelected(QPPreferenceDialog.getAutoConnectToServer());
-        autoFallbackCheckBox.setSelected(PersistentPreferences.getSocketAutoFallbackToCLI());
 
         // Advanced settings
         connectTimeoutSpinner.getValueFactory().setValue(PersistentPreferences.getSocketConnectionTimeoutMs());
@@ -389,9 +356,7 @@ public class ServerConnectionController {
         // Main settings
         QPPreferenceDialog.setMicroscopeServerHost(hostField.getText());
         QPPreferenceDialog.setMicroscopeServerPort(portSpinner.getValue());
-        QPPreferenceDialog.setUseSocketConnection(useSocketCheckBox.isSelected());
         QPPreferenceDialog.setAutoConnectToServer(autoConnectCheckBox.isSelected());
-        PersistentPreferences.setSocketAutoFallbackToCLI(autoFallbackCheckBox.isSelected());
 
         // Advanced settings
         PersistentPreferences.setSocketConnectionTimeoutMs(connectTimeoutSpinner.getValue());
@@ -512,7 +477,7 @@ public class ServerConnectionController {
                 // Get controller instance and connect
                 MicroscopeController controller = MicroscopeController.getInstance();
                 controller.disconnect(); // Disconnect first if connected
-                controller.setUseSocketConnection(true);
+
                 controller.connect();
 
                 logMessage("Connected to server via MicroscopeController");
