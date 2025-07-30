@@ -156,9 +156,8 @@ public class UtilityFunctions {
 
                     Platform.runLater(() -> {
                         try {
-                            // Are acquired images in the correct orientation for stitching?
-                            boolean invertedX = false;
-                            boolean invertedY = true;
+                            boolean invertedX = QPPreferenceDialog.getInvertedXProperty();
+                            boolean invertedY = QPPreferenceDialog.getInvertedYProperty();
 
                             // Add to project with calculated flip values
                             QPProjectFunctions.addImageToProject(

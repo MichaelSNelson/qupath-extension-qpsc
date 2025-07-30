@@ -79,17 +79,17 @@ public class TilingUtilities {
         double minY = bb.getMinY();
         double maxY = bb.getMaxY();
 
-        // Apply axis inversions if needed
-        if (request.isInvertX()) {
-            double temp = minX;
-            minX = maxX;
-            maxX = temp;
-        }
-        if (request.isInvertY()) {
-            double temp = minY;
-            minY = maxY;
-            maxY = temp;
-        }
+//        // Apply axis inversions if needed
+//        if (request.isInvertX()) {
+//            double temp = minX;
+//            minX = maxX;
+//            maxX = temp;
+//        }
+//        if (request.isInvertY()) {
+//            double temp = minY;
+//            minY = maxY;
+//            maxY = temp;
+//        }
 
         // Expand bounds by half frame to ensure full coverage
         double startX = minX - request.getFrameWidth() / 2.0;
@@ -170,6 +170,7 @@ public class TilingUtilities {
             createTileGrid(x, y, w, h, request, configPath, roi);
         }
     }
+
     /**
      * Core tiling algorithm that generates a grid of tiles and writes the configuration.
      * <p>
@@ -204,7 +205,7 @@ public class TilingUtilities {
         double xStep = request.getFrameWidth() * (1 - overlapFraction);
         double yStep = request.getFrameHeight() * (1 - overlapFraction);
 
-        // Calculate number of tiles needed - ensure we cover the entire area
+        // Calculate number of tiles needed
         int nCols = (int) Math.ceil(width / xStep);
         int nRows = (int) Math.ceil(height / yStep);
 
@@ -217,6 +218,7 @@ public class TilingUtilities {
         logger.info("  Frame size: {} x {}", request.getFrameWidth(), request.getFrameHeight());
         logger.info("  Step size: {} x {} ({}% overlap)", xStep, yStep, request.getOverlapPercent());
         logger.info("  Grid: {} columns x {} rows", nCols, nRows);
+        logger.info("  X-axis inverted: {}, Y-axis inverted: {}", request.isInvertX(), request.isInvertY());
 
         // Prepare output structures
         List<String> configLines = new ArrayList<>();
@@ -225,18 +227,22 @@ public class TilingUtilities {
         int tileIndex = 0;
         int skippedTiles = 0;
 
-        // Generate tiles in a simple raster pattern
-        // The axis inversion (if any) will be handled by the transformation later
+        // Generate tiles
         for (int row = 0; row < nRows; row++) {
-            double y = startY + row * yStep;
+            // When Y is inverted, we need to process rows in reverse order
+            int gridRow = request.isInvertY() ? (nRows - 1 - row) : row;
+            double y = startY + gridRow * yStep;
 
-            // Serpentine pattern for efficient stage movement
+            // Serpentine pattern based on the logical row (not grid row)
             boolean reverseDirection = (row % 2 == 1);
 
             for (int col = 0; col < nCols; col++) {
                 // Apply serpentine pattern
-                int actualCol = reverseDirection ? (nCols - 1 - col) : col;
-                double x = startX + actualCol * xStep;
+                int serpentineCol = reverseDirection ? (nCols - 1 - col) : col;
+
+                // When X is inverted, we need to process columns in reverse order
+                int gridCol = request.isInvertX() ? (nCols - 1 - serpentineCol) : serpentineCol;
+                double x = startX + gridCol * xStep;
 
                 // Create tile ROI
                 ROI tileROI = ROIs.createRectangleROI(
@@ -249,7 +255,6 @@ public class TilingUtilities {
                 // Check if we should include this tile
                 boolean includeTile = true;
                 if (filterROI != null) {
-                    // Check if tile center is within the filter ROI or if they intersect
                     includeTile = filterROI.contains(tileROI.getCentroidX(), tileROI.getCentroidY()) ||
                             filterROI.getGeometry().intersects(tileROI.getGeometry());
                 }
@@ -274,8 +279,8 @@ public class TilingUtilities {
                     );
                     tile.setName(String.valueOf(tileIndex));
                     tile.getMeasurements().put("TileNumber", tileIndex);
-                    tile.getMeasurements().put("Row", row);
-                    tile.getMeasurements().put("Column", actualCol);
+                    tile.getMeasurements().put("Row", gridRow);
+                    tile.getMeasurements().put("Column", gridCol);
                     detectionTiles.add(tile);
                 }
 
@@ -298,4 +303,5 @@ public class TilingUtilities {
             logger.info("Added {} detection tiles to QuPath", detectionTiles.size());
         }
     }
+
 }
