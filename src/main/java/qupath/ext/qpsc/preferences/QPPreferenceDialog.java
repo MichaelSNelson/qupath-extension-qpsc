@@ -34,10 +34,7 @@ public class QPPreferenceDialog {
     private static final String CATEGORY = ResourceBundle.getBundle("qupath.ext.qpsc.ui.strings").getString("name");
 
     // --- Preference definitions ---
-    private static final StringProperty selectedScannerProperty =
-            PathPrefs.createPersistentPreference("selectedScanner", "Generic");
-    private static final StringProperty savedTransformNameProperty  =
-            PathPrefs.createPersistentPreference("savedMicroscopeTransform", "");
+
     private static final BooleanProperty flipMacroXProperty =
             PathPrefs.createPersistentPreference("isFlippedXProperty", false);
     private static final BooleanProperty flipMacroYProperty =
@@ -101,21 +98,6 @@ public class QPPreferenceDialog {
                 qupath.getPreferencePane()
                         .getPropertySheet()
                         .getItems();
-        items.add( new PropertyItemBuilder<>(selectedScannerProperty(), String.class)
-                .propertyType(PropertyItemBuilder.PropertyType.CHOICE)
-                .name("Source Scanner")
-                .category(CATEGORY)
-                .description("Select the scanner that created the images you're working with")
-                .choices(getScannerChoices())
-                .build());
-
-        items.add(new PropertyItemBuilder<>(savedTransformNameProperty , String.class)
-                .propertyType(PropertyItemBuilder.PropertyType.CHOICE)
-                .name("Microscope Alignment Transform")
-                .category(CATEGORY)
-                .description("Saved transform for stage-to-image alignment")
-                .choices(FXCollections.observableArrayList(getAvailableTransforms()))
-                .build());
 
         items.add(new PropertyItemBuilder<>(flipMacroXProperty, Boolean.class)
                 .name("Flip macro image X")
@@ -229,12 +211,7 @@ public class QPPreferenceDialog {
     public static boolean getInvertedYProperty() {
         return invertedYProperty.get();
     }
-    public static String getSavedTransformName() {
-        return savedTransformNameProperty.get();
-    }
-    public static String getSelectedScannerProperty() {
-        return selectedScannerProperty.get();
-    }
+
     public static String getMicroscopeServerHost() {
         return microscopeServerHostProperty.get();
     }
@@ -267,13 +244,7 @@ public class QPPreferenceDialog {
         autoConnectToServerProperty.set(autoConnect);
     }
 
-    public static void setSelectedScannerProperty(String scanner) {
-        selectedScannerProperty.set(scanner);
-    }
 
-    public static StringProperty selectedScannerProperty() {
-        return selectedScannerProperty;
-    }
     public static String getMicroscopeConfigFileProperty() {
         return microscopeConfigFileProperty.get();
     }
@@ -323,9 +294,7 @@ public class QPPreferenceDialog {
         return FXCollections.observableArrayList(choices);
     }
 
-    public static void setSavedTransformName(String name) {
-        savedTransformNameProperty.set(name);
-    }
+
 
     private static List<String> getAvailableTransforms() {
         List<String> transforms = new ArrayList<>();

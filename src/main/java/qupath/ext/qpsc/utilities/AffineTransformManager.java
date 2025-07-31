@@ -7,6 +7,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qupath.ext.qpsc.controller.ExistingImageWorkflow;
 import qupath.ext.qpsc.controller.MicroscopeController;
+import qupath.ext.qpsc.preferences.PersistentPreferences;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.ui.SampleSetupController;
 import qupath.lib.projects.Project;
@@ -327,7 +328,7 @@ public class AffineTransformManager {
      *         or cannot be loaded
      */
     public static AffineTransform loadSavedTransformFromPreferences() {
-        String savedTransformName = QPPreferenceDialog.getSavedTransformName();
+        String savedTransformName = PersistentPreferences.getSavedTransformName();
         if (savedTransformName == null || savedTransformName.isEmpty()) {
             logger.debug("No saved transform name in preferences");
             return null;
@@ -365,7 +366,7 @@ public class AffineTransformManager {
      * @return true if a transform is saved and can be successfully loaded, false otherwise
      */
     public static boolean hasSavedTransform() {
-        String savedName = QPPreferenceDialog.getSavedTransformName();
+        String savedName = PersistentPreferences.getSavedTransformName();
         if (savedName == null || savedName.isEmpty()) {
             return false;
         }

@@ -4,10 +4,8 @@ import javafx.application.Platform;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
-import qupath.ext.qpsc.ui.AffineTransformationController;
-import qupath.ext.qpsc.ui.MacroImageController;
-import qupath.ext.qpsc.ui.SampleSetupController;
-import qupath.ext.qpsc.ui.UIFunctions;
+import qupath.ext.qpsc.preferences.PersistentPreferences;
+import qupath.ext.qpsc.ui.*;
 import qupath.ext.qpsc.utilities.*;
 
 import qupath.lib.gui.QuPathGUI;
@@ -80,78 +78,116 @@ public class MicroscopeAlignmentWorkflow {
             return;
         }
 
-        // Check for macro image
-        BufferedImage macroImage = MacroImageUtility.retrieveMacroImage(gui);
-        if (macroImage == null) {
-            Platform.runLater(() -> UIFunctions.notifyUserOfError(
-                    "No macro image found in the current image. " +
-                            "A macro image is required for alignment workflow.",
-                    "No Macro Image"));
-            return;
-        }
-
-        // Initialize transform manager
-        String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
-        AffineTransformManager transformManager = new AffineTransformManager(
-                new File(configPath).getParent());
-
-        // Get current microscope from config
-        MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(configPath);
-        String microscopeName = mgr.getString("microscope", "name");
-
-        // First, show sample setup dialog to get modality
-        SampleSetupController.showDialog()
-                .thenCompose(sampleSetup -> {
-                    if (sampleSetup == null) {
-                        logger.info("User cancelled at sample setup");
-                        return CompletableFuture.completedFuture(null);
-                    }
-
-                    // Now show alignment dialog with proper parameters
-                    return MacroImageController.showAlignmentDialog(gui, transformManager, microscopeName)
-                            .thenApply(alignConfig -> {
-                                if (alignConfig == null) {
-                                    return null;
-                                }
-
-                                // Run detection NOW before project creation
-                                MacroImageResults macroImageResults = performDetection(gui, alignConfig);
-
-                                // Package everything together
-                                return new CombinedConfig(sampleSetup, alignConfig, macroImageResults);
-                            });
-                })
-                .thenAccept(combinedConfig -> {
-                    if (combinedConfig == null) {
-                        logger.info("User cancelled alignment workflow");
+        // First, show microscope selection dialog
+        MicroscopeSelectionDialog.showDialog()
+                .thenAccept(microscopeSelection -> {
+                    if (microscopeSelection == null) {
+                        logger.info("User cancelled microscope selection");
                         return;
                     }
 
-                    // Process the alignment with project setup
-                    processAlignmentWithProject(gui, combinedConfig, transformManager);
-                })
-                .exceptionally(ex -> {
-                    // Check if this is a cancellation - if so, handle gracefully
-                    if (ex.getCause() instanceof CancellationException) {
-                        logger.info("User cancelled the workflow");
-                        return null;
+                    // Check if microscope supports macro images
+                    if (!microscopeSelection.hasMacroSupport()) {
+                        Platform.runLater(() -> UIFunctions.notifyUserOfError(
+                                "The selected microscope '" + microscopeSelection.microscopeName() +
+                                        "' does not support macro images.\n\n" +
+                                        "Manual alignment is the only option for non-macro image scanners.\n" +
+                                        "Please use a different workflow or select a microscope with macro image support.",
+                                "No Macro Image Support"
+                        ));
+                        return;
                     }
 
-                    logger.error("Alignment workflow failed", ex);
+                    // Store the selected scanner for later use
+                    String selectedScanner = microscopeSelection.microscopeName();
+                    logger.info("Selected source microscope: {}", selectedScanner);
+
+                    // Check for macro image in the current image
+                    BufferedImage macroImage = MacroImageUtility.retrieveMacroImage(gui);
+                    if (macroImage == null) {
+                        Platform.runLater(() -> UIFunctions.notifyUserOfError(
+                                "No macro image found in the current image. " +
+                                        "A macro image is required for alignment workflow.",
+                                "No Macro Image"));
+                        return;
+                    }
+
+                    // Initialize transform manager
+                    String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
+                    AffineTransformManager transformManager = new AffineTransformManager(
+                            new File(configPath).getParent());
+
+                    // Get current microscope from config
+                    MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(configPath);
+                    String currentMicroscope = mgr.getString("microscope", "name");
+
+                    // Continue with sample setup dialog...
+                    SampleSetupController.showDialog()
+                            .thenCompose(sampleSetup -> {
+                                if (sampleSetup == null) {
+                                    logger.info("User cancelled at sample setup");
+                                    return CompletableFuture.completedFuture(null);
+                                }
+
+                                // Now show alignment dialog with proper parameters
+                                // Pass the CURRENT microscope (target) not the selected scanner (source)
+                                return MacroImageController.showAlignmentDialog(gui, transformManager, currentMicroscope)
+                                        .thenApply(alignConfig -> {
+                                            if (alignConfig == null) {
+                                                return null;
+                                            }
+
+                                            // Run detection NOW before project creation
+                                            MacroImageResults macroImageResults = performDetection(gui, alignConfig,
+                                                    selectedScanner, microscopeSelection.configPath());
+
+                                            // Package everything together with the selected scanner
+                                            return new CombinedConfig(sampleSetup, alignConfig, macroImageResults,
+                                                    selectedScanner, microscopeSelection.configPath());
+                                        });
+                            })
+                            .thenAccept(combinedConfig -> {
+                                if (combinedConfig == null) {
+                                    logger.info("User cancelled alignment workflow");
+                                    return;
+                                }
+
+                                // Process the alignment with project setup
+                                processAlignmentWithProject(gui, combinedConfig, transformManager);
+                            })
+                            .exceptionally(ex -> {
+                                // Check if this is a cancellation - if so, handle gracefully
+                                if (ex.getCause() instanceof CancellationException) {
+                                    logger.info("User cancelled the workflow");
+                                    return null;
+                                }
+
+                                logger.error("Alignment workflow failed", ex);
+                                Platform.runLater(() -> UIFunctions.notifyUserOfError(
+                                        "Workflow error: " + ex.getMessage(),
+                                        "Alignment Error"));
+                                return null;
+                            });
+
+                })
+                .exceptionally(ex -> {
+                    logger.error("Microscope selection failed", ex);
                     Platform.runLater(() -> UIFunctions.notifyUserOfError(
-                            "Workflow error: " + ex.getMessage(),
-                            "Alignment Error"));
+                            "Failed to select microscope: " + ex.getMessage(),
+                            "Selection Error"));
                     return null;
                 });
     }
 
     /**
-     * Container for sample setup, alignment config, and detection results.
+     * Container for sample setup, alignment config, detection results, and selected scanner.
      */
     private record CombinedConfig(
             SampleSetupController.SampleSetupResult sampleSetup,
             MacroImageController.AlignmentConfig alignmentConfig,
-            MacroImageResults macroImageResults
+            MacroImageResults macroImageResults,
+            String selectedScanner,
+            String selectedScannerConfigPath
     ) {}
 
     /**
@@ -174,11 +210,15 @@ public class MicroscopeAlignmentWorkflow {
      *
      * @param gui QuPath GUI instance
      * @param config Alignment configuration
+     * @param selectedScanner The scanner that created the image
+     * @param selectedScannerConfigPath Path to the scanner's config file
      * @return Detection results including green box location and tissue regions
      */
     private static MacroImageResults performDetection(
             QuPathGUI gui,
-            MacroImageController.AlignmentConfig config) {
+            MacroImageController.AlignmentConfig config,
+            String selectedScanner,
+            String selectedScannerConfigPath) {
 
         logger.info("Performing detection while macro image is available");
 
@@ -193,11 +233,46 @@ public class MicroscopeAlignmentWorkflow {
         int originalMacroHeight = originalMacroImage.getHeight();
         logger.info("Original macro dimensions: {}x{}", originalMacroWidth, originalMacroHeight);
 
-        // Crop the macro image to just the slide area
-        String scanner = QPPreferenceDialog.getSelectedScannerProperty();
-        logger.info("Using scanner '{}' for macro image processing", scanner);
+        // Crop the macro image using the SELECTED SCANNER settings
+        logger.info("Using scanner '{}' for macro image processing", selectedScanner);
 
-        MacroImageUtility.CroppedMacroResult croppedResult = MacroImageUtility.cropToSlideArea(originalMacroImage);
+        // Load the scanner configuration directly to avoid singleton caching
+        Map<String, Object> scannerConfig = MinorFunctions.loadYamlFile(selectedScannerConfigPath);
+
+        // Check if scanner requires cropping
+        boolean requiresCropping = false;
+        MacroImageUtility.CroppedMacroResult croppedResult;
+
+        // Check if this scanner has macro configuration
+        Map<String, Object> macroConfig = (Map<String, Object>) scannerConfig.get("macro");
+        if (macroConfig != null) {
+            Boolean cropRequired = MinorFunctions.getYamlBoolean(scannerConfig, "macro", "requiresCropping");
+            requiresCropping = cropRequired != null && cropRequired;
+        }
+
+        if (requiresCropping) {
+            // Get slide bounds from scanner config
+            Integer xMin = MinorFunctions.getYamlInteger(scannerConfig, "macro", "slideBounds", "xMin");
+            Integer xMax = MinorFunctions.getYamlInteger(scannerConfig, "macro", "slideBounds", "xMax");
+            Integer yMin = MinorFunctions.getYamlInteger(scannerConfig, "macro", "slideBounds", "yMin");
+            Integer yMax = MinorFunctions.getYamlInteger(scannerConfig, "macro", "slideBounds", "yMax");
+
+            if (xMin != null && xMax != null && yMin != null && yMax != null) {
+                croppedResult = MacroImageUtility.cropToSlideArea(originalMacroImage, xMin, xMax, yMin, yMax);
+                logger.info("Cropped macro image using bounds from {}: X[{}-{}], Y[{}-{}]",
+                        selectedScanner, xMin, xMax, yMin, yMax);
+            } else {
+                logger.warn("Scanner '{}' requires cropping but bounds are not properly configured", selectedScanner);
+                croppedResult = new MacroImageUtility.CroppedMacroResult(
+                        originalMacroImage, originalMacroWidth, originalMacroHeight, 0, 0);
+            }
+        } else {
+            // No cropping needed
+            croppedResult = new MacroImageUtility.CroppedMacroResult(
+                    originalMacroImage, originalMacroWidth, originalMacroHeight, 0, 0);
+            logger.info("Scanner '{}' does not require cropping", selectedScanner);
+        }
+
         BufferedImage croppedMacroImage = croppedResult.getCroppedImage();
 
         int macroWidth = croppedMacroImage.getWidth();
@@ -295,6 +370,8 @@ public class MicroscopeAlignmentWorkflow {
                 var sampleSetup = combinedConfig.sampleSetup();
                 var alignConfig = combinedConfig.alignmentConfig();
                 var detectionResults = combinedConfig.macroImageResults();
+                var selectedScanner = combinedConfig.selectedScanner();
+                var selectedScannerConfigPath = combinedConfig.selectedScannerConfigPath();
 
                 // Import to project
                 boolean flipX = QPPreferenceDialog.getFlipMacroXProperty();
@@ -373,12 +450,29 @@ public class MicroscopeAlignmentWorkflow {
                 boolean invertedX = QPPreferenceDialog.getInvertedXProperty();
                 boolean invertedY = QPPreferenceDialog.getInvertedYProperty();
 
-// Get macro pixel size from scanner configuration
+                // Get macro pixel size using the SELECTED SCANNER config
                 double macroPixelSize;
                 try {
-                    macroPixelSize = MacroImageUtility.getMacroPixelSize();
-                    logger.info("Using macro pixel size {} µm from scanner configuration", macroPixelSize);
-                } catch (IllegalStateException e) {
+                    // Load the scanner configuration directly
+                    Map<String, Object> scannerConfig = MinorFunctions.loadYamlFile(selectedScannerConfigPath);
+                    Double pixelSize = MinorFunctions.getYamlDouble(scannerConfig, "macro", "pixelSize_um");
+
+                    if (pixelSize == null || pixelSize <= 0) {
+                        String error = String.format(
+                                "Scanner '%s' has no valid macro pixel size configured. " +
+                                        "This is required for accurate alignment. " +
+                                        "Please add 'macro: pixelSize_um:' to the scanner configuration.",
+                                selectedScanner
+                        );
+                        logger.error(error);
+                        UIFunctions.notifyUserOfError(error + "\n\nCannot proceed with alignment.", "Configuration Error");
+                        return;
+                    }
+
+                    macroPixelSize = pixelSize;
+                    logger.info("Using macro pixel size {} µm from scanner '{}' configuration",
+                            macroPixelSize, selectedScanner);
+                } catch (Exception e) {
                     logger.error("Failed to get macro pixel size: {}", e.getMessage());
                     UIFunctions.notifyUserOfError(
                             e.getMessage() + "\n\nCannot proceed with alignment.",
@@ -390,7 +484,7 @@ public class MicroscopeAlignmentWorkflow {
                 double mainPixelSize = gui.getImageData().getServer()
                         .getPixelCalibration().getAveragedPixelSizeMicrons();
 
-// Create tiles for manual alignment
+                // Create tiles for manual alignment
                 String tempTileDirectory = (String) projectDetails.get("tempTileDirectory");
                 String modeWithIndex = (String) projectDetails.get("imagingModeWithIndex");
 
@@ -415,7 +509,7 @@ public class MicroscopeAlignmentWorkflow {
                             // Create and save the general macro→stage transform
                             saveGeneralTransform(gui, alignConfig, fullResToStageTransform,
                                     detectionResults, macroPixelSize, invertedX, invertedY,
-                                    transformManager);
+                                    transformManager, selectedScanner);
 
                         }).exceptionally(ex -> {
                             logger.error("Error in transform setup", ex);
@@ -606,6 +700,7 @@ public class MicroscopeAlignmentWorkflow {
      * @param invertedX Whether the microscope stage X-axis is inverted (unused, kept for compatibility)
      * @param invertedY Whether the microscope stage Y-axis is inverted (unused, kept for compatibility)
      * @param transformManager Manager responsible for persisting transforms to disk
+     * @param selectedScanner The scanner that created the source image
      *
      * @throws IllegalStateException if the transform calculation fails or produces invalid results
      *
@@ -619,7 +714,8 @@ public class MicroscopeAlignmentWorkflow {
             double macroPixelSize,
             boolean invertedX,
             boolean invertedY,
-            AffineTransformManager transformManager) {
+            AffineTransformManager transformManager,
+            String selectedScanner) {
 
         try {
             // Get image dimensions
@@ -701,25 +797,28 @@ public class MicroscopeAlignmentWorkflow {
                 logger.warn("Transform validation failed - may produce out-of-bounds coordinates!");
             }
 
+            // Get current microscope name
+            String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
+            MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(configPath);
+            String currentMicroscope = mgr.getString("microscope", "name");
+
             // Create description
             String description = String.format(
-                    "Macro-to-stage transform for %dx%d macro image. " +
+                    "Transform from %s to %s microscope. " +
+                            "Macro image: %dx%d pixels. " +
                             "Green box detected: %s. Validation: %s",
+                    selectedScanner,
+                    currentMicroscope,
                     macroImageResults.macroWidth(),
                     macroImageResults.macroHeight(),
                     (macroImageResults.greenBoxResult() != null),
                     isValid ? "PASSED" : "FAILED"
             );
 
-            // Get microscope name
-            String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
-            MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(configPath);
-            String microscopeName = mgr.getString("microscope", "name");
-
             // Generate transform name if needed
             String transformName = config.transformName();
             if (transformName == null || transformName.isBlank()) {
-                transformName = microscopeName + "_Transform_" +
+                transformName = selectedScanner + "_to_" + currentMicroscope + "_" +
                         new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
             }
 
@@ -727,8 +826,8 @@ public class MicroscopeAlignmentWorkflow {
             AffineTransformManager.TransformPreset preset =
                     new AffineTransformManager.TransformPreset(
                             transformName,
-                            microscopeName,
-                            "Standard",
+                            currentMicroscope,  // Store the TARGET microscope
+                            selectedScanner,    // Store the SOURCE scanner as mounting method
                             macroToStageTransform,
                             description,
                             config.greenBoxParams()
@@ -738,16 +837,18 @@ public class MicroscopeAlignmentWorkflow {
             logger.info("Saved macro→stage transform: {}", transformName);
 
             // Save to preferences for future use
-            QPPreferenceDialog.setSavedTransformName(transformName);
+            PersistentPreferences.setSavedTransformName(transformName);
 
             // Notify user
             String finalTransformName = transformName;
             Platform.runLater(() -> {
                 String message = String.format(
                         "Successfully saved alignment transform: %s\n\n" +
-                                "This transform maps macro image coordinates to stage coordinates.\n" +
+                                "This transform maps %s macro image coordinates to %s stage coordinates.\n" +
                                 "Transform validation: %s",
                         finalTransformName,
+                        selectedScanner,
+                        currentMicroscope,
                         isValid ? "PASSED ✓" : "WARNING - May produce out-of-bounds coordinates!"
                 );
 
@@ -820,7 +921,6 @@ public class MicroscopeAlignmentWorkflow {
             logger.warn("Ground truth validation failed - transform may be incorrect!");
         }
     }
-
 
     /**
      * Runs the tissue detection script if configured.

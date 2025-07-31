@@ -24,7 +24,35 @@ public class PersistentPreferences {
         slideLabelSaved.setValue(slideLabel);
     }
 
-    // ================== BOUNDING BOX WORKFLOW ==================
+    private static final StringProperty selectedScannerProperty =
+            PathPrefs.createPersistentPreference("selectedScanner", "Generic");
+    private static final StringProperty savedTransformNameProperty  =
+            PathPrefs.createPersistentPreference("savedMicroscopeTransform", "");
+    public static String getSavedTransformName() {
+        return savedTransformNameProperty.get();
+    }
+    public static String getSelectedScannerProperty() {
+        return selectedScannerProperty.get();
+    }
+    public static void setSelectedScannerProperty(String scanner) {
+        selectedScannerProperty.set(scanner);
+    }
+
+    public static StringProperty selectedScannerProperty() {
+        return selectedScannerProperty;
+    }
+    public static void setSavedTransformName(String name) {
+        savedTransformNameProperty.set(name);
+    }
+
+    // Add getter for scanner property (already exists but let's ensure it's complete)
+    public static String getSelectedScanner() {
+        return selectedScannerProperty.get();
+    }
+
+    public static void setSelectedScanner(String scanner) {
+        selectedScannerProperty.set(scanner);
+    }
 // ================== BOUNDING BOX WORKFLOW ==================
     private static final StringProperty boundingBoxString =
             PathPrefs.createPersistentPreference("BoundingBox", "27000,7000,20000,10000");

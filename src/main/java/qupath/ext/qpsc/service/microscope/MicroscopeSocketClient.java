@@ -87,13 +87,13 @@ public class MicroscopeSocketClient implements AutoCloseable {
         /** Get Z stage position */
         GETZ("getz____"),
         /** Move Z stage */
-        MOVEZ("movez___"),
+        MOVEZ("move_z__"),
         /** Move XY stage */
         MOVE("move____"),
         /** Get rotation angle in ticks */
         GETR("getr____"),
         /** Move rotation stage */
-        MOVER("mover___"),
+        MOVER("move_r__"),
         /** Shutdown server */
         SHUTDOWN("shutdown"),
         /** Disconnect client */

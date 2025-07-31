@@ -5,6 +5,7 @@ import javafx.scene.control.Alert;
 import javafx.scene.control.ButtonType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import qupath.ext.qpsc.preferences.PersistentPreferences;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.lib.gui.QuPathGUI;
 import qupath.lib.images.servers.ImageServer;
@@ -266,7 +267,7 @@ public class MacroImageUtility {
      * @throws IllegalStateException if scanner is not configured or pixel size is missing
      */
     public static double getMacroPixelSize() {
-        String scannerName = QPPreferenceDialog.getSelectedScannerProperty();
+        String scannerName = PersistentPreferences.getSelectedScannerProperty();
         if (scannerName == null || scannerName.isEmpty()) {
             String error = "No scanner selected in preferences. Please select a scanner in Edit > Preferences.";
             logger.error(error);

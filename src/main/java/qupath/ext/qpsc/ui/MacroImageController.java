@@ -115,7 +115,7 @@ public class MacroImageController {
             content.setPadding(new Insets(10));
 
             Label instructions = new Label(
-                    "This workflow creates an alignment transform between the macro image and main image.\n" +
+                    "This workflow creates an alignment transform between the macro image and main image.\n\n" +
                             "1. Choose to create new or refine existing transform\n" +
                             "2. Configure green box detection to find the scanned area (REQUIRED: Visit this tab)\n" +
                             "3. Configure tissue detection for annotation placement (OR visit this tab)\n\n" +
@@ -123,10 +123,23 @@ public class MacroImageController {
                             "The created transform will be saved and available in the Existing Image workflow."
             );
             instructions.setWrapText(true);
-            instructions.setStyle("-fx-background-color: #ecf0f1; -fx-padding: 10; -fx-border-color: #bdc3c7; -fx-font-weight: bold;");
+            instructions.setMaxWidth(750); // Prevent text cutoff
+            instructions.setPrefWidth(750);
+            instructions.setStyle(
+                    "-fx-background-color: -fx-control-inner-background; " +  // Theme-aware background
+                            "-fx-padding: 15; " +
+                            "-fx-border-color: -fx-box-border; " +  // Theme-aware border
+                            "-fx-border-width: 1; " +
+                            "-fx-border-radius: 5; " +
+                            "-fx-background-radius: 5; " +
+                            "-fx-font-weight: normal; " +  // Changed from bold for better readability
+                            "-fx-text-fill: -fx-text-base-color;"  // Theme-aware text color
+            );
 
             content.getChildren().addAll(instructions, tabs);
-
+            dialog.getDialogPane().setPrefSize(850, 700);  // Increased from 800
+            dialog.getDialogPane().setMinHeight(Region.USE_PREF_SIZE);
+            dialog.getDialogPane().setMinWidth(850);  // Add minimum width
             dialog.getDialogPane().setContent(content);
 
             // Buttons
