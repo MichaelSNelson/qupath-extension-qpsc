@@ -9,12 +9,15 @@ import org.slf4j.LoggerFactory;
 import qupath.ext.qpsc.model.RotationManager;
 import qupath.ext.qpsc.preferences.PersistentPreferences;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
+import qupath.ext.qpsc.service.AcquisitionCommandBuilder;
+import qupath.ext.qpsc.service.microscope.MicroscopeSocketClient;
 
 import qupath.ext.qpsc.ui.*;
 import qupath.ext.qpsc.utilities.*;
 import qupath.lib.gui.QuPathGUI;
 import qupath.lib.objects.PathObject;
 import qupath.lib.projects.Project;
+import qupath.lib.projects.ProjectImageEntry;
 import qupath.lib.roi.interfaces.ROI;
 import qupath.lib.scripting.QP;
 import qupath.fx.dialogs.Dialogs;
@@ -23,8 +26,10 @@ import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 /**
@@ -35,7 +40,7 @@ import java.util.stream.Collectors;
  * - Path B: Create new alignment through manual annotation workflow
  *
  * @author Mike Nelson
- * @version 2.2 - Fixed tile coordinate transformation to stage coordinates
+ * @version 3.0 - Updated to use socket-based communication
  */
 public class ExistingImageWorkflow {
     private static final Logger logger = LoggerFactory.getLogger(ExistingImageWorkflow.class);
@@ -54,11 +59,12 @@ public class ExistingImageWorkflow {
     /**
      * Entry point for the workflow. Follows the sequence:
      * 1. Check for open image
-     * 2. Sample setup dialog
-     * 3. Check for existing slide-specific alignment (NEW)
-     * 4. Alignment selection or skip if using existing
-     * 5. Path-specific dialogs and project creation
-     * 6. Acquisition and stitching
+     * 2. Ensure microscope server connection
+     * 3. Sample setup dialog
+     * 4. Check for existing slide-specific alignment
+     * 5. Alignment selection or skip if using existing
+     * 6. Path-specific dialogs and project creation
+     * 7. Acquisition and stitching
      */
     public static void run() {
         logger.info("************************************");
@@ -72,6 +78,21 @@ public class ExistingImageWorkflow {
                     UIFunctions.notifyUserOfError(
                             "No image is currently open. Please open an image first.",
                             "No Image")
+            );
+            return;
+        }
+
+        // Ensure connection to microscope server
+        try {
+            if (!MicroscopeController.getInstance().isConnected()) {
+                logger.info("Connecting to microscope server for stage control");
+                MicroscopeController.getInstance().connect();
+            }
+        } catch (IOException e) {
+            logger.error("Failed to connect to microscope server: {}", e.getMessage());
+            UIFunctions.notifyUserOfError(
+                    "Cannot connect to microscope server.\nPlease check server is running and try again.",
+                    "Connection Error"
             );
             return;
         }
@@ -120,7 +141,7 @@ public class ExistingImageWorkflow {
         CompletableFuture<AffineTransform> future = new CompletableFuture<>();
 
         // Try to load slide-specific alignment
-        AffineTransform slideTransform;
+        AffineTransform slideTransform = null;
 
         Project<BufferedImage> project = gui.getProject();
         if (project != null) {
@@ -131,19 +152,18 @@ public class ExistingImageWorkflow {
             File projectDir = new File(sample.projectsFolder(), sample.sampleName());
             if (projectDir.exists()) {
                 slideTransform = AffineTransformManager.loadSlideAlignmentFromDirectory(projectDir, sample.sampleName());
-            } else {
-                slideTransform = null;
             }
         }
 
         if (slideTransform != null) {
+            AffineTransform finalSlideTransform = slideTransform;
             Platform.runLater(() -> {
                 Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
                 alert.setTitle("Existing Slide Alignment Found");
                 alert.setHeaderText("Found existing alignment for slide '" + sample.sampleName() + "'");
                 alert.setContentText("Would you like to use the existing slide alignment?\n\n" +
                         "Choose 'Yes' to proceed directly to acquisition.\n" +
-                        "Choose 'No' to create a new alignment.");
+                        "Choose 'No' to select a different alignment or create a new one.");
 
                 ButtonType yesButton = new ButtonType("Yes", ButtonBar.ButtonData.YES);
                 ButtonType noButton = new ButtonType("No", ButtonBar.ButtonData.NO);
@@ -152,13 +172,14 @@ public class ExistingImageWorkflow {
                 Optional<ButtonType> result = alert.showAndWait();
                 if (result.isPresent() && result.get() == yesButton) {
                     logger.info("User chose to use existing slide alignment");
-                    future.complete(slideTransform);
+                    future.complete(finalSlideTransform);
                 } else {
-                    logger.info("User chose to create new alignment");
+                    logger.info("User chose to select different alignment");
                     future.complete(null);
                 }
             });
         } else {
+            logger.info("No slide-specific alignment found for sample: {}", sample.sampleName());
             future.complete(null);
         }
 
@@ -251,7 +272,36 @@ public class ExistingImageWorkflow {
         // Get macro pixel size
         double pixelSize;
         try {
-            pixelSize = MacroImageUtility.getMacroPixelSize();
+            // Extract the scanner name from the transform mounting method
+            String scannerName = context.alignment.selectedTransform().getMountingMethod();
+            logger.info("Using scanner '{}' from transform mounting method", scannerName);
+
+            // Try to find the scanner config file
+            String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
+            File configDir = new File(configPath).getParentFile();
+            File scannerConfigFile = new File(configDir, "config_" + scannerName + ".yml");
+
+            if (scannerConfigFile.exists()) {
+                // Load the scanner configuration directly to avoid singleton caching
+                Map<String, Object> scannerConfig = MinorFunctions.loadYamlFile(scannerConfigFile.getAbsolutePath());
+                Double macroPixelSizeValue = MinorFunctions.getYamlDouble(scannerConfig, "macro", "pixelSize_um");
+
+                if (macroPixelSizeValue != null && macroPixelSizeValue > 0) {
+                    pixelSize = macroPixelSizeValue;
+                    logger.info("Loaded macro pixel size {} µm from scanner config: {}",
+                            pixelSize, scannerConfigFile.getName());
+                } else {
+                    throw new IllegalStateException(
+                            "Scanner '" + scannerName + "' has no valid macro pixel size configured. " +
+                                    "Please add 'macro: pixelSize_um:' to the scanner configuration."
+                    );
+                }
+            } else {
+                // Fallback to preferences if no scanner config found
+                logger.warn("Scanner config file not found: {}. Using default from preferences.",
+                        scannerConfigFile.getAbsolutePath());
+                pixelSize = MacroImageUtility.getMacroPixelSize();
+            }
         } catch (IllegalStateException e) {
             UIFunctions.notifyUserOfError(
                     e.getMessage() + "\n\nThe workflow cannot continue without the macro image pixel size.",
@@ -271,7 +321,52 @@ public class ExistingImageWorkflow {
         }
 
         // IMPORTANT: Crop the macro image first
-        MacroImageUtility.CroppedMacroResult croppedResult = MacroImageUtility.cropToSlideArea(originalMacroImage);
+        MacroImageUtility.CroppedMacroResult croppedResult;
+
+        // Extract scanner name from transform
+        String scannerName = context.alignment.selectedTransform().getMountingMethod();
+        logger.info("Processing macro image for scanner: {}", scannerName);
+
+        // Try to load scanner-specific configuration
+        String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
+        File configDir = new File(configPath).getParentFile();
+        File scannerConfigFile = new File(configDir, "config_" + scannerName + ".yml");
+
+        if (scannerConfigFile.exists()) {
+            // Load the scanner configuration directly
+            Map<String, Object> scannerConfig = MinorFunctions.loadYamlFile(scannerConfigFile.getAbsolutePath());
+
+            // Check if scanner requires cropping
+            Boolean requiresCropping = MinorFunctions.getYamlBoolean(scannerConfig, "macro", "requiresCropping");
+
+            if (requiresCropping != null && requiresCropping) {
+                // Get slide bounds from scanner config
+                Integer xMin = MinorFunctions.getYamlInteger(scannerConfig, "macro", "slideBounds", "xMin");
+                Integer xMax = MinorFunctions.getYamlInteger(scannerConfig, "macro", "slideBounds", "xMax");
+                Integer yMin = MinorFunctions.getYamlInteger(scannerConfig, "macro", "slideBounds", "yMin");
+                Integer yMax = MinorFunctions.getYamlInteger(scannerConfig, "macro", "slideBounds", "yMax");
+
+                if (xMin != null && xMax != null && yMin != null && yMax != null) {
+                    croppedResult = MacroImageUtility.cropToSlideArea(originalMacroImage, xMin, xMax, yMin, yMax);
+                    logger.info("Cropped macro image using bounds from {}: X[{}-{}], Y[{}-{}]",
+                            scannerName, xMin, xMax, yMin, yMax);
+                } else {
+                    logger.warn("Scanner '{}' requires cropping but bounds are not properly configured", scannerName);
+                    croppedResult = new MacroImageUtility.CroppedMacroResult(
+                            originalMacroImage, originalMacroImage.getWidth(), originalMacroImage.getHeight(), 0, 0);
+                }
+            } else {
+                // No cropping needed
+                croppedResult = new MacroImageUtility.CroppedMacroResult(
+                        originalMacroImage, originalMacroImage.getWidth(), originalMacroImage.getHeight(), 0, 0);
+                logger.info("Scanner '{}' does not require cropping", scannerName);
+            }
+        } else {
+            // Fallback to default cropping
+            logger.warn("Scanner config file not found: {}. Using default cropping.", scannerConfigFile.getAbsolutePath());
+            croppedResult = MacroImageUtility.cropToSlideArea(originalMacroImage);
+        }
+
         BufferedImage croppedMacroImage = croppedResult.getCroppedImage();
 
         // Then apply flips if configured
@@ -333,7 +428,31 @@ public class ExistingImageWorkflow {
         // Get macro pixel size
         double pixelSize;
         try {
-            pixelSize = MacroImageUtility.getMacroPixelSize();
+            // For manual alignment, try to get from preferences first
+            String savedScanner = PersistentPreferences.getSelectedScanner();
+            if (savedScanner != null && !savedScanner.isEmpty()) {
+                // Try to load scanner-specific config
+                String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
+                File configDir = new File(configPath).getParentFile();
+                File scannerConfigFile = new File(configDir, "config_" + savedScanner + ".yml");
+
+                if (scannerConfigFile.exists()) {
+                    Map<String, Object> scannerConfig = MinorFunctions.loadYamlFile(scannerConfigFile.getAbsolutePath());
+                    Double macroPixelSizeValue = MinorFunctions.getYamlDouble(scannerConfig, "macro", "pixelSize_um");
+
+                    if (macroPixelSizeValue != null && macroPixelSizeValue > 0) {
+                        pixelSize = macroPixelSizeValue;
+                        logger.info("Using macro pixel size {} µm from scanner '{}' config",
+                                pixelSize, savedScanner);
+                    } else {
+                        pixelSize = MacroImageUtility.getMacroPixelSize();
+                    }
+                } else {
+                    pixelSize = MacroImageUtility.getMacroPixelSize();
+                }
+            } else {
+                pixelSize = MacroImageUtility.getMacroPixelSize();
+            }
         } catch (IllegalStateException e) {
             UIFunctions.notifyUserOfError(
                     e.getMessage() + "\n\nThe workflow cannot continue without the macro image pixel size.",
@@ -396,28 +515,43 @@ public class ExistingImageWorkflow {
                             sample.modality()
                     );
 
-                    // Handle flips for existing image if needed
+                    // Check if we need to handle flips for the current image
                     var imageData = gui.getImageData();
                     if (imageData != null && (flippedX || flippedY)) {
-                        String imagePath = MinorFunctions.extractFilePath(imageData.getServerPath());
-                        if (imagePath != null) {
-                            QPProjectFunctions.addImageToProject(
-                                    new File(imagePath),
-                                    gui.getProject(),
-                                    flippedX,
-                                    flippedY
-                            );
+                        // First check if this image is already properly in the project
+                        ProjectImageEntry<BufferedImage> currentEntry = null;
 
-                            // Refresh and reopen the image
-                            gui.refreshProject();
-                            var entries = gui.getProject().getImageList();
-                            var newEntry = entries.stream()
-                                    .filter(e -> e.getImageName().equals(new File(imagePath).getName()))
-                                    .findFirst()
-                                    .orElse(null);
-                            if (newEntry != null) {
-                                gui.openImageEntry(newEntry);
+                        try {
+                            currentEntry = gui.getProject().getEntry(imageData);
+                        } catch (Exception e) {
+                            logger.debug("Could not get project entry for current image: {}", e.getMessage());
+                        }
+
+                        // Only add the image if it's not already in the project
+                        if (currentEntry == null) {
+                            logger.info("Current image not in project, adding with flips");
+                            String imagePath = MinorFunctions.extractFilePath(imageData.getServerPath());
+                            if (imagePath != null) {
+                                QPProjectFunctions.addImageToProject(
+                                        new File(imagePath),
+                                        gui.getProject(),
+                                        flippedX,
+                                        flippedY
+                                );
+
+                                // Refresh and reopen the image
+                                gui.refreshProject();
+                                var entries = gui.getProject().getImageList();
+                                var newEntry = entries.stream()
+                                        .filter(e -> e.getImageName().equals(new File(imagePath).getName()))
+                                        .findFirst()
+                                        .orElse(null);
+                                if (newEntry != null) {
+                                    gui.openImageEntry(newEntry);
+                                }
                             }
+                        } else {
+                            logger.info("Current image already exists in project, no need to re-add");
                         }
                     }
                 }
@@ -446,19 +580,6 @@ public class ExistingImageWorkflow {
      * Processes the existing alignment workflow after green box detection.
      * Creates a full-resolution to stage transform by combining the detected green box
      * with the saved general macro-to-stage transform.
-     *
-     * <p>This method handles the critical transformation chain:
-     * <pre>
-     * Full-res pixels → Macro (flipped/cropped) → Stage micrometers
-     * </pre>
-     *
-     * <p>The saved transform expects macro coordinates in the displayed (flipped/cropped) coordinate system,
-     * which is exactly what we have after green box detection.
-     *
-     * @param gui QuPath GUI instance
-     * @param alignContext Context containing alignment settings and green box detection results
-     * @param projectInfo Project information including paths and settings
-     * @return CompletableFuture that completes when alignment processing is done
      */
     private static CompletableFuture<Void> processExistingAlignment(
             QuPathGUI gui, AlignmentContext alignContext, ProjectInfo projectInfo) {
@@ -563,9 +684,6 @@ public class ExistingImageWorkflow {
         // Set this as the current transform
         MicroscopeController.getInstance().setCurrentTransform(fullResToStage);
 
-        // IMPORTANT: We will transform tiles AFTER they are created, not the TileConfiguration files
-        // The TileConfiguration files should remain in QuPath coordinates for stitching
-
         // Check if we have a slide-specific alignment already
         AffineTransform slideTransform = AffineTransformManager.loadSlideAlignment(
                 project, alignContext.context.sample.sampleName());
@@ -614,6 +732,9 @@ public class ExistingImageWorkflow {
     /**
      * Helper method to handle the alignment refinement process
      */
+    /**
+     * Helper method to handle the alignment refinement process
+     */
     private static CompletableFuture<Void> proceedWithAlignmentRefinement(
             QuPathGUI gui,
             AlignmentContext alignContext,
@@ -642,9 +763,24 @@ public class ExistingImageWorkflow {
             // Do single-tile refinement (tiles already exist)
             return performSingleTileRefinement(gui, alignContext, projectInfo, annotations, fullResToStageTransform)
                     .thenCompose(refinedTransform -> {
-                        if (refinedTransform == null) refinedTransform = fullResToStageTransform;
-                        return continueToAcquisition(gui, alignContext.context.sample, projectInfo,
-                                annotations, alignContext.pixelSize, refinedTransform);
+                        if (refinedTransform == null) {
+                            // User requested new alignment from scratch
+                            logger.info("User requested new alignment - switching to manual workflow");
+
+                            // Create manual alignment context
+                            ManualAlignmentContext manualContext = new ManualAlignmentContext(
+                                    alignContext.context,
+                                    alignContext.pixelSize,
+                                    projectInfo
+                            );
+
+                            // Switch to manual alignment workflow
+                            return processManualAlignment(gui, manualContext);
+                        } else {
+                            // Continue with the refined (or initial) transform
+                            return continueToAcquisition(gui, alignContext.context.sample, projectInfo,
+                                    annotations, alignContext.pixelSize, refinedTransform);
+                        }
                     });
         } else {
             // Continue without refinement
@@ -661,7 +797,6 @@ public class ExistingImageWorkflow {
                     annotations, alignContext.pixelSize, fullResToStageTransform);
         }
     }
-
     /**
      * Process manual alignment workflow
      */
@@ -706,10 +841,6 @@ public class ExistingImageWorkflow {
                             transform
                     );
 
-                    // Offer to save the GENERAL transform (need to extract macro to stage portion)
-                    // This would require knowing the green box position, which we don't have in manual mode
-                    // So we skip this for now
-
                     return continueToAcquisition(gui, context.context.sample,
                             context.projectInfo, annotations, context.pixelSize, transform);
                 });
@@ -737,7 +868,6 @@ public class ExistingImageWorkflow {
         // If no script is configured, prompt user to select one
         if (tissueScript == null || tissueScript.isBlank()) {
             tissueScript = promptForTissueDetectionScript();
-
         }
 
         if (tissueScript != null && !tissueScript.isBlank()) {
@@ -962,7 +1092,50 @@ public class ExistingImageWorkflow {
     }
 
     /**
-     * Perform single-tile refinement
+     * Delete all tiles for a given modality
+     */
+    private static void deleteAllTiles(QuPathGUI gui, String modality) {
+        var hierarchy = gui.getViewer().getHierarchy();
+        int totalDetections = hierarchy.getDetectionObjects().size();
+
+        String modalityBase = modality.replaceAll("(_\\d+)$", "");
+
+        List<PathObject> tilesToRemove = hierarchy.getDetectionObjects().stream()
+                .filter(o -> o.getPathClass() != null &&
+                        o.getPathClass().toString().contains(modalityBase))
+                .collect(Collectors.toList());
+
+        if (!tilesToRemove.isEmpty()) {
+            logger.info("Removing {} of {} total detections for modality: {}",
+                    tilesToRemove.size(), totalDetections, modalityBase);
+
+            // If we're removing most detections, it's faster to clear all and re-add the few we want to keep
+            if (tilesToRemove.size() > totalDetections * 0.8) {
+                List<PathObject> toKeep = hierarchy.getDetectionObjects().stream()
+                        .filter(o -> !tilesToRemove.contains(o))
+                        .collect(Collectors.toList());
+
+                QP.removeDetections();
+                if (!toKeep.isEmpty()) {
+                    hierarchy.addObjects(toKeep);
+                }
+                logger.info("Cleared all detections and re-added {} objects", toKeep.size());
+            } else {
+                // Use batch removal for better performance
+                hierarchy.removeObjects(tilesToRemove, true);
+            }
+        }
+    }
+
+
+    /**
+     * Performs single-tile refinement of the alignment transform.
+     *
+     * This method allows the user to fine-tune the alignment by:
+     * 1. Selecting a tile in QuPath
+     * 2. Moving the microscope to the estimated position based on the initial transform
+     * 3. Manually adjusting the stage position to match the tile
+     * 4. Updating the transform based on the refined position
      */
     private static CompletableFuture<AffineTransform> performSingleTileRefinement(
             QuPathGUI gui,
@@ -978,123 +1151,173 @@ public class ExistingImageWorkflow {
         // Select tile for refinement (tiles should already exist)
         UIFunctions.promptTileSelectionDialogAsync(
                 "Select a tile for alignment refinement.\n" +
-                        "The microscope will move to approximately the correct position.\n" +
-                        "You can then fine-tune the alignment if needed."
+                        "The microscope will move to the estimated position for this tile.\n" +
+                        "You will then manually adjust the stage position to match."
         ).thenAccept(selectedTile -> {
             if (selectedTile == null) {
+                // User cancelled tile selection
                 future.complete(initialTransform);
                 return;
             }
 
-            try {
-                // Get tile coordinates in full-res pixels
-                double[] tileCoords = {
-                        selectedTile.getROI().getCentroidX(),
-                        selectedTile.getROI().getCentroidY()
-                };
+            Platform.runLater(() -> {
+                try {
+                    // Get tile coordinates in full-res pixels
+                    double[] tileCoords = {
+                            selectedTile.getROI().getCentroidX(),
+                            selectedTile.getROI().getCentroidY()
+                    };
 
-                logger.info("Selected tile '{}' at full-res coordinates: ({}, {})",
-                        selectedTile.getName(), tileCoords[0], tileCoords[1]);
+                    logger.info("Selected tile '{}' at full-res coordinates: ({}, {})",
+                            selectedTile.getName(), tileCoords[0], tileCoords[1]);
 
-                // Transform directly to stage using full-res→stage transform
-                double[] stageCoords = TransformationFunctions.transformQuPathFullResToStage(
-                        tileCoords, initialTransform
-                );
+                    // Transform to estimated stage position using initial transform
+                    double[] estimatedStageCoords = TransformationFunctions.transformQuPathFullResToStage(
+                            tileCoords, initialTransform
+                    );
 
-                logger.info("Tile coordinates map to stage: ({}, {})", stageCoords[0], stageCoords[1]);
+                    logger.info("Estimated stage position for tile: ({}, {})",
+                            estimatedStageCoords[0], estimatedStageCoords[1]);
 
-                // Get stage bounds from config
-                MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(
-                        QPPreferenceDialog.getMicroscopeConfigFileProperty());
+                    // Get stage bounds from config
+                    MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(
+                            QPPreferenceDialog.getMicroscopeConfigFileProperty());
 
-                double stageXMin = mgr.getDouble("stage", "xlimit", "low");
-                double stageXMax = mgr.getDouble("stage", "xlimit", "high");
-                double stageYMin = mgr.getDouble("stage", "ylimit", "low");
-                double stageYMax = mgr.getDouble("stage", "ylimit", "high");
+                    double stageXMin = mgr.getDouble("stage", "xlimit", "low");
+                    double stageXMax = mgr.getDouble("stage", "xlimit", "high");
+                    double stageYMin = mgr.getDouble("stage", "ylimit", "low");
+                    double stageYMax = mgr.getDouble("stage", "ylimit", "high");
 
-                // Verify stage bounds for this specific coordinate
-                logger.info("Stage bounds check:");
-                logger.info("  X: {} (limits: {} to {}) - {}",
-                        stageCoords[0], stageXMin, stageXMax,
-                        (stageCoords[0] >= stageXMin && stageCoords[0] <= stageXMax) ? "OK" : "OUT OF BOUNDS!");
-                logger.info("  Y: {} (limits: {} to {}) - {}",
-                        stageCoords[1], stageYMin, stageYMax,
-                        (stageCoords[1] >= stageYMin && stageCoords[1] <= stageYMax) ? "OK" : "OUT OF BOUNDS!");
+                    // Verify stage bounds
+                    if (estimatedStageCoords[0] < stageXMin || estimatedStageCoords[0] > stageXMax ||
+                            estimatedStageCoords[1] < stageYMin || estimatedStageCoords[1] > stageYMax) {
 
-                if (stageCoords[0] < stageXMin || stageCoords[0] > stageXMax ||
-                        stageCoords[1] < stageYMin || stageCoords[1] > stageYMax) {
-                    Platform.runLater(() -> {
                         UIFunctions.notifyUserOfError(
                                 String.format("Selected tile is outside stage bounds!\n" +
-                                                "Tile would move to: (%.1f, %.1f)\n" +
-                                                "Stage limits: X: %.0f to %.0f, Y: %.0f to %.0f",
-                                        stageCoords[0], stageCoords[1],
+                                                "Estimated position: (%.1f, %.1f)\n" +
+                                                "Stage limits: X: %.0f to %.0f, Y: %.0f to %.0f\n\n" +
+                                                "Please select a different tile or create a new alignment.",
+                                        estimatedStageCoords[0], estimatedStageCoords[1],
                                         stageXMin, stageXMax, stageYMin, stageYMax),
                                 "Stage Bounds Error"
                         );
-                    });
-                    future.complete(initialTransform);
-                    return;
-                }
+                        future.complete(initialTransform);
+                        return;
+                    }
 
-                logger.info("Moving to tile '{}' at stage position: ({}, {})",
-                        selectedTile.getName(), stageCoords[0], stageCoords[1]);
+                    // Center the QuPath viewer on the selected tile
+                    var viewer = gui.getViewer();
+                    if (viewer != null && selectedTile.getROI() != null) {
+                        double cx = selectedTile.getROI().getCentroidX();
+                        double cy = selectedTile.getROI().getCentroidY();
+                        viewer.setCenterPixelLocation(cx, cy);
 
-                MicroscopeController.getInstance().moveStageXY(stageCoords[0], stageCoords[1]);
+                        // Select the tile to highlight it
+                        viewer.getHierarchy().getSelectionModel().setSelectedObject(selectedTile);
+                    }
 
-                boolean refined = UIFunctions.stageToQuPathAlignmentGUI2();
+                    // Move to estimated position
+                    logger.info("Moving to estimated position for tile '{}'", selectedTile.getName());
+                    MicroscopeController.getInstance().moveStageXY(
+                            estimatedStageCoords[0], estimatedStageCoords[1]);
 
-                if (refined) {
-                    double[] refinedStageCoords = MicroscopeController.getInstance().getStagePositionXY();
-                    logger.info("Refined stage position: ({}, {})", refinedStageCoords[0], refinedStageCoords[1]);
+                    // Wait a moment for stage to settle
+                    Thread.sleep(500);
 
-                    // Calculate the refined transform
-                    AffineTransform refinedTransform = TransformationFunctions.addTranslationToScaledAffine(
-                            initialTransform, tileCoords, refinedStageCoords
+                    // Show refinement dialog
+                    Alert refinementDialog = new Alert(Alert.AlertType.CONFIRMATION);
+                    refinementDialog.setTitle("Refine Alignment");
+                    refinementDialog.setHeaderText("Alignment Refinement");
+                    refinementDialog.setContentText(
+                            "The microscope has moved to the estimated position for the selected tile.\n\n" +
+                                    "Please use the microscope controls to adjust the stage position so that\n" +
+                                    "the live view matches the selected tile in QuPath.\n\n" +
+                                    "When the alignment is correct, click 'Save Refined Position'."
                     );
 
-                    logger.info("Saving refined slide-specific transform");
+                    ButtonType saveButton = new ButtonType("Save Refined Position");
+                    ButtonType skipButton = new ButtonType("Skip Refinement");
+                    ButtonType newAlignmentButton = new ButtonType("Create New Alignment");
 
-                    // Save the slide-specific alignment
-                    Project<BufferedImage> project = (Project<BufferedImage>) projectInfo.details.get("currentQuPathProject");
-                    AffineTransformManager.saveSlideAlignment(
-                            project,
-                            alignContext.context.sample.sampleName(),
-                            alignContext.context.sample.modality(),
-                            refinedTransform
-                    );
+                    refinementDialog.getButtonTypes().setAll(saveButton, skipButton, newAlignmentButton);
 
-                    future.complete(refinedTransform);
-                } else {
-                    logger.info("Refinement cancelled - using initial transform");
+                    Optional<ButtonType> result = refinementDialog.showAndWait();
 
-                    // Still save the initial transform as slide-specific
-                    Project<BufferedImage> project = (Project<BufferedImage>) projectInfo.details.get("currentQuPathProject");
-                    AffineTransformManager.saveSlideAlignment(
-                            project,
-                            alignContext.context.sample.sampleName(),
-                            alignContext.context.sample.modality(),
-                            initialTransform
-                    );
+                    if (result.isPresent()) {
+                        if (result.get() == saveButton) {
+                            // Get the refined stage position
+                            double[] refinedStageCoords = MicroscopeController.getInstance().getStagePositionXY();
+                            logger.info("Refined stage position: ({}, {})",
+                                    refinedStageCoords[0], refinedStageCoords[1]);
 
-                    future.complete(initialTransform);
-                }
+                            // Calculate the refined transform
+                            AffineTransform refinedTransform = TransformationFunctions.addTranslationToScaledAffine(
+                                    initialTransform, tileCoords, refinedStageCoords
+                            );
 
-            } catch (Exception e) {
-                logger.error("Error during refinement", e);
-                Platform.runLater(() -> {
+                            logger.info("Calculated refined transform based on position adjustment");
+
+                            // Save the slide-specific alignment
+                            Project<BufferedImage> project = (Project<BufferedImage>) projectInfo.details.get("currentQuPathProject");
+                            AffineTransformManager.saveSlideAlignment(
+                                    project,
+                                    alignContext.context.sample.sampleName(),
+                                    alignContext.context.sample.modality(),
+                                    refinedTransform
+                            );
+
+                            logger.info("Saved refined slide-specific transform");
+
+                            // Notify user of success
+                            Dialogs.showInfoNotification(
+                                    "Alignment Refined",
+                                    "The alignment has been refined and saved for this slide."
+                            );
+
+                            future.complete(refinedTransform);
+
+                        } else if (result.get() == skipButton) {
+                            // Use initial transform without refinement
+                            logger.info("User skipped refinement - using initial transform");
+
+                            // Still save the initial transform as slide-specific
+                            Project<BufferedImage> project = (Project<BufferedImage>) projectInfo.details.get("currentQuPathProject");
+                            AffineTransformManager.saveSlideAlignment(
+                                    project,
+                                    alignContext.context.sample.sampleName(),
+                                    alignContext.context.sample.modality(),
+                                    initialTransform
+                            );
+
+                            future.complete(initialTransform);
+
+                        } else if (result.get() == newAlignmentButton) {
+                            // User wants to create a new alignment from scratch
+                            logger.info("User requested new alignment - switching to manual alignment workflow");
+
+                            // Complete with null to signal that manual alignment should be started
+                            future.complete(null);
+                        }
+                    } else {
+                        // Dialog was closed - treat as skip
+                        logger.info("Refinement dialog closed - using initial transform");
+                        future.complete(initialTransform);
+                    }
+
+                } catch (Exception e) {
+                    logger.error("Error during refinement", e);
                     UIFunctions.notifyUserOfError(
-                            "Error during refinement: " + e.getMessage(),
+                            "Error during refinement: " + e.getMessage() + "\n\n" +
+                                    "The initial alignment will be used.",
                             "Refinement Error"
                     );
-                });
-                future.complete(initialTransform);
-            }
+                    future.complete(initialTransform);
+                }
+            });
         });
 
         return future;
     }
-
     /**
      * Offer to save transform for future use
      */
@@ -1210,6 +1433,25 @@ public class ExistingImageWorkflow {
                             return CompletableFuture.completedFuture(null);
                         }
 
+                        // Show overall progress dialog
+                        Platform.runLater(() -> {
+                            Alert progressAlert = new Alert(Alert.AlertType.INFORMATION);
+                            progressAlert.setTitle("Acquisition Progress");
+                            progressAlert.setHeaderText("Starting acquisition workflow");
+                            progressAlert.setContentText(String.format(
+                                    "Processing %d annotations with %d rotation angles each.\n" +
+                                            "This may take several minutes per annotation.",
+                                    currentAnnotations.size(),
+                                    angleExposures != null ? angleExposures.size() : 1
+                            ));
+                            progressAlert.show();
+
+                            // Auto-close after 3 seconds
+                            PauseTransition pause = new PauseTransition(Duration.seconds(3));
+                            pause.setOnFinished(e -> progressAlert.close());
+                            pause.play();
+                        });
+
                         // Process annotations
                         return processAnnotationsForAcquisition(
                                 gui, sample, projectInfo, currentAnnotations,
@@ -1217,23 +1459,6 @@ public class ExistingImageWorkflow {
                         );
                     });
         });
-    }    /**
-     * Delete all tiles for a given modality
-     */
-    private static void deleteAllTiles(QuPathGUI gui, String modality) {
-        String modalityBase = modality.replaceAll("(_\\d+)$", "");
-
-        List<PathObject> tilesToRemove = gui.getViewer().getHierarchy().getDetectionObjects().stream()
-                .filter(o -> o.getPathClass() != null &&
-                        o.getPathClass().toString().contains(modalityBase))
-                .collect(Collectors.toList());
-
-        if (!tilesToRemove.isEmpty()) {
-            tilesToRemove.forEach(tile ->
-                    gui.getViewer().getHierarchy().removeObject(tile, false));
-            gui.getViewer().getHierarchy().fireHierarchyChangedEvent(gui.getViewer());
-            logger.info("Removed {} existing tiles for modality: {}", tilesToRemove.size(), modalityBase);
-        }
     }
 
     /**
@@ -1260,8 +1485,15 @@ public class ExistingImageWorkflow {
         // Ensure all have names
         ensureAnnotationNames(currentAnnotations);
 
-        // Delete ALL existing tiles to avoid duplicates
+        // Delete ALL existing tiles ONCE in a batch operation
+        // This is the operation that was taking 30 seconds
+        long startTime = System.currentTimeMillis();
         deleteAllTiles(gui, sample.modality());
+        long deleteTime = System.currentTimeMillis() - startTime;
+
+        if (deleteTime > 1000) {
+            logger.warn("Tile deletion took {} ms - consider using batch operations", deleteTime);
+        }
 
         // CRITICAL: Clean up stale folders from previous tile creation
         cleanupStaleFolders(tempTileDirectory, currentAnnotations);
@@ -1357,7 +1589,7 @@ public class ExistingImageWorkflow {
      *
      * <p>The workflow for each annotation is:
      * <ol>
-     *   <li>Launch acquisition via CLI</li>
+     *   <li>Launch acquisition via socket</li>
      *   <li>Monitor progress until completion</li>
      *   <li>Perform stitching (can overlap with next acquisition)</li>
      *   <li>Import results to project</li>
@@ -1418,14 +1650,20 @@ public class ExistingImageWorkflow {
         List<CompletableFuture<Void>> stitchingFutures = new ArrayList<>();
 
         // Process each annotation sequentially
-        CompletableFuture<Object> acquisitionChain = CompletableFuture.completedFuture(null);
+        CompletableFuture<Boolean> acquisitionChain = CompletableFuture.completedFuture(true);
 
         for (int i = 0; i < currentAnnotations.size(); i++) {
             final PathObject annotation = currentAnnotations.get(i);
             final int annotationIndex = i + 1;
             final int totalAnnotations = currentAnnotations.size();
 
-            acquisitionChain = acquisitionChain.thenCompose(v -> {
+            acquisitionChain = acquisitionChain.thenCompose(previousResult -> {
+                // Check if previous acquisition was cancelled or failed
+                if (!previousResult) {
+                    logger.info("Stopping workflow due to cancelled or failed acquisition");
+                    return CompletableFuture.completedFuture(false);
+                }
+
                 logger.info("Processing annotation {} of {}: {}",
                         annotationIndex, totalAnnotations, annotation.getName());
 
@@ -1443,7 +1681,7 @@ public class ExistingImageWorkflow {
                 ).thenCompose(acquisitionResult -> {
                     if (!acquisitionResult) {
                         logger.error("Acquisition failed for annotation: {}", annotation.getName());
-                        return CompletableFuture.completedFuture(null);
+                        return CompletableFuture.completedFuture(acquisitionResult);
                     }
 
                     // Extract just angles for stitching
@@ -1459,7 +1697,7 @@ public class ExistingImageWorkflow {
                     stitchingFutures.add(stitchFuture);
 
                     // Return immediately to continue with next acquisition
-                    return CompletableFuture.completedFuture(null);
+                    return CompletableFuture.completedFuture(acquisitionResult);
                 });
             }).exceptionally(ex -> {
                 logger.error("Error processing annotation: " + annotation.getName(), ex);
@@ -1472,7 +1710,13 @@ public class ExistingImageWorkflow {
         }
 
         // After all acquisitions are done, wait for all stitching to complete
-        return acquisitionChain.thenCompose(v -> {
+        return acquisitionChain.thenCompose(finalResult -> {
+            // Check if acquisitions were successful
+            if (finalResult == null || !finalResult) {
+                logger.info("Acquisitions were cancelled or failed, skipping final steps");
+                return CompletableFuture.completedFuture(null);
+            }
+
             logger.info("All acquisitions completed. Waiting for {} stitching operations to complete...",
                     stitchingFutures.size());
 
@@ -1502,11 +1746,66 @@ public class ExistingImageWorkflow {
             });
         });
     }
+
     /**
-     * Performs acquisition for a single annotation.
-     * This is a blocking operation that waits for the CLI to complete.
+     * Performs acquisition for a single annotation using socket-based communication with the microscope server.
      *
-     * @return CompletableFuture with true if successful, false otherwise
+     * <p>This method executes asynchronously and manages the complete acquisition lifecycle including:
+     * <ul>
+     *   <li>Building and sending the acquisition command to the microscope server</li>
+     *   <li>Calculating expected file counts based on tiles and rotation angles</li>
+     *   <li>Displaying a progress bar with cancellation support</li>
+     *   <li>Monitoring acquisition state until completion or failure</li>
+     *   <li>Handling errors and user notifications</li>
+     * </ul>
+     *
+     * <p>The acquisition is performed as a blocking operation on the server side, meaning the server
+     * will control the microscope hardware sequentially to capture all requested tiles and angles.
+     * This method monitors the server's progress and updates the UI accordingly.
+     *
+     * <p><b>Progress Monitoring:</b> The expected number of files is calculated as
+     * {@code tilesPerAnnotation × numberOfAngles}. The progress bar updates as the server
+     * reports completion of each tile acquisition.
+     *
+     * <p><b>Cancellation:</b> Users can cancel the acquisition via the progress bar's cancel button.
+     * This sends a cancellation request to the server, which will stop the acquisition gracefully
+     * after completing the current tile.
+     *
+     * @param annotation The PathObject representing the tissue region to acquire. Must have a valid
+     *                   name and ROI. The annotation's name is used as the region identifier for
+     *                   the microscope server and file organization.
+     * @param sample The sample setup information containing the sample name and output folder paths.
+     *               This determines where acquired tiles will be saved.
+     * @param projectsFolder The root directory path where all project data is stored. Tiles will be
+     *                       saved in subdirectories under this path.
+     * @param modeWithIndex The imaging modality with index suffix (e.g., "BF_10x_1", "PPM_10x_2").
+     *                      This determines the acquisition parameters and output directory structure.
+     * @param configFile The full path to the YAML configuration file containing microscope hardware
+     *                   settings, stage limits, and imaging parameters.
+     * @param tickExposures List of rotation angles (in ticks) paired with exposure times (in ms).
+     *                      For brightfield, typically contains one entry (90.0 degrees).
+     *                      For PPM, may contain multiple angles (e.g., -5, 0, 5, 90 degrees).
+     *                      Can be null or empty for non-rotating acquisitions.
+     *
+     * @return A CompletableFuture that completes with:
+     *         <ul>
+     *           <li>{@code true} if the acquisition completed successfully</li>
+     *           <li>{@code false} if the acquisition was cancelled by the user or ended in an
+     *               unexpected state</li>
+     *           <li>Exceptionally with a RuntimeException if the acquisition failed on the server</li>
+     *         </ul>
+     *
+     * @throws RuntimeException wrapped in the CompletableFuture if:
+     *         <ul>
+     *           <li>Socket communication fails</li>
+     *           <li>The server reports acquisition failure</li>
+     *           <li>Timeout occurs (5 minutes per annotation)</li>
+     *         </ul>
+     *
+     * @see MicroscopeSocketClient#monitorAcquisition
+     * @see AcquisitionCommandBuilder
+     * @see UIFunctions.ProgressHandle
+     * @since 2.0
      */
     private static CompletableFuture<Boolean> performAnnotationAcquisition(
             PathObject annotation,
@@ -1518,54 +1817,108 @@ public class ExistingImageWorkflow {
 
         return CompletableFuture.supplyAsync(() -> {
             try {
-                List<String> cliArgs = new ArrayList<>(Arrays.asList(
-                        res.getString("command.acquisitionWorkflow"),
-                        configFile,
-                        projectsFolder,
-                        sample.sampleName(),
-                        modeWithIndex,
-                        annotation.getName()
-                ));
+                logger.info("Starting socket-based acquisition for annotation: {}", annotation.getName());
 
-                // Add rotation angles with exposures if present
+                // Build acquisition command with all necessary parameters
+                AcquisitionCommandBuilder acquisitionBuilder = AcquisitionCommandBuilder.builder()
+                        .yamlPath(configFile)
+                        .projectsFolder(projectsFolder)
+                        .sampleLabel(sample.sampleName())
+                        .scanType(modeWithIndex)
+                        .regionName(annotation.getName())
+                        .angleExposures(tickExposures);
+
+                logger.info("Starting acquisition with parameters:");
+                logger.info("  Config: {}", configFile);
+                logger.info("  Projects folder: {}", projectsFolder);
+                logger.info("  Sample: {}", sample.sampleName());
+                logger.info("  Mode: {}", modeWithIndex);
+                logger.info("  Annotation: {}", annotation.getName());
+                logger.info("  Angle-Exposure pairs: {}", tickExposures);
+
+                // Start acquisition via socket
+                MicroscopeController.getInstance().startAcquisition(acquisitionBuilder);
+
+                logger.info("Socket acquisition command sent successfully");
+
+                // Get the socket client for monitoring
+                MicroscopeSocketClient socketClient = MicroscopeController.getInstance().getSocketClient();
+
+                // Calculate expected files for this annotation
+                // FIXED: Use the actual output directory, not temp/tiles
+                String tileDirPath = Paths.get(projectsFolder, sample.sampleName(), modeWithIndex, annotation.getName()).toString();
+                int tilesPerAngle = MinorFunctions.countTifEntriesInTileConfig(List.of(tileDirPath));
+                int expectedFiles = tilesPerAngle;
                 if (tickExposures != null && !tickExposures.isEmpty()) {
-                    String anglesStr = tickExposures.stream()
-                            .map(ae -> ae.ticks + "," + ae.exposureMs)
-                            .collect(Collectors.joining(" ", "(", ")"));
-                    cliArgs.add(anglesStr);
+                    expectedFiles *= tickExposures.size();
                 }
 
-                logger.info("Starting acquisition with args: {}", cliArgs);
+                logger.info("Expected files: {} ({}x{} angles)", expectedFiles, tilesPerAngle,
+                        tickExposures != null ? tickExposures.size() : 1);
 
-                int timeoutSeconds = 60;
-                if (tickExposures != null && !tickExposures.isEmpty()) {
-                    timeoutSeconds = 60 * tickExposures.size();
+                // Create progress counter
+                AtomicInteger progressCounter = new AtomicInteger(0);
+
+                // Show progress bar with cancel button
+                UIFunctions.ProgressHandle progressHandle = null;
+                if (expectedFiles > 0) {
+                    progressHandle = UIFunctions.showProgressBarAsync(
+                            progressCounter,
+                            expectedFiles,
+                            300000, // 5 minute timeout per annotation
+                            true    // Show cancel button
+                    );
+
+                    // Set up cancel callback
+                    final UIFunctions.ProgressHandle finalHandle = progressHandle;
+                    progressHandle.setCancelCallback(v -> {
+                        logger.info("User requested acquisition cancellation");
+                        try {
+                            if (socketClient.cancelAcquisition()) {
+                                logger.info("Cancellation request sent to server");
+                            }
+                        } catch (IOException e) {
+                            logger.error("Failed to send cancel command", e);
+                        }
+                    });
                 }
 
-//                CliExecutor.ExecResult result = CliExecutor.execComplexCommand(
-//                        timeoutSeconds,
-//                        res.getString("acquisition.cli.progressRegex"),
-//                        cliArgs.toArray(new String[0])
-//                );
-//
-//                if (result.exitCode() != 0) {
-//                    String errorDetails = String.valueOf(result.stderr());
-//                    if (errorDetails == null || errorDetails.trim().isEmpty()) {
-//                        errorDetails = "No error details available from acquisition script";
-//                    }
-//                    logger.error("Acquisition failed with exit code {} for annotation '{}'. Error: {}",
-//                            result.exitCode(), annotation.getName(), errorDetails);
-//
-//                    String finalErrorDetails = errorDetails;
-//                    Platform.runLater(() -> UIFunctions.notifyUserOfError(
-//                            "Acquisition failed for " + annotation.getName() + ":\n\n" + finalErrorDetails,
-//                            "Acquisition Error"
-//                    ));
-//                    return false;
-//                }
 
-                logger.info("Acquisition completed successfully for {}", annotation.getName());
-                return true;
+                // Monitor acquisition with progress updates
+                MicroscopeSocketClient.AcquisitionState finalState =
+                        socketClient.monitorAcquisition(
+                                progress -> {
+                                    logger.debug("Acquisition progress for {}: {}", annotation.getName(), progress);
+                                    progressCounter.set(progress.current);
+                                },
+                                500,    // Poll every 500ms
+                                300000  // 5 minute timeout
+                        );
+
+                // Close progress handle
+                if (progressHandle != null) {
+                    progressHandle.close();
+                }
+
+                // Check final state
+                if (finalState == MicroscopeSocketClient.AcquisitionState.COMPLETED) {
+                    logger.info("Socket acquisition completed successfully for {}", annotation.getName());
+                    return true;
+                } else if (finalState == MicroscopeSocketClient.AcquisitionState.CANCELLED) {
+                    logger.warn("Socket acquisition was cancelled for {}", annotation.getName());
+                    Platform.runLater(() ->
+                            UIFunctions.notifyUserOfError(
+                                    "Acquisition was cancelled by user request",
+                                    "Acquisition Cancelled"
+                            )
+                    );
+                    return false;
+                } else if (finalState == MicroscopeSocketClient.AcquisitionState.FAILED) {
+                    throw new RuntimeException("Socket acquisition failed on server for " + annotation.getName());
+                } else {
+                    logger.warn("Acquisition ended in unexpected state: {} for {}", finalState, annotation.getName());
+                    return false;
+                }
 
             } catch (Exception e) {
                 logger.error("Acquisition failed for {}", annotation.getName(), e);
@@ -1585,13 +1938,50 @@ public class ExistingImageWorkflow {
             }
         });
     }
+
+
     /**
-     * Performs stitching for a single annotation.
-     * This runs asynchronously on the STITCH_EXECUTOR, which is single-threaded
-     * to ensure only one stitching operation runs at a time (memory constraint).
+     * Orchestrates the stitching process for a single annotation across all rotation angles.
      *
-     * @return CompletableFuture that completes when stitching is done
+     * <p>This method manages the sequential stitching of tile sets acquired at different rotation
+     * angles. For multi-angle acquisitions (e.g., PPM), each angle's tiles are stitched into a
+     * separate OME-TIFF file. The stitching operations run sequentially to avoid memory issues.
+     *
+     * <p><b>Execution Model:</b> All stitching operations run on the single-threaded
+     * {@code STITCH_EXECUTOR} to ensure only one stitching process runs at a time. This prevents
+     * memory exhaustion when processing large tile sets.
+     *
+     * <p><b>Output Naming Convention:</b>
+     * <ul>
+     *   <li>Single angle: {@code sampleName_modality_annotationName.ome.tif}</li>
+     *   <li>Multiple angles: {@code sampleName_modality_suffix_annotationName.ome.tif}
+     *       where suffix indicates the angle (e.g., "_m5" for -5°, "_p5" for +5°)</li>
+     * </ul>
+     *
+     * @param annotation The PathObject that was acquired. Its name is used in the output filename
+     *                   and to locate the tile directory.
+     * @param sample Sample information including the sample name used in output filenames.
+     * @param projectsFolder Root directory containing all project data and where stitched images
+     *                       will be saved in the "SlideImages" subdirectory.
+     * @param modeWithIndex The base imaging modality folder (e.g., "PPM_10x_1") where tiles are
+     *                      stored. This is NOT modified with angle suffixes.
+     * @param rotationAngles List of rotation angles in degrees. If null or empty, performs a single
+     *                       stitch. Otherwise, stitches each angle sequentially.
+     * @param rotationManager Manager that provides angle-specific naming suffixes (e.g., "_m5", "_p5").
+     *                        Required when rotationAngles is provided.
+     * @param pixelSize Physical pixel size in micrometers, used for OME-TIFF metadata.
+     * @param gui QuPath GUI instance for updating the project with stitched images.
+     * @param project The QuPath project where stitched images will be imported.
+     *
+     * @return A CompletableFuture that completes when all stitching operations finish.
+     *         The future completes normally even if individual stitching operations fail
+     *         (errors are logged and shown to the user via UI notifications).
+     *
+     * @see #stitchAnnotation
+     * @see UtilityFunctions#stitchImagesAndUpdateProject
+     * @since 2.0
      */
+
     private static CompletableFuture<Void> performAnnotationStitching(
             PathObject annotation,
             SampleSetupController.SampleSetupResult sample,
@@ -1604,7 +1994,7 @@ public class ExistingImageWorkflow {
             Project<BufferedImage> project) {
 
         if (rotationAngles != null && !rotationAngles.isEmpty()) {
-            // Stitch each angle SEQUENTIALLY (not in parallel)
+            // Stitch each angle SEQUENTIALLY
             CompletableFuture<Void> stitchChain = CompletableFuture.completedFuture(null);
 
             for (Double angle : rotationAngles) {
@@ -1626,8 +2016,56 @@ public class ExistingImageWorkflow {
         }
     }
 
+
     /**
-     * Stitch a single annotation/angle combination
+     * Performs the actual stitching operation for a single annotation and rotation angle combination.
+     *
+     * <p>This method handles the core stitching logic, including:
+     * <ul>
+     *   <li>Determining the correct input directory structure based on angle</li>
+     *   <li>Building the appropriate output filename with modality and angle suffixes</li>
+     *   <li>Invoking the BasicStitching plugin to create pyramidal OME-TIFF files</li>
+     *   <li>Importing the stitched result into the QuPath project</li>
+     *   <li>Error handling and user notification</li>
+     * </ul>
+     *
+     * <p><b>Directory Structure:</b> For angle-based acquisitions, tiles are organized as:
+     * {@code projectsFolder/sampleName/modeWithIndex/annotationName/angle/}
+     * where angle is a string representation of the rotation angle (e.g., "-5.0", "0.0", "90.0").
+     *
+     * <p><b>Stitching Strategy:</b> Uses the TileConfiguration.txt file in each directory to
+     * determine tile positions. The BasicStitching plugin handles the actual image processing,
+     * pyramid generation, and OME-TIFF writing.
+     *
+     * @param annotation The annotation being stitched. Provides the name for directory lookup
+     *                   and output file naming.
+     * @param angle The rotation angle in degrees for this stitch operation. If null, indicates
+     *              a single-angle acquisition. Used to locate the correct subdirectory and
+     *              generate angle-specific output filenames.
+     * @param sample Sample information for output file naming and directory paths.
+     * @param projectsFolder Root directory for all project data.
+     * @param modeWithIndex Base modality folder name (e.g., "PPM_10x_1"). This is the actual
+     *                      directory where tiles are stored, without angle suffixes.
+     * @param rotationManager Provides angle-to-suffix mapping for output filenames. Can be null
+     *                        for single-angle acquisitions.
+     * @param pixelSize Physical pixel size in micrometers for OME-TIFF metadata.
+     * @param gui QuPath GUI for project updates and image importing.
+     * @param project Target project for importing stitched images.
+     *
+     * @return A CompletableFuture that completes when stitching finishes. Completes normally
+     *         even if stitching fails (errors are logged and displayed to user).
+     *
+     * @throws IOException wrapped in the CompletableFuture if:
+     *         <ul>
+     *           <li>Tile directory doesn't exist</li>
+     *           <li>No tiles found matching the criteria</li>
+     *           <li>Stitching plugin fails</li>
+     *           <li>Output file cannot be written</li>
+     *         </ul>
+     *
+     * @see UtilityFunctions#stitchImagesAndUpdateProject
+     * @see RotationManager#getAngleSuffix
+     * @since 2.0
      */
     private static CompletableFuture<Void> stitchAnnotation(
             PathObject annotation,
@@ -1643,23 +2081,33 @@ public class ExistingImageWorkflow {
         return CompletableFuture.runAsync(() -> {
             try {
                 String annotationName = annotation.getName();
-                String modalityName = modeWithIndex;
+
+                // For angle-based stitching, modify the imagingModeWithIndex to include annotation name
+                String modifiedModality;
+                String matchingString;
 
                 if (angle != null && rotationManager != null) {
-                    modalityName += rotationManager.getAngleSuffix(sample.modality(), angle);
+                    // For angle-based stitching, include annotation name and angle suffix
+                    String angleSuffix = rotationManager.getAngleSuffix(sample.modality(), angle);
+                    modifiedModality = modeWithIndex + "_" + annotationName + angleSuffix;
+                    matchingString = String.valueOf(angle);
+                } else {
+                    // Single angle - include annotation name
+                    modifiedModality = modeWithIndex + "_" + annotationName;
+                    matchingString = annotationName;
                 }
 
-                logger.info("Stitching {} for modality {}", annotationName, modalityName);
+                logger.info("Stitching {} for modality {} (angle: {})",
+                        annotationName, modifiedModality, angle);
 
-                // The key fix: For ExistingImageWorkflow without rotation, the tiles are directly
-                // in the annotation folder, so we need to pass the parent folder (modeWithIndex)
-                // and use the annotation name as the matching string
+                // Pass the modified modality as the imagingModeWithIndex parameter
+                // This will make UtilityFunctions create the correct filename
                 String outPath = UtilityFunctions.stitchImagesAndUpdateProject(
                         projectsFolder,
                         sample.sampleName(),
-                        modalityName,
-                        annotationName,
-                        annotationName,  // Use annotation name as matching string
+                        modifiedModality,      // This becomes part of the output filename
+                        annotationName,        // The folder containing tiles
+                        matchingString,        // The angle subdirectory
                         gui,
                         project,
                         String.valueOf(QPPreferenceDialog.getCompressionTypeProperty()),
@@ -1670,19 +2118,37 @@ public class ExistingImageWorkflow {
                 logger.info("Stitching completed: {}", outPath);
 
             } catch (Exception e) {
-                logger.error("Stitching failed for {}", annotation.getName(), e);
+                logger.error("Stitching failed for {} (angle: {})", annotation.getName(), angle, e);
                 Platform.runLater(() ->
                         UIFunctions.notifyUserOfError(
-                                "Stitching failed for " + annotation.getName() + ": " + e.getMessage(),
+                                String.format("Stitching failed for %s: %s",
+                                        annotation.getName(), e.getMessage()),
                                 "Stitching Error"
                         )
                 );
             }
         }, STITCH_EXECUTOR);
     }
-
     /**
-     * Convenience method for stitching with angle
+     * Convenience wrapper method for stitching a single annotation at a specific rotation angle.
+     *
+     * <p>This method simply delegates to {@link #stitchAnnotation} with all the same parameters.
+     * It exists to provide a clearer method name when called from angle-iteration loops.
+     *
+     * @param annotation The annotation to stitch
+     * @param angle The specific rotation angle for this stitch operation
+     * @param sample Sample information
+     * @param projectsFolder Project root directory
+     * @param modeWithIndex Base modality folder
+     * @param rotationManager Rotation angle suffix provider
+     * @param pixelSize Pixel size in micrometers
+     * @param gui QuPath GUI instance
+     * @param project Target QuPath project
+     *
+     * @return CompletableFuture that completes when stitching finishes
+     *
+     * @see #stitchAnnotation
+     * @since 2.0
      */
     private static CompletableFuture<Void> stitchAnnotationAngle(
             PathObject annotation,
@@ -1702,7 +2168,15 @@ public class ExistingImageWorkflow {
     }
 
     // Helper classes for context passing
-
+    /**
+     * Internal context container for passing workflow state between dialog stages.
+     *
+     * <p>This class encapsulates the results from the sample setup and alignment selection
+     * dialogs, providing a convenient way to pass this information through the asynchronous
+     * workflow pipeline without excessive parameter lists.
+     *
+     * @since 2.0
+     */
     private static class WorkflowContext {
         final SampleSetupController.SampleSetupResult sample;
         final AlignmentSelectionController.AlignmentChoice alignment;
@@ -1714,15 +2188,48 @@ public class ExistingImageWorkflow {
         }
     }
 
+    /**
+     * Extended context for workflows using existing alignment with green box detection.
+     *
+     * <p>This class contains all information needed to process an existing alignment workflow,
+     * including the detected green box location, macro image dimensions, and cropping offsets.
+     * The green box provides the registration between macro and full-resolution images.
+     *
+     * @since 2.0
+     */
     private static class AlignmentContext {
+        /** Base workflow context with sample and alignment choice */
         final WorkflowContext context;
+
+        /** Macro image pixel size in micrometers */
         final double pixelSize;
+
+        /** Green box detection results including ROI and confidence */
         final GreenBoxDetector.DetectionResult greenBoxResult;
+
+        /** Width of the cropped macro image in pixels */
         final int macroWidth;
+
+        /** Height of the cropped macro image in pixels */
         final int macroHeight;
+
+        /** X offset applied during macro image cropping */
         final int cropOffsetX;
+
+        /** Y offset applied during macro image cropping */
         final int cropOffsetY;
 
+        /**
+         * Creates a new alignment context with green box detection results.
+         *
+         * @param context Base workflow context
+         * @param pixelSize Macro image pixel size in micrometers
+         * @param greenBoxResult Detection results containing the green box ROI
+         * @param macroWidth Width of cropped macro image
+         * @param macroHeight Height of cropped macro image
+         * @param cropOffsetX Horizontal offset from original to cropped macro
+         * @param cropOffsetY Vertical offset from original to cropped macro
+         */
         AlignmentContext(WorkflowContext context, double pixelSize,
                          GreenBoxDetector.DetectionResult greenBoxResult,
                          int macroWidth, int macroHeight,
@@ -1737,6 +2244,15 @@ public class ExistingImageWorkflow {
         }
     }
 
+
+    /**
+     * Context for manual alignment workflows where the user creates the transform interactively.
+     *
+     * <p>This simplified context is used when no existing alignment is available and the user
+     * must manually establish correspondence between QuPath tiles and microscope stage positions.
+     *
+     * @since 2.0
+     */
     private static class ManualAlignmentContext {
         final WorkflowContext context;
         final double pixelSize;
@@ -1748,7 +2264,20 @@ public class ExistingImageWorkflow {
             this.projectInfo = projectInfo;
         }
     }
-
+    /**
+     * Wrapper for project setup information returned by {@link QPProjectFunctions}.
+     *
+     * <p>This class provides type-safe access to the project setup details that are
+     * originally returned as a generic Map. Common keys include:
+     * <ul>
+     *   <li>"currentQuPathProject" - The Project&lt;BufferedImage&gt; instance</li>
+     *   <li>"imagingModeWithIndex" - The modality folder name (e.g., "BF_10x_1")</li>
+     *   <li>"tempTileDirectory" - Path for temporary tile storage</li>
+     *   <li>"matchingImage" - The ProjectImageEntry if an image was imported</li>
+     * </ul>
+     *
+     * @since 2.0
+     */
     private static class ProjectInfo {
         final Map<String, Object> details;
 
