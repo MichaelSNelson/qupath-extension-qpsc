@@ -135,10 +135,11 @@ class PPMRotationStrategy implements RotationStrategy {
 
     @Override
     public String getAngleSuffix(double angle) {
-        if (angle == 0) return "_0deg";
-        if (angle == 90) return "_90deg"; // For brightfield
-        if (angle > 0) return "_p" + (int)angle;
-        return "_m" + (int)Math.abs(angle);
+//        if (angle == 0) return "_0deg";
+//        if (angle == 90) return "_90deg"; // For brightfield
+//        if (angle > 0) return "_p" + (int)angle;
+//        return "_m" + (int)Math.abs(angle);
+        return "";
     }
 }
 

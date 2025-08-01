@@ -2082,32 +2082,26 @@ public class ExistingImageWorkflow {
             try {
                 String annotationName = annotation.getName();
 
-                // For angle-based stitching, modify the imagingModeWithIndex to include annotation name
-                String modifiedModality;
+                // The matching string is the raw angle value (e.g., "0.0", "-5.0", "90.0")
+                // This is what the directories are actually named
                 String matchingString;
-
-                if (angle != null && rotationManager != null) {
-                    // For angle-based stitching, include annotation name and angle suffix
-                    String angleSuffix = rotationManager.getAngleSuffix(sample.modality(), angle);
-                    modifiedModality = modeWithIndex + "_" + annotationName + angleSuffix;
+                if (angle != null) {
                     matchingString = String.valueOf(angle);
                 } else {
-                    // Single angle - include annotation name
-                    modifiedModality = modeWithIndex + "_" + annotationName;
                     matchingString = annotationName;
                 }
 
                 logger.info("Stitching {} for modality {} (angle: {})",
-                        annotationName, modifiedModality, angle);
+                        annotationName, modeWithIndex, angle);
 
-                // Pass the modified modality as the imagingModeWithIndex parameter
-                // This will make UtilityFunctions create the correct filename
+                // Call stitchImagesAndUpdateProject with the ORIGINAL parameters
+                // Tiles are in: projectsFolder/sampleName/modeWithIndex/annotationName/angle/
                 String outPath = UtilityFunctions.stitchImagesAndUpdateProject(
                         projectsFolder,
                         sample.sampleName(),
-                        modifiedModality,      // This becomes part of the output filename
-                        annotationName,        // The folder containing tiles
-                        matchingString,        // The angle subdirectory
+                        modeWithIndex,         // Original modality (e.g., "PPM_10x_1")
+                        annotationName,        // The annotation folder name
+                        matchingString,        // The angle value (e.g., "0.0", "-5.0")
                         gui,
                         project,
                         String.valueOf(QPPreferenceDialog.getCompressionTypeProperty()),
@@ -2115,7 +2109,40 @@ public class ExistingImageWorkflow {
                         1  // downsample
                 );
 
-                logger.info("Stitching completed: {}", outPath);
+                logger.info("Initial stitching output: {}", outPath);
+
+                // Now manually rename the output file to include annotation name and angle suffix
+                if (outPath != null) {
+                    File stitchedFile = new File(outPath);
+                    String desiredName;
+
+                    if (angle != null && rotationManager != null) {
+                        // For multi-angle: include annotation name and angle suffix
+                        String angleSuffix = rotationManager.getAngleSuffix(sample.modality(), angle);
+                        desiredName = sample.sampleName() + "_" + modeWithIndex + "_" +
+                                annotationName + angleSuffix + ".ome.tif";
+                    } else {
+                        // For single angle: just include annotation name
+                        desiredName = sample.sampleName() + "_" + modeWithIndex + "_" +
+                                annotationName + ".ome.tif";
+                    }
+
+                    File renamedFile = new File(stitchedFile.getParent(), desiredName);
+
+                    // Only rename if the file doesn't already have the correct name
+                    if (!stitchedFile.getName().equals(desiredName)) {
+                        if (stitchedFile.renameTo(renamedFile)) {
+                            logger.info("Renamed stitched file from {} to {}",
+                                    stitchedFile.getName(), desiredName);
+                            outPath = renamedFile.getAbsolutePath();
+                        } else {
+                            logger.error("Failed to rename {} to {}",
+                                    stitchedFile.getName(), desiredName);
+                        }
+                    }
+                }
+
+                logger.info("Final stitching output: {}", outPath);
 
             } catch (Exception e) {
                 logger.error("Stitching failed for {} (angle: {})", annotation.getName(), angle, e);
