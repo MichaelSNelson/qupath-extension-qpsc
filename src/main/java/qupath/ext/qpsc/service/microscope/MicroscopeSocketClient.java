@@ -682,6 +682,8 @@ public class MicroscopeSocketClient implements AutoCloseable {
             long timeoutMs) throws IOException, InterruptedException {
 
         long startTime = System.currentTimeMillis();
+        long lastProgressTime = startTime;
+        int lastProgressCount = -1;  // Initialize to -1 to detect first progress
         AcquisitionState lastState = AcquisitionState.IDLE;
         int retryCount = 0;
         final int maxInitialRetries = 3;
@@ -707,21 +709,37 @@ public class MicroscopeSocketClient implements AutoCloseable {
                     try {
                         AcquisitionProgress progress = getAcquisitionProgress();
                         progressCallback.accept(progress);
+
+                        // Check if progress was actually made
+                        if (progress != null && progress.current > lastProgressCount) {
+                            lastProgressTime = System.currentTimeMillis();
+                            lastProgressCount = progress.current;
+                            logger.debug("Progress updated: {} files, resetting timeout", progress.current);
+                        }
                     } catch (IOException e) {
                         logger.debug("Failed to get progress: {}", e.getMessage());
                     }
                 }
 
-                // Check timeout
-                if (timeoutMs > 0 && System.currentTimeMillis() - startTime > timeoutMs) {
-                    logger.warn("Acquisition monitoring timed out after {} ms", timeoutMs);
-                    break;
+                // Check timeout based on last progress, not total time
+                if (timeoutMs > 0) {
+                    long timeSinceProgress = System.currentTimeMillis() - lastProgressTime;
+                    if (timeSinceProgress > timeoutMs) {
+                        logger.warn("No progress for {} ms (last progress: {} files), timing out",
+                                timeSinceProgress, lastProgressCount);
+                        break;
+                    }
                 }
 
                 // Log state changes
                 if (currentState != lastState) {
                     logger.info("Acquisition state changed: {} -> {}", lastState, currentState);
                     lastState = currentState;
+
+                    // Reset progress timer on state change to RUNNING
+                    if (currentState == AcquisitionState.RUNNING) {
+                        lastProgressTime = System.currentTimeMillis();
+                    }
                 }
 
                 Thread.sleep(pollIntervalMs);
