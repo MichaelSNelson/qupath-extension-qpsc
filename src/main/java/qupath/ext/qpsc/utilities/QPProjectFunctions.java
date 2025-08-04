@@ -369,6 +369,58 @@ public class QPProjectFunctions {
     }
 
     /**
+     * Determines the appropriate image type for a given image file.
+     *
+     * <p>This method first checks for specific filename patterns that indicate
+     * PPM (Polarized Light Microscopy) or Brightfield images, which should always
+     * be set as BRIGHTFIELD_H_E type. If no specific patterns are found, it falls
+     * back to QuPath's automatic image type estimation.</p>
+     *
+     * <p>Filename patterns that force BRIGHTFIELD_H_E type:</p>
+     * <ul>
+     *   <li>Contains "ppm" (case-insensitive) - Polarized light microscopy</li>
+     *   <li>Contains "_90" or "90." - 90-degree rotation brightfield</li>
+     *   <li>Contains "_bf" - Brightfield designation</li>
+     *   <li>Contains "brightfield" - Explicit brightfield naming</li>
+     * </ul>
+     *
+     * @param imageFile The image file to check
+     * @param server The image server for automatic type estimation
+     * @param imageData The image data for automatic type estimation
+     * @return The determined ImageType
+     */
+    private static ImageData.ImageType determineImageType(
+            File imageFile,
+            ImageServer<BufferedImage> server,
+            ImageData<BufferedImage> imageData) {
+
+        String fileName = imageFile.getName().toLowerCase();
+
+        // Check if this is a PPM or BF modality based on the filename
+        // PPM files typically contain "ppm" in the name
+        // BF (brightfield) files typically contain "bf" or "90" (90 degree angle)
+        if (fileName.contains("ppm") ||
+                fileName.contains("_90") ||
+                fileName.contains("90.") ||
+                fileName.contains("_bf") ||
+                fileName.contains("brightfield")) {
+
+            // Force brightfield H&E for PPM and BF modalities
+            logger.info("Setting image type to BRIGHTFIELD_H_E based on filename pattern: {}", fileName);
+            return ImageData.ImageType.BRIGHTFIELD_H_E;
+        }
+
+        // For other modalities, use the standard estimation
+        logger.debug("Using automatic image type estimation for: {}", fileName);
+        var regionStore = QPEx.getQuPath().getImageRegionStore();
+        var thumb = regionStore.getThumbnail(server, 0, 0, true);
+        var imageType = GuiTools.estimateImageType(server, thumb);
+        logger.info("Auto-detected image type as {} for: {}", imageType, fileName);
+
+        return imageType;
+    }
+
+    /**
      * Adds an image file to the specified QuPath project, with optional horizontal and vertical flipping.
      *
      * <p>This method handles two scenarios:</p>
@@ -431,12 +483,8 @@ public class QPProjectFunctions {
             // Read the image data and set up basic properties
             ImageData<BufferedImage> imageData = entry.readImageData();
 
-            // Generate a thumbnail for image type estimation
-            var regionStore = QPEx.getQuPath().getImageRegionStore();
-            var thumb = regionStore.getThumbnail(imageData.getServer(), 0, 0, true);
-
-            // Estimate and set the image type (e.g., BRIGHTFIELD_H_E, FLUORESCENCE, etc.)
-            var imageType = GuiTools.estimateImageType(imageData.getServer(), thumb);
+            // Determine and set the image type using our unified method
+            var imageType = determineImageType(imageFile, server, imageData);
             imageData.setImageType(imageType);
 
             // Set a user-friendly name for the image in the project
@@ -488,30 +536,13 @@ public class QPProjectFunctions {
         // Add the transformed server to the project
         ProjectImageEntry<BufferedImage> entry = project.addImage(flipped.getBuilder());
 
-        // Set up the image data (same process as no-flip path)
+        // Set up the image data
         ImageData<BufferedImage> imageData = entry.readImageData();
-        // Determine image type based on filename patterns
-        var imageType = ImageData.ImageType.UNSET;
-        String fileName = imageFile.getName().toLowerCase();
 
-        // Check if this is a PPM or BF modality based on the filename
-        // PPM files typically contain "ppm" in the name
-        // BF (brightfield) files typically contain "bf" or "90" (90 degree angle)
-        if (fileName.contains("ppm") || fileName.contains("_90") || fileName.contains("90.") ||
-                fileName.contains("_bf") || fileName.contains("brightfield")) {
-            // Force brightfield H&E for PPM and BF modalities
-            imageType = ImageData.ImageType.BRIGHTFIELD_H_E;
-            logger.info("Setting image type to BRIGHTFIELD_H_E for PPM/BF image: {}", fileName);
-        } else {
-            // For other modalities, use the standard estimation
-            var regionStore = QPEx.getQuPath().getImageRegionStore();
-            var thumb = regionStore.getThumbnail(imageData.getServer(), 0, 0, true);
-            imageType = GuiTools.estimateImageType(imageData.getServer(), thumb);
-            logger.info("Auto-detected image type as {} for: {}", imageType, fileName);
-        }
-
-// Set the determined image type
+        // Determine and set the image type using our unified method
+        var imageType = determineImageType(imageFile, flipped, imageData);
         imageData.setImageType(imageType);
+
         entry.setImageName(imageFile.getName());
 
         // Save the changes

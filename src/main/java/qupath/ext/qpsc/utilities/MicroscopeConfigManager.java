@@ -407,8 +407,10 @@ public class MicroscopeConfigManager {
     public double getScannerMacroPixelSize(String scannerName) {
         Double pixelSize = getDouble("scanners", scannerName, "macro", "pixelSize_um");
         if (pixelSize == null || pixelSize <= 0) {
-            logger.warn("Invalid or missing macro pixel size for scanner '{}', using default 80.0 µm", scannerName);
-            return 80.0;
+            throw new IllegalStateException(
+                    "Scanner '" + scannerName + "' has no valid macro pixel size configured. " +
+                            "Please add 'macro.pixelSize_um' to the scanner configuration."
+            );
         }
         return pixelSize;
     }
