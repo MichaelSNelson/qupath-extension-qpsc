@@ -6,7 +6,6 @@ import java.nio.file.Paths;
 import java.net.URI;
 import java.net.URISyntaxException;
 
-import javafx.application.Platform;
 import javafx.beans.value.ChangeListener;
 import javafx.beans.value.ObservableValue;
 import qupath.lib.gui.QuPathGUI;
@@ -98,20 +97,35 @@ public class QPProjectFunctions {
             if (existingEntry != null) {
                 logger.info("Image already exists in project: {}", existingEntry.getImageName());
                 matchingImage = existingEntry;
-
-                // Important: When we set the project, QuPath might clear the current image
-                // So we need to ensure it gets reopened after project is set
             } else {
                 // Try to extract file path and add to project
                 String imagePath = extractImagePath(currentImageData);
 
-                    if (imagePath != null && new File(imagePath).exists()) {
-                        logger.info("Adding new image to project: {}", imagePath);
-                        matchingImage = importImageToProject(qupathGUI, project, new File(imagePath),
-                                isSlideFlippedX, isSlideFlippedY);
+                if (imagePath != null && new File(imagePath).exists()) {
+                    File imageFile = new File(imagePath);
+                    logger.info("Adding new image to project: {}", imagePath);
+
+                    // Add image with flips
+                    if (addImageToProject(imageFile, project, isSlideFlippedX, isSlideFlippedY)) {
+                        // Find the newly added entry
+                        String baseName = imageFile.getName();
+                        matchingImage = project.getImageList().stream()
+                                .filter(e -> baseName.equals(e.getImageName()))
+                                .findFirst()
+                                .orElse(null);
+
+                        if (matchingImage != null) {
+                            // Open the image later, after project is set
+                            logger.info("Image added successfully: {}", baseName);
+                        } else {
+                            logger.warn("Could not find newly added image in project: {}", baseName);
+                        }
                     } else {
-                        logger.warn("Could not extract valid file path from current image");
+                        logger.error("Failed to add image to project: {}", imagePath);
                     }
+                } else {
+                    logger.warn("Could not extract valid file path from current image");
+                }
             }
         } else {
             logger.info("No current image open in QuPath");
@@ -270,37 +284,37 @@ public class QPProjectFunctions {
         return null;
     }
 
-    /**
-     * Import an image file to the project and open it in the GUI.
-     */
-    private static ProjectImageEntry<BufferedImage> importImageToProject(
-            QuPathGUI qupathGUI,
-            Project<BufferedImage> project,
-            File imageFile,
-            boolean flipX,
-            boolean flipY) throws IOException {
-
-        // Add image with flips
-        addImageToProject(imageFile, project, flipX, flipY);
-
-        // Find the newly added entry
-        String baseName = imageFile.getName();
-        ProjectImageEntry<BufferedImage> entry = project.getImageList().stream()
-                .filter(e -> baseName.equals(e.getImageName()))
-                .findFirst()
-                .orElse(null);
-
-        if (entry != null) {
-            // Open the image
-            qupathGUI.openImageEntry(entry);
-            qupathGUI.refreshProject();
-            logger.info("Opened image in GUI: {}", baseName);
-        } else {
-            logger.warn("Could not find newly added image in project: {}", baseName);
-        }
-
-        return entry;
-    }
+//    /**
+//     * Import an image file to the project and open it in the GUI.
+//     */
+//    private static ProjectImageEntry<BufferedImage> importCurrentImageToNewProject(
+//            QuPathGUI qupathGUI,
+//            Project<BufferedImage> project,
+//            File imageFile,
+//            boolean flipX,
+//            boolean flipY) throws IOException {
+//
+//        // Add image with flips
+//        addImageToProject(imageFile, project, flipX, flipY);
+//
+//        // Find the newly added entry
+//        String baseName = imageFile.getName();
+//        ProjectImageEntry<BufferedImage> entry = project.getImageList().stream()
+//                .filter(e -> baseName.equals(e.getImageName()))
+//                .findFirst()
+//                .orElse(null);
+//
+//        if (entry != null) {
+//            // Open the image
+//            qupathGUI.openImageEntry(entry);
+//            qupathGUI.refreshProject();
+//            logger.info("Opened image in GUI: {}", baseName);
+//        } else {
+//            logger.warn("Could not find newly added image in project: {}", baseName);
+//        }
+//
+//        return entry;
+//    }
 
     /**
      * Build a unique subfolder for this sample + modality, and compute the
