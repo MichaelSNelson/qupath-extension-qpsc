@@ -16,6 +16,7 @@ import qupath.lib.regions.ImagePlane;
 import qupath.lib.roi.ROIs;
 import qupath.lib.roi.interfaces.ROI;
 
+import java.awt.*;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.Point2D;
 import java.awt.image.BufferedImage;
@@ -23,6 +24,7 @@ import java.io.File;
 import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.*;
+import java.util.List;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 
@@ -585,6 +587,8 @@ public class MicroscopeAlignmentWorkflow {
      *
      * @implNote Tiles are created in full resolution coordinates
      */
+
+    //TODO WHY WAS THIS CREATED WHEN ONE ALREADY EXISTS
     private static void createTilesForAnnotations(
             QuPathGUI gui,
             List<PathObject> annotations,
@@ -722,61 +726,72 @@ public class MicroscopeAlignmentWorkflow {
             int fullResWidth = gui.getImageData().getServer().getWidth();
             int fullResHeight = gui.getImageData().getServer().getHeight();
 
-            // Create the transform based on whether we have green box detection
+            // Detect actual data bounds (excluding white padding)
+            Rectangle dataBounds = null;
+            String scriptDir = new File(QPPreferenceDialog.getTissueDetectionScriptProperty()).getParent();
+            if (scriptDir != null) {
+                dataBounds = ImageProcessing.detectOcus40DataBounds(gui, scriptDir);
+                if (dataBounds != null) {
+                    logger.info("Using detected data bounds: ({}, {}, {}, {})",
+                            dataBounds.x, dataBounds.y, dataBounds.width, dataBounds.height);
+                    // Use actual data bounds instead of full image
+                    fullResWidth = dataBounds.width;
+                    fullResHeight = dataBounds.height;
+                }
+            }
+
+            // Create the transform
             AffineTransform macroToStageTransform;
 
             if (macroImageResults.greenBoxResult() != null &&
                     macroImageResults.greenBoxResult().getDetectedBox() != null) {
 
-                // Get the green box ROI - it's in the displayed macro image coordinates
                 ROI greenBox = macroImageResults.greenBoxResult().getDetectedBox();
 
-                logger.info("Using green box at ({}, {}, {}, {}) in displayed macro image",
-                        greenBox.getBoundsX(), greenBox.getBoundsY(),
-                        greenBox.getBoundsWidth(), greenBox.getBoundsHeight());
+                // CRITICAL FIX: Use consistent scaling based on macro pixel size
+                // Don't use green box dimensions for scaling - only for positioning
 
-                // The green box in the macro image corresponds to the full resolution image
-                // Create transform: macro → full-res
-                double scaleX = fullResWidth / greenBox.getBoundsWidth();
-                double scaleY = fullResHeight / greenBox.getBoundsHeight();
+                // First, create a simple macro-to-stage transform based on pixel size
+                double scaleToStage = macroPixelSize; // Convert macro pixels to micrometers
 
-                AffineTransform macroToFullRes = new AffineTransform();
-                // Scale first, then translate
-                macroToFullRes.scale(scaleX, scaleY);
-                macroToFullRes.translate(-greenBox.getBoundsX(), -greenBox.getBoundsY());
+                logger.info("=== TRANSFORM CALCULATION ===");
+                logger.info("Macro pixel size: {} µm/pixel", macroPixelSize);
+                logger.info("Green box location: ({}, {})", greenBox.getBoundsX(), greenBox.getBoundsY());
+                logger.info("Green box size: {} x {} pixels", greenBox.getBoundsWidth(), greenBox.getBoundsHeight());
 
-                logger.info("Macro→FullRes transform: scale({}, {}), translate({}, {})",
-                        scaleX, scaleY, -greenBox.getBoundsX(), -greenBox.getBoundsY());
+                // Calculate where the green box center should map to in stage coordinates
+                double greenBoxCenterX = greenBox.getBoundsX() + greenBox.getBoundsWidth() / 2.0;
+                double greenBoxCenterY = greenBox.getBoundsY() + greenBox.getBoundsHeight() / 2.0;
 
-                // Test the macro to full-res transform
-                Point2D gbTopLeft = new Point2D.Double(greenBox.getBoundsX(), greenBox.getBoundsY());
-                Point2D gbBottomRight = new Point2D.Double(
-                        greenBox.getBoundsX() + greenBox.getBoundsWidth(),
-                        greenBox.getBoundsY() + greenBox.getBoundsHeight());
+                // The green box center in macro should map to the image center in stage
+                double fullResCenterX = fullResWidth / 2.0;
+                double fullResCenterY = fullResHeight / 2.0;
 
-                Point2D fullResTopLeft = new Point2D.Double();
-                Point2D fullResBottomRight = new Point2D.Double();
-                macroToFullRes.transform(gbTopLeft, fullResTopLeft);
-                macroToFullRes.transform(gbBottomRight, fullResBottomRight);
+                // Transform the full-res center to stage coordinates
+                Point2D fullResCenter = new Point2D.Double(fullResCenterX, fullResCenterY);
+                Point2D stageCenter = new Point2D.Double();
+                fullResToStageTransform.transform(fullResCenter, stageCenter);
 
-                logger.info("Green box corners map to full-res: ({}, {}) → ({}, {}), ({}, {}) → ({}, {})",
-                        gbTopLeft.getX(), gbTopLeft.getY(), fullResTopLeft.getX(), fullResTopLeft.getY(),
-                        gbBottomRight.getX(), gbBottomRight.getY(), fullResBottomRight.getX(), fullResBottomRight.getY());
+                // Create macro to stage transform with uniform scaling
+                macroToStageTransform = new AffineTransform();
 
-                // Now combine: macro → full-res → stage
-                macroToStageTransform = new AffineTransform(fullResToStageTransform);
-                macroToStageTransform.concatenate(macroToFullRes);
+                // Apply uniform scale (same for X and Y)
+                macroToStageTransform.scale(scaleToStage, scaleToStage);
 
-                logger.info("Created macro→stage transform: {}", macroToStageTransform);
+                // Calculate translation to align green box center with stage center
+                double translateX = stageCenter.getX() / scaleToStage - greenBoxCenterX;
+                double translateY = stageCenter.getY() / scaleToStage - greenBoxCenterY;
 
-                // Validate with test points
-                validateTransformWithTestPoints(
-                        macroToStageTransform,
-                        macroImageResults
-                );
+                macroToStageTransform.translate(translateX, translateY);
+
+                logger.info("Final transform - Scale: {} (uniform), Translation: ({}, {})",
+                        scaleToStage, translateX, translateY);
+
+                // Verify uniform scaling
+                logger.info("Transform scales - X: {}, Y: {} (should be equal!)",
+                        macroToStageTransform.getScaleX(), macroToStageTransform.getScaleY());
 
             } else {
-                // No green box - fallback
                 logger.warn("No green box detected - cannot create accurate transform");
                 throw new IllegalStateException("Green box detection is required for alignment");
             }

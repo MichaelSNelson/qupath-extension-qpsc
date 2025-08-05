@@ -653,7 +653,9 @@ public class TransformationFunctions {
     private static void processTileConfigurationFile(
             File inFile,
             AffineTransform transform) throws IOException {
-
+        logger.info("CRITICAL: Transform being applied to tiles:");
+        logger.info("  Transform scale X: {}", transform.getScaleX());
+        logger.info("  Transform scale Y: {}", transform.getScaleY());
         // Backup original
         File backupFile = new File(inFile.getParent(), "TileConfiguration_QP.txt");
         Files.copy(inFile.toPath(), backupFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
@@ -670,9 +672,16 @@ public class TransformationFunctions {
                 String filename = m.group(1);
                 double x = Double.parseDouble(m.group(2).trim());
                 double y = Double.parseDouble(m.group(3).trim());
-
+                if (filename.equals("0.tif")) {
+                    logger.info("CRITICAL: First tile transformation:");
+                    logger.info("  Input (QuPath pixels): ({}, {})", x, y);
+                }
                 double[] coords = transformQuPathFullResToStage(new double[]{x, y}, transform);
-
+                if (filename.equals("0.tif")) {
+                    logger.info("  Output (stage µm): ({}, {})", coords[0], coords[1]);
+                    logger.info("  Implied pixel size: {} µm/pixel",
+                            Math.abs(coords[0] / x));
+                }
                 String transformedLine = String.format("%s; ; (%.3f, %.3f)",
                         filename, coords[0], coords[1]);
                 out.add(transformedLine);

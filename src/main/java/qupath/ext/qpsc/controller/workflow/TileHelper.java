@@ -50,7 +50,7 @@ public class TileHelper {
         QuPathGUI gui = QuPathGUI.getInstance();
         double imagePixelSize = gui.getImageData().getServer()
                 .getPixelCalibration().getAveragedPixelSizeMicrons();
-
+        logger.info("getAveragedPixelSizeMicrons from QuPath getPixelCalibration: {}", imagePixelSize);
         // Calculate frame dimensions in microns
         double frameWidthMicrons = pixelSize * cameraWidth;
         double frameHeightMicrons = pixelSize * cameraHeight;

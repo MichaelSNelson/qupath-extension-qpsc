@@ -424,7 +424,8 @@ public class AffineTransformManager {
             Files.write(alignmentFile.toPath(), json.getBytes(StandardCharsets.UTF_8));
 
             logger.info("Saved slide-specific alignment to: {}", alignmentFile.getAbsolutePath());
-
+            logger.info("CRITICAL: Saving slide alignment with scale: X={}, Y={}",
+                    transform.getScaleX(), transform.getScaleY());
         } catch (Exception e) {
             logger.error("Failed to save slide alignment", e);
         }
@@ -474,7 +475,10 @@ public class AffineTransformManager {
 
                 logger.info("Loaded slide-specific alignment from: {}", alignmentFile.getAbsolutePath());
                 logger.info("Alignment created on: {}", alignmentData.get("timestamp"));
-
+                if (transform != null) {
+                    logger.info("CRITICAL: Loaded slide alignment with scale: X={}, Y={}",
+                            transform.getScaleX(), transform.getScaleY());
+                }
                 return transform;
             }
 

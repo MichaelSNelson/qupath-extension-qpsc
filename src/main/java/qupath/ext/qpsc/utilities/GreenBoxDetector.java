@@ -137,6 +137,23 @@ public class GreenBoxDetector {
         ROI detectedBox = findCompleteBox(edges, macroImage.getWidth(), macroImage.getHeight(), params);
 
         if (detectedBox != null) {
+
+            // TEMPORARY EDGE ADJUSTMENT - REMOVE AFTER TESTING
+            // 0.0 = outer edge (default), 0.5 = middle, 1.0 = inner edge
+            double EDGE_ADJUSTMENT_FACTOR = 0.5;  // Use middle of edge
+            if (EDGE_ADJUSTMENT_FACTOR > 0 && params.edgeThickness > 0) {
+                double shrink = params.edgeThickness * EDGE_ADJUSTMENT_FACTOR;
+                detectedBox = ROIs.createRectangleROI(
+                        detectedBox.getBoundsX() + shrink,
+                        detectedBox.getBoundsY() + shrink,
+                        detectedBox.getBoundsWidth() - 2 * shrink,
+                        detectedBox.getBoundsHeight() - 2 * shrink,
+                        detectedBox.getImagePlane()
+                );
+                logger.info("Adjusted green box bounds inward by {} pixels (factor {})",
+                        shrink, EDGE_ADJUSTMENT_FACTOR);
+            }
+            // END TEMPORARY ADJUSTMENT
             // Calculate confidence based on how well it matches expected characteristics
             double confidence = calculateConfidence(detectedBox, greenMask, params);
 
