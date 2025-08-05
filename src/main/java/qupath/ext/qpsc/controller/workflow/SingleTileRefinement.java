@@ -1,5 +1,3 @@
-
-// File: qupath/ext/qpsc/controller/workflow/SingleTileRefinement.java
 package qupath.ext.qpsc.controller.workflow;
 
 import javafx.application.Platform;
@@ -24,12 +22,39 @@ import java.util.concurrent.CompletableFuture;
 
 /**
  * Helper for single-tile alignment refinement.
+ *
+ * <p>This class provides functionality to refine an existing alignment by:
+ * <ul>
+ *   <li>Selecting a single tile from the annotations</li>
+ *   <li>Moving the microscope to the estimated position</li>
+ *   <li>Allowing manual adjustment of the stage position</li>
+ *   <li>Calculating a refined transform based on the adjustment</li>
+ * </ul>
+ *
+ * <p>Single-tile refinement improves alignment accuracy by correcting for
+ * small errors in the initial transform.
+ *
+ * @author Mike Nelson
+ * @since 1.0
  */
 public class SingleTileRefinement {
     private static final Logger logger = LoggerFactory.getLogger(SingleTileRefinement.class);
 
     /**
      * Performs single-tile refinement of alignment.
+     *
+     * <p>This method:
+     * <ol>
+     *   <li>Prompts user to select a tile</li>
+     *   <li>Moves microscope to estimated position</li>
+     *   <li>Allows manual position adjustment</li>
+     *   <li>Calculates refined transform</li>
+     * </ol>
+     *
+     * @param gui QuPath GUI instance
+     * @param annotations List of annotations containing tiles
+     * @param initialTransform Initial transform to refine
+     * @return CompletableFuture with refined transform, or initial if cancelled
      */
     public static CompletableFuture<AffineTransform> performRefinement(
             QuPathGUI gui,
@@ -69,6 +94,25 @@ public class SingleTileRefinement {
         return future;
     }
 
+    /**
+     * Performs the actual tile refinement process.
+     *
+     * <p>This method:
+     * <ol>
+     *   <li>Gets tile center coordinates</li>
+     *   <li>Transforms to estimated stage position</li>
+     *   <li>Validates stage boundaries</li>
+     *   <li>Centers viewer on tile</li>
+     *   <li>Moves microscope to position</li>
+     *   <li>Shows refinement dialog</li>
+     * </ol>
+     *
+     * @param gui QuPath GUI instance
+     * @param selectedTile The tile selected for refinement
+     * @param initialTransform Initial transform
+     * @param future Future to complete with refined transform
+     * @throws Exception if refinement fails
+     */
     private static void performTileRefinement(
             QuPathGUI gui,
             PathObject selectedTile,
@@ -103,7 +147,8 @@ public class SingleTileRefinement {
         centerViewerOnTile(gui, selectedTile);
 
         // Move to estimated position
-        logger.info("Moving to estimated position");
+        logger.info("Moving to estimated position: ({}, {})",
+                estimatedStageCoords[0], estimatedStageCoords[1]);
         MicroscopeController.getInstance().moveStageXY(
                 estimatedStageCoords[0], estimatedStageCoords[1]);
 
@@ -114,6 +159,12 @@ public class SingleTileRefinement {
         showRefinementDialog(tileCoords, initialTransform, future);
     }
 
+    /**
+     * Validates that stage coordinates are within allowed bounds.
+     *
+     * @param stageCoords Stage coordinates to validate
+     * @return true if coordinates are valid, false otherwise
+     */
     private static boolean validateStageBounds(double[] stageCoords) {
         MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(
                 QPPreferenceDialog.getMicroscopeConfigFileProperty());
@@ -123,10 +174,23 @@ public class SingleTileRefinement {
         double stageYMin = mgr.getDouble("stage", "ylimit", "low");
         double stageYMax = mgr.getDouble("stage", "ylimit", "high");
 
-        return stageCoords[0] >= stageXMin && stageCoords[0] <= stageXMax &&
+        boolean valid = stageCoords[0] >= stageXMin && stageCoords[0] <= stageXMax &&
                 stageCoords[1] >= stageYMin && stageCoords[1] <= stageYMax;
+
+        if (!valid) {
+            logger.warn("Stage coordinates ({}, {}) outside bounds: X[{}, {}], Y[{}, {}]",
+                    stageCoords[0], stageCoords[1], stageXMin, stageXMax, stageYMin, stageYMax);
+        }
+
+        return valid;
     }
 
+    /**
+     * Centers the QuPath viewer on the selected tile.
+     *
+     * @param gui QuPath GUI instance
+     * @param tile Tile to center on
+     */
     private static void centerViewerOnTile(QuPathGUI gui, PathObject tile) {
         var viewer = gui.getViewer();
         if (viewer != null && tile.getROI() != null) {
@@ -134,9 +198,25 @@ public class SingleTileRefinement {
             double cy = tile.getROI().getCentroidY();
             viewer.setCenterPixelLocation(cx, cy);
             viewer.getHierarchy().getSelectionModel().setSelectedObject(tile);
+            logger.debug("Centered viewer on tile at ({}, {})", cx, cy);
         }
     }
 
+    /**
+     * Shows the refinement dialog for user interaction.
+     *
+     * <p>Presents options to:
+     * <ul>
+     *   <li>Save the refined position after manual adjustment</li>
+     *   <li>Skip refinement and use initial transform</li>
+     *   <li>Create entirely new alignment</li>
+     * </ul>
+     *
+     * @param tileCoords Original tile coordinates in QuPath
+     * @param initialTransform Initial transform
+     * @param future Future to complete with result
+     * @throws IOException if stage position cannot be read
+     */
     private static void showRefinementDialog(
             double[] tileCoords,
             AffineTransform initialTransform,
@@ -189,6 +269,7 @@ public class SingleTileRefinement {
                 future.complete(null); // Signal to switch to manual alignment
             }
         } else {
+            // Dialog closed without selection
             future.complete(initialTransform);
         }
     }

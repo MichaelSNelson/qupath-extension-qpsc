@@ -140,7 +140,7 @@ public class GreenBoxDetector {
 
             // TEMPORARY EDGE ADJUSTMENT - REMOVE AFTER TESTING
             // 0.0 = outer edge (default), 0.5 = middle, 1.0 = inner edge
-            double EDGE_ADJUSTMENT_FACTOR = 0.5;  // Use middle of edge
+            double EDGE_ADJUSTMENT_FACTOR = 0;
             if (EDGE_ADJUSTMENT_FACTOR > 0 && params.edgeThickness > 0) {
                 double shrink = params.edgeThickness * EDGE_ADJUSTMENT_FACTOR;
                 detectedBox = ROIs.createRectangleROI(

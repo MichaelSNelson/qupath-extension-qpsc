@@ -1,4 +1,3 @@
-// File: qupath/ext/qpsc/controller/workflow/TileHelper.java
 package qupath.ext.qpsc.controller.workflow;
 
 import org.slf4j.Logger;
@@ -20,13 +19,43 @@ import java.util.stream.Collectors;
 
 /**
  * Helper class for tile management operations.
+ *
+ * <p>This class manages:
+ * <ul>
+ *   <li>Creating tiles based on camera field of view</li>
+ *   <li>Validating tile counts to prevent excessive tiling</li>
+ *   <li>Cleaning up old tiles from previous runs</li>
+ *   <li>Managing tile directories and organization</li>
+ * </ul>
+ *
+ * <p>Tiles represent individual camera frames that will be acquired and
+ * later stitched together to form the complete image.
+ *
+ * @author Mike Nelson
+ * @since 1.0
  */
 public class TileHelper {
     private static final Logger logger = LoggerFactory.getLogger(TileHelper.class);
+
+    /** Maximum tiles allowed per annotation to prevent runaway tiling */
     private static final int MAX_TILES_PER_ANNOTATION = 10000;
 
     /**
      * Creates tiles for the given annotations.
+     *
+     * <p>This method:
+     * <ol>
+     *   <li>Calculates camera frame size in image pixels</li>
+     *   <li>Validates tile counts to prevent excessive tiling</li>
+     *   <li>Creates detection objects representing tiles</li>
+     *   <li>Writes tile configuration files for acquisition</li>
+     * </ol>
+     *
+     * @param annotations List of annotations to tile
+     * @param sample Sample setup information
+     * @param tempTileDirectory Directory for tile configuration files
+     * @param modeWithIndex Imaging mode identifier
+     * @param macroPixelSize Macro image pixel size (currently unused)
      */
     public static void createTilesForAnnotations(
             List<PathObject> annotations,
@@ -38,19 +67,22 @@ public class TileHelper {
         logger.info("Creating tiles for {} annotations in modality {}",
                 annotations.size(), modeWithIndex);
 
+        // Get microscope configuration
         MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(
                 QPPreferenceDialog.getMicroscopeConfigFileProperty()
         );
 
+        // Get camera and imaging parameters
         double pixelSize = mgr.getDouble("imagingMode", sample.modality(), "pixelSize_um");
         int cameraWidth = mgr.getInteger("imagingMode", sample.modality(), "detector", "width_px");
         int cameraHeight = mgr.getInteger("imagingMode", sample.modality(), "detector", "height_px");
 
-        // Get the actual image pixel size
+        // Get the actual image pixel size from QuPath
         QuPathGUI gui = QuPathGUI.getInstance();
         double imagePixelSize = gui.getImageData().getServer()
                 .getPixelCalibration().getAveragedPixelSizeMicrons();
-        logger.info("getAveragedPixelSizeMicrons from QuPath getPixelCalibration: {}", imagePixelSize);
+        logger.info("Image pixel size from QuPath: {} µm", imagePixelSize);
+
         // Calculate frame dimensions in microns
         double frameWidthMicrons = pixelSize * cameraWidth;
         double frameHeightMicrons = pixelSize * cameraHeight;
@@ -59,18 +91,20 @@ public class TileHelper {
         double frameWidthPixels = frameWidthMicrons / imagePixelSize;
         double frameHeightPixels = frameHeightMicrons / imagePixelSize;
 
+        // Get tiling parameters
         double overlapPercent = QPPreferenceDialog.getTileOverlapPercentProperty();
         boolean invertedX = QPPreferenceDialog.getInvertedXProperty();
         boolean invertedY = QPPreferenceDialog.getInvertedYProperty();
 
-        logger.info("Frame size in QuPath pixels: {} x {}", frameWidthPixels, frameHeightPixels);
+        logger.info("Frame size in QuPath pixels: {} x {} ({}% overlap)",
+                frameWidthPixels, frameHeightPixels, overlapPercent);
 
         try {
-            // Remove existing tiles
+            // Remove existing tiles for this modality
             String modalityBase = sample.modality().replaceAll("(_\\d+)$", "");
             deleteAllTiles(gui, modalityBase);
 
-            // Validate tile counts
+            // Validate tile counts before creation
             validateTileCounts(annotations, frameWidthPixels, frameHeightPixels, overlapPercent);
 
             // Create new tiles
@@ -96,6 +130,19 @@ public class TileHelper {
 
     /**
      * Validates that tile counts are reasonable.
+     *
+     * <p>Prevents creation of excessive tiles that could indicate:
+     * <ul>
+     *   <li>Incorrect pixel size configuration</li>
+     *   <li>Extremely large annotations</li>
+     *   <li>Configuration errors</li>
+     * </ul>
+     *
+     * @param annotations Annotations to validate
+     * @param frameWidth Frame width in pixels
+     * @param frameHeight Frame height in pixels
+     * @param overlapPercent Overlap percentage
+     * @throws RuntimeException if any annotation would create too many tiles
      */
     private static void validateTileCounts(List<PathObject> annotations,
                                            double frameWidth, double frameHeight, double overlapPercent) {
@@ -104,22 +151,38 @@ public class TileHelper {
             if (ann.getROI() != null) {
                 double annWidth = ann.getROI().getBoundsWidth();
                 double annHeight = ann.getROI().getBoundsHeight();
-                double tilesX = Math.ceil(annWidth / (frameWidth * (1 - overlapPercent/100.0)));
-                double tilesY = Math.ceil(annHeight / (frameHeight * (1 - overlapPercent/100.0)));
+
+                // Calculate effective frame size considering overlap
+                double effectiveFrameWidth = frameWidth * (1 - overlapPercent/100.0);
+                double effectiveFrameHeight = frameHeight * (1 - overlapPercent/100.0);
+
+                double tilesX = Math.ceil(annWidth / effectiveFrameWidth);
+                double tilesY = Math.ceil(annHeight / effectiveFrameHeight);
                 double totalTiles = tilesX * tilesY;
 
                 if (totalTiles > MAX_TILES_PER_ANNOTATION) {
                     throw new RuntimeException(String.format(
-                            "Annotation '%s' would require %.0f tiles. Maximum allowed is %d.\n" +
-                                    "This usually indicates incorrect pixel size settings.",
-                            ann.getName(), totalTiles, MAX_TILES_PER_ANNOTATION));
+                            "Annotation '%s' would require %.0f tiles (%.0fx%.0f). Maximum allowed is %d.\n" +
+                                    "This usually indicates incorrect pixel size settings.\n" +
+                                    "Annotation size: %.0fx%.0f pixels, Frame size: %.0fx%.0f pixels",
+                            ann.getName(), totalTiles, tilesX, tilesY, MAX_TILES_PER_ANNOTATION,
+                            annWidth, annHeight, frameWidth, frameHeight));
                 }
+
+                logger.debug("Annotation '{}' will create {} tiles ({}x{})",
+                        ann.getName(), totalTiles, tilesX, tilesY);
             }
         }
     }
 
     /**
      * Deletes all detection tiles for a given modality.
+     *
+     * <p>Removes existing tiles from the QuPath hierarchy to prepare for
+     * new tile creation. Uses efficient batch removal for large tile counts.
+     *
+     * @param gui QuPath GUI instance
+     * @param modality Base modality name (without index suffix)
      */
     public static void deleteAllTiles(QuPathGUI gui, String modality) {
         var hierarchy = gui.getViewer().getHierarchy();
@@ -127,6 +190,7 @@ public class TileHelper {
 
         String modalityBase = modality.replaceAll("(_\\d+)$", "");
 
+        // Find tiles to remove based on class name
         List<PathObject> tilesToRemove = hierarchy.getDetectionObjects().stream()
                 .filter(o -> o.getPathClass() != null &&
                         o.getPathClass().toString().contains(modalityBase))
@@ -136,8 +200,9 @@ public class TileHelper {
             logger.info("Removing {} of {} total detections for modality: {}",
                     tilesToRemove.size(), totalDetections, modalityBase);
 
-            // Batch removal for performance
+            // Use batch removal for performance
             if (tilesToRemove.size() > totalDetections * 0.8) {
+                // If removing most detections, it's faster to clear all and re-add the rest
                 List<PathObject> toKeep = hierarchy.getDetectionObjects().stream()
                         .filter(o -> !tilesToRemove.contains(o))
                         .collect(Collectors.toList());
@@ -147,6 +212,7 @@ public class TileHelper {
                     hierarchy.addObjects(toKeep);
                 }
             } else {
+                // Remove specific objects
                 hierarchy.removeObjects(tilesToRemove, true);
             }
         }
@@ -154,6 +220,12 @@ public class TileHelper {
 
     /**
      * Cleans up stale folders from previous tile creation.
+     *
+     * <p>Removes directories for annotations that no longer exist to prevent
+     * confusion and save disk space.
+     *
+     * @param tempTileDirectory Root temporary tile directory
+     * @param currentAnnotations List of current valid annotations
      */
     public static void cleanupStaleFolders(String tempTileDirectory,
                                            List<PathObject> currentAnnotations) {
@@ -193,6 +265,11 @@ public class TileHelper {
         }
     }
 
+    /**
+     * Recursively deletes a directory and all its contents.
+     *
+     * @param dir Directory to delete
+     */
     private static void deleteDirectoryRecursively(File dir) {
         if (dir.isDirectory()) {
             File[] files = dir.listFiles();

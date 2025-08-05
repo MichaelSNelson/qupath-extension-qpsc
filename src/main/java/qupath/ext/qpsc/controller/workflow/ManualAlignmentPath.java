@@ -21,6 +21,25 @@ import java.util.concurrent.CompletableFuture;
 
 /**
  * Handles Path B: Manual alignment creation.
+ *
+ * <p>This path is used when:
+ * <ul>
+ *   <li>No existing alignment is available or suitable</li>
+ *   <li>The user wants to create a new alignment from scratch</li>
+ *   <li>No macro image is available for automatic detection</li>
+ * </ul>
+ *
+ * <p>The workflow:
+ * <ol>
+ *   <li>Loads pixel size configuration</li>
+ *   <li>Sets up the project</li>
+ *   <li>Creates tiles for alignment</li>
+ *   <li>Shows manual alignment UI</li>
+ *   <li>Saves the created transform</li>
+ * </ol>
+ *
+ * @author Mike Nelson
+ * @since 1.0
  */
 public class ManualAlignmentPath {
     private static final Logger logger = LoggerFactory.getLogger(ManualAlignmentPath.class);
@@ -28,6 +47,12 @@ public class ManualAlignmentPath {
     private final QuPathGUI gui;
     private final WorkflowState state;
 
+    /**
+     * Creates a new manual alignment path handler.
+     *
+     * @param gui QuPath GUI instance
+     * @param state Current workflow state
+     */
     public ManualAlignmentPath(QuPathGUI gui, WorkflowState state) {
         this.gui = gui;
         this.state = state;
@@ -35,6 +60,11 @@ public class ManualAlignmentPath {
 
     /**
      * Executes the manual alignment path workflow.
+     *
+     * <p>This method orchestrates the complete Path B workflow including
+     * project setup and manual transform creation.
+     *
+     * @return CompletableFuture containing the updated workflow state
      */
     public CompletableFuture<WorkflowState> execute() {
         logger.info("Path B: Manual alignment creation");
@@ -55,6 +85,14 @@ public class ManualAlignmentPath {
 
     /**
      * Loads pixel size for manual alignment.
+     *
+     * <p>Attempts to load from:
+     * <ol>
+     *   <li>Saved scanner configuration if available</li>
+     *   <li>MacroImageUtility fallback configuration</li>
+     * </ol>
+     *
+     * @return CompletableFuture containing the pixel size in micrometers
      */
     private CompletableFuture<Double> loadPixelSize() {
         return CompletableFuture.supplyAsync(() -> {
@@ -73,6 +111,7 @@ public class ManualAlignmentPath {
                                 scannerConfig, "macro", "pixelSize_um");
 
                         if (pixelSize != null && pixelSize > 0) {
+                            logger.info("Loaded pixel size {} from scanner config", pixelSize);
                             return pixelSize;
                         }
                     }
@@ -91,6 +130,16 @@ public class ManualAlignmentPath {
 
     /**
      * Creates manual alignment through user interaction.
+     *
+     * <p>This method:
+     * <ol>
+     *   <li>Gets or creates annotations</li>
+     *   <li>Creates tiles for visual reference</li>
+     *   <li>Shows the manual alignment UI</li>
+     *   <li>Saves the created transform</li>
+     * </ol>
+     *
+     * @return CompletableFuture containing the updated workflow state
      */
     private CompletableFuture<WorkflowState> createManualAlignment() {
         // Get or create annotations
@@ -109,10 +158,11 @@ public class ManualAlignmentPath {
                 state.pixelSize
         );
 
-        // Setup manual transform
+        // Get axis inversion settings
         boolean invertedX = QPPreferenceDialog.getInvertedXProperty();
         boolean invertedY = QPPreferenceDialog.getInvertedYProperty();
 
+        // Show manual alignment UI
         return AffineTransformationController.setupAffineTransformationAndValidationGUI(
                 state.pixelSize, invertedX, invertedY
         ).thenApply(transform -> {

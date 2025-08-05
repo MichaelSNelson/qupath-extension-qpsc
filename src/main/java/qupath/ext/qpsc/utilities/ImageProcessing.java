@@ -84,7 +84,7 @@ public class ImageProcessing {
 
             logger.info("Detected data bounds: x={}, y={}, width={}, height={}",
                     dataBounds.x, dataBounds.y, dataBounds.width, dataBounds.height);
-
+            logger.info("Centroid in QuPath pixels of data bounds X {} Y {}", boundsROI.getCentroidX(), boundsROI.getCentroidY());
             // Calculate padding amounts for logging
             int imageWidth = gui.getImageData().getServer().getWidth();
             int imageHeight = gui.getImageData().getServer().getHeight();

@@ -23,6 +23,25 @@ import java.util.concurrent.CompletableFuture;
 
 /**
  * Handles Path A: Using existing alignment with green box detection.
+ *
+ * <p>This path is used when:
+ * <ul>
+ *   <li>A macro image is available in the current image</li>
+ *   <li>A saved alignment transform exists for the scanner</li>
+ *   <li>Green box detection can locate the tissue position</li>
+ * </ul>
+ *
+ * <p>The workflow:
+ * <ol>
+ *   <li>Loads scanner-specific pixel size configuration</li>
+ *   <li>Crops and processes the macro image</li>
+ *   <li>Detects the green box with user preview</li>
+ *   <li>Creates full-resolution to stage transform</li>
+ *   <li>Optionally performs single-tile refinement</li>
+ * </ol>
+ *
+ * @author Mike Nelson
+ * @since 1.0
  */
 public class ExistingAlignmentPath {
     private static final Logger logger = LoggerFactory.getLogger(ExistingAlignmentPath.class);
@@ -30,6 +49,12 @@ public class ExistingAlignmentPath {
     private final QuPathGUI gui;
     private final WorkflowState state;
 
+    /**
+     * Creates a new existing alignment path handler.
+     *
+     * @param gui QuPath GUI instance
+     * @param state Current workflow state
+     */
     public ExistingAlignmentPath(QuPathGUI gui, WorkflowState state) {
         this.gui = gui;
         this.state = state;
@@ -37,11 +62,16 @@ public class ExistingAlignmentPath {
 
     /**
      * Executes the existing alignment path workflow.
+     *
+     * <p>This method orchestrates the complete Path A workflow including
+     * green box detection, transform creation, and optional refinement.
+     *
+     * @return CompletableFuture containing the updated workflow state
      */
     public CompletableFuture<WorkflowState> execute() {
         logger.info("Path A: Using existing alignment with green box detection");
 
-        // Validate macro image
+        // Validate macro image availability
         if (!MacroImageUtility.isMacroImageAvailable(gui)) {
             logger.error("No macro image available for green box detection");
             Platform.runLater(() ->
@@ -62,6 +92,11 @@ public class ExistingAlignmentPath {
 
     /**
      * Loads pixel size from scanner configuration.
+     *
+     * <p>The pixel size is critical for accurate scaling between macro
+     * and full-resolution images.
+     *
+     * @return CompletableFuture containing the macro pixel size in micrometers
      */
     private CompletableFuture<Double> loadPixelSize() {
         return CompletableFuture.supplyAsync(() -> {
@@ -79,6 +114,12 @@ public class ExistingAlignmentPath {
 
     /**
      * Processes the macro image (crop and flip).
+     *
+     * <p>Applies scanner-specific cropping to remove slide holder areas
+     * and flips based on user preferences.
+     *
+     * @param pixelSize Macro image pixel size
+     * @return CompletableFuture containing processed macro image context
      */
     private CompletableFuture<MacroImageContext> processMacroImage(double pixelSize) {
         return CompletableFuture.supplyAsync(() -> {
@@ -92,7 +133,7 @@ public class ExistingAlignmentPath {
             // Crop based on scanner configuration
             MacroImageUtility.CroppedMacroResult croppedResult = cropMacroImage(originalMacro);
 
-            // Apply flips
+            // Apply flips for display
             BufferedImage displayImage = applyFlips(croppedResult.getCroppedImage());
 
             return new MacroImageContext(croppedResult, displayImage);
@@ -100,10 +141,16 @@ public class ExistingAlignmentPath {
     }
 
     /**
-     * Shows green box detection dialog.
+     * Shows green box detection dialog with preview.
+     *
+     * <p>Allows the user to adjust detection parameters and preview results
+     * before confirming the green box location.
+     *
+     * @param macroContext Processed macro image context
+     * @return CompletableFuture containing green box detection results
      */
     private CompletableFuture<GreenBoxContext> detectGreenBox(MacroImageContext macroContext) {
-        // Get initial parameters
+        // Get initial parameters from saved transform
         GreenBoxDetector.DetectionParams params = new GreenBoxDetector.DetectionParams();
         if (state.alignmentChoice.selectedTransform() != null &&
                 state.alignmentChoice.selectedTransform().getGreenBoxParams() != null) {
@@ -122,7 +169,10 @@ public class ExistingAlignmentPath {
     }
 
     /**
-     * Sets up the project.
+     * Sets up the QuPath project.
+     *
+     * @param context Green box detection context
+     * @return CompletableFuture with context passed through
      */
     private CompletableFuture<GreenBoxContext> setupProject(GreenBoxContext context) {
         return ProjectHelper.setupProject(gui, state.sample)
@@ -138,6 +188,18 @@ public class ExistingAlignmentPath {
 
     /**
      * Creates the transform and prepares for acquisition.
+     *
+     * <p>This method:
+     * <ol>
+     *   <li>Gets or creates annotations</li>
+     *   <li>Creates full-resolution to stage transform</li>
+     *   <li>Validates transform boundaries</li>
+     *   <li>Optionally performs single-tile refinement</li>
+     *   <li>Saves the final transform</li>
+     * </ol>
+     *
+     * @param context Green box detection context
+     * @return CompletableFuture containing the updated workflow state
      */
     private CompletableFuture<WorkflowState> createTransform(GreenBoxContext context) {
         return CompletableFuture.supplyAsync(() -> {
@@ -176,9 +238,15 @@ public class ExistingAlignmentPath {
 
     /**
      * Creates the full-resolution to stage transform.
+     *
+     * <p>Combines the macro-to-stage transform with the green box location
+     * to create an accurate full-resolution to stage mapping.
+     *
+     * @param context Green box detection context
+     * @return AffineTransform mapping full-res pixels to stage micrometers
      */
     private AffineTransform createFullResToStageTransform(GreenBoxContext context) {
-        // Get base transform
+        // Get base macro-to-stage transform
         AffineTransform macroToStage = state.alignmentChoice.selectedTransform().getTransform();
 
         // Get image dimensions and detect data bounds
@@ -211,6 +279,11 @@ public class ExistingAlignmentPath {
 
     /**
      * Performs single-tile refinement if requested.
+     *
+     * <p>Allows the user to manually adjust alignment using a single tile
+     * for improved accuracy.
+     *
+     * @return CompletableFuture containing the refined workflow state
      */
     private CompletableFuture<WorkflowState> performRefinement() {
         // Create tiles for refinement
@@ -236,6 +309,9 @@ public class ExistingAlignmentPath {
 
     /**
      * Saves the slide-specific alignment.
+     *
+     * <p>Saves the transform to the project for future reuse with this
+     * specific slide.
      */
     private void saveSlideAlignment() {
         Project<BufferedImage> project = (Project<BufferedImage>) state.projectInfo.getCurrentProject();
@@ -250,6 +326,9 @@ public class ExistingAlignmentPath {
 
     // Helper methods
 
+    /**
+     * Loads scanner-specific pixel size from configuration.
+     */
     private double loadScannerPixelSize(String scannerName) {
         String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
         File configDir = new File(configPath).getParentFile();
@@ -272,6 +351,9 @@ public class ExistingAlignmentPath {
         );
     }
 
+    /**
+     * Crops macro image based on scanner configuration.
+     */
     private MacroImageUtility.CroppedMacroResult cropMacroImage(BufferedImage originalMacro) {
         String scannerName = state.alignmentChoice.selectedTransform().getMountingMethod();
         String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
@@ -299,6 +381,9 @@ public class ExistingAlignmentPath {
                 originalMacro, originalMacro.getWidth(), originalMacro.getHeight(), 0, 0);
     }
 
+    /**
+     * Applies flips to macro image based on preferences.
+     */
     private BufferedImage applyFlips(BufferedImage image) {
         boolean flipX = QPPreferenceDialog.getFlipMacroXProperty();
         boolean flipY = QPPreferenceDialog.getFlipMacroYProperty();
@@ -309,9 +394,13 @@ public class ExistingAlignmentPath {
         return image;
     }
 
+    /**
+     * Detects actual data bounds, excluding white padding.
+     */
     private Rectangle detectDataBounds(GreenBoxContext context, int reportedWidth, int reportedHeight) {
         String scannerName = state.alignmentChoice.selectedTransform().getMountingMethod();
 
+        // Special handling for Ocus40 scanner
         if ("Ocus40".equalsIgnoreCase(scannerName)) {
             try {
                 String tissueScriptPath = QPPreferenceDialog.getTissueDetectionScriptProperty();
@@ -329,7 +418,7 @@ public class ExistingAlignmentPath {
             }
         }
 
-        // Fallback calculation
+        // Fallback calculation based on green box size
         ROI greenBox = context.greenBoxResult.getDetectedBox();
         double pixelSizeRatio = state.pixelSize / gui.getImageData().getServer()
                 .getPixelCalibration().getAveragedPixelSizeMicrons();
@@ -348,6 +437,9 @@ public class ExistingAlignmentPath {
         );
     }
 
+    /**
+     * Validates transform against stage boundaries.
+     */
     private boolean validateTransform(AffineTransform transform) {
         MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(
                 QPPreferenceDialog.getMicroscopeConfigFileProperty());
@@ -368,6 +460,9 @@ public class ExistingAlignmentPath {
 
     // Inner context classes
 
+    /**
+     * Context for macro image processing results.
+     */
     private static class MacroImageContext {
         final MacroImageUtility.CroppedMacroResult croppedResult;
         final BufferedImage displayImage;
@@ -378,6 +473,9 @@ public class ExistingAlignmentPath {
         }
     }
 
+    /**
+     * Context for green box detection results.
+     */
     private static class GreenBoxContext {
         final MacroImageContext macroContext;
         final GreenBoxDetector.DetectionResult greenBoxResult;

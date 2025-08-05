@@ -1,4 +1,3 @@
-// File: qupath/ext/qpsc/controller/workflow/TileCleanupHelper.java
 package qupath.ext.qpsc.controller.workflow;
 
 import org.slf4j.Logger;
@@ -7,13 +6,33 @@ import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.utilities.UtilityFunctions;
 
 /**
- * Helper for tile cleanup operations.
+ * Helper for tile cleanup operations after acquisition.
+ *
+ * <p>This class manages the post-acquisition cleanup of temporary tile files
+ * based on user preferences:
+ * <ul>
+ *   <li><b>Delete:</b> Remove all temporary tiles immediately</li>
+ *   <li><b>Zip:</b> Archive tiles to a zip file then delete originals</li>
+ *   <li><b>Keep:</b> Retain tiles for debugging or manual inspection</li>
+ * </ul>
+ *
+ * @author Mike Nelson
+ * @since 1.0
  */
 public class TileCleanupHelper {
     private static final Logger logger = LoggerFactory.getLogger(TileCleanupHelper.class);
 
     /**
      * Performs tile cleanup based on user preferences.
+     *
+     * <p>The cleanup method is determined by the tile handling preference:
+     * <ul>
+     *   <li>"Delete" - Removes all tiles and the temporary folder</li>
+     *   <li>"Zip" - Creates a zip archive then removes originals</li>
+     *   <li>Any other value - Keeps tiles in place</li>
+     * </ul>
+     *
+     * @param tempTileDir Path to the temporary tile directory
      */
     public static void performCleanup(String tempTileDir) {
         String handling = QPPreferenceDialog.getTileHandlingMethodProperty();
@@ -22,13 +41,13 @@ public class TileCleanupHelper {
 
         if ("Delete".equals(handling)) {
             UtilityFunctions.deleteTilesAndFolder(tempTileDir);
-            logger.info("Deleted temporary tiles");
+            logger.info("Deleted temporary tiles at: {}", tempTileDir);
         } else if ("Zip".equals(handling)) {
             UtilityFunctions.zipTilesAndMove(tempTileDir);
             UtilityFunctions.deleteTilesAndFolder(tempTileDir);
-            logger.info("Zipped and archived temporary tiles");
+            logger.info("Zipped and archived temporary tiles from: {}", tempTileDir);
         } else {
-            logger.info("Keeping temporary tiles");
+            logger.info("Keeping temporary tiles at: {}", tempTileDir);
         }
     }
 }

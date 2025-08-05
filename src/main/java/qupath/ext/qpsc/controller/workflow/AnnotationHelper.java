@@ -1,5 +1,3 @@
-
-// File: qupath/ext/qpsc/controller/workflow/AnnotationHelper.java
 package qupath.ext.qpsc.controller.workflow;
 
 import javafx.application.Platform;
@@ -23,14 +21,43 @@ import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
 
 /**
- * Helper class for annotation management.
+ * Helper class for annotation management in the workflow.
+ *
+ * <p>This class provides utilities for:
+ * <ul>
+ *   <li>Ensuring valid annotations exist before acquisition</li>
+ *   <li>Running automatic tissue detection if configured</li>
+ *   <li>Validating annotation classes and properties</li>
+ *   <li>Auto-naming unnamed annotations</li>
+ * </ul>
+ *
+ * <p>Valid annotation classes are "Tissue", "Scanned Area", and "Bounding Box".
+ * These represent different types of regions that can be acquired.
+ *
+ * @author Mike Nelson
+ * @since 1.0
  */
 public class AnnotationHelper {
     private static final Logger logger = LoggerFactory.getLogger(AnnotationHelper.class);
+
+    /** Valid annotation classes that can be used for acquisition */
     private static final String[] VALID_ANNOTATION_CLASSES = {"Tissue", "Scanned Area", "Bounding Box"};
 
     /**
-     * Ensures annotations exist - either collects existing ones or creates new via tissue detection.
+     * Ensures annotations exist for acquisition.
+     *
+     * <p>This method follows this logic:
+     * <ol>
+     *   <li>Check for existing valid annotations</li>
+     *   <li>If none found, check for configured tissue detection script</li>
+     *   <li>If no script configured, prompt user to select one</li>
+     *   <li>Run tissue detection to create annotations</li>
+     *   <li>Ensure all annotations have names</li>
+     * </ol>
+     *
+     * @param gui QuPath GUI instance
+     * @param macroPixelSize Pixel size of macro image in micrometers
+     * @return List of valid annotations (may be empty if none created)
      */
     public static List<PathObject> ensureAnnotationsExist(QuPathGUI gui, double macroPixelSize) {
         logger.info("Ensuring annotations exist for acquisition");
@@ -58,9 +85,11 @@ public class AnnotationHelper {
             try {
                 logger.info("Running tissue detection script: {}", tissueScript);
 
+                // Get current image pixel size
                 double pixelSize = gui.getImageData().getServer()
                         .getPixelCalibration().getAveragedPixelSizeMicrons();
 
+                // Calculate script paths and modify script with parameters
                 Map<String, String> scriptPaths = MinorFunctions.calculateScriptPaths(tissueScript);
                 String modifiedScript = UtilityFunctions.modifyTissueDetectScript(
                         tissueScript,
@@ -68,10 +97,11 @@ public class AnnotationHelper {
                         scriptPaths.get("jsonTissueClassfierPathString")
                 );
 
+                // Run the script
                 gui.runScript(null, modifiedScript);
                 logger.info("Tissue detection completed");
 
-                // Re-collect annotations
+                // Re-collect annotations after tissue detection
                 annotations = getCurrentValidAnnotations();
                 logger.info("Found {} annotations after tissue detection", annotations.size());
 
@@ -98,6 +128,14 @@ public class AnnotationHelper {
 
     /**
      * Gets current valid annotations from the image hierarchy.
+     *
+     * <p>Valid annotations must:
+     * <ul>
+     *   <li>Have a non-empty ROI</li>
+     *   <li>Have one of the valid path classes</li>
+     * </ul>
+     *
+     * @return List of valid annotations
      */
     public static List<PathObject> getCurrentValidAnnotations() {
         var annotations = QP.getAnnotationObjects().stream()
@@ -114,6 +152,12 @@ public class AnnotationHelper {
 
     /**
      * Ensures all annotations have names.
+     *
+     * <p>Unnamed annotations are given auto-generated names based on their
+     * class and centroid position. This ensures unique identification during
+     * acquisition and file organization.
+     *
+     * @param annotations List of annotations to check and name
      */
     private static void ensureAnnotationNames(List<PathObject> annotations) {
         int unnamedCount = 0;
@@ -122,6 +166,7 @@ public class AnnotationHelper {
                 String className = ann.getPathClass() != null ?
                         ann.getPathClass().getName() : "Annotation";
 
+                // Create name based on class and position
                 String name = String.format("%s_%d_%d",
                         className,
                         Math.round(ann.getROI().getCentroidX()),
@@ -140,6 +185,11 @@ public class AnnotationHelper {
 
     /**
      * Prompts user to select a tissue detection script.
+     *
+     * <p>Shows a dialog asking if the user wants to run automatic tissue detection,
+     * and if so, allows them to select a Groovy script file.
+     *
+     * @return Path to selected script or null if cancelled
      */
     private static String promptForTissueDetectionScript() {
         CompletableFuture<String> future = new CompletableFuture<>();
@@ -156,6 +206,7 @@ public class AnnotationHelper {
                 return;
             }
 
+            // Show file chooser for script selection
             javafx.stage.FileChooser fileChooser = new javafx.stage.FileChooser();
             fileChooser.setTitle("Select Tissue Detection Script");
             fileChooser.getExtensionFilters().addAll(

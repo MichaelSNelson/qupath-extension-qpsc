@@ -1,4 +1,3 @@
-// File: qupath/ext/qpsc/controller/workflow/AcquisitionManager.java
 package qupath.ext.qpsc.controller.workflow;
 
 import javafx.application.Platform;
@@ -35,50 +34,101 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 /**
- * Manages the acquisition phase of the workflow.
+ * Manages the acquisition phase of the microscope workflow.
+ *
+ * <p>This class orchestrates the complete acquisition process including:
+ * <ul>
+ *   <li>Annotation validation with user confirmation</li>
+ *   <li>Rotation angle configuration for multi-modal imaging</li>
+ *   <li>Tile generation and transformation to stage coordinates</li>
+ *   <li>Acquisition monitoring with progress tracking</li>
+ *   <li>Automatic stitching queue management</li>
+ *   <li>Error handling and user cancellation support</li>
+ * </ul>
+ *
+ * <p>The acquisition process is performed sequentially for each annotation to ensure
+ * proper resource management and allow for user intervention if needed.
+ *
+ * @author Mike Nelson
+ * @since 1.0
  */
 public class AcquisitionManager {
     private static final Logger logger = LoggerFactory.getLogger(AcquisitionManager.class);
+
+    /** Valid annotation classes that can be used for acquisition */
     private static final String[] VALID_ANNOTATION_CLASSES = {"Tissue", "Scanned Area", "Bounding Box"};
-    private static final int ACQUISITION_TIMEOUT_MS = 300000; // 5 minutes
 
-    private final QuPathGUI gui;
-    private final WorkflowState state;
+    /** Maximum time to wait for acquisition completion (5 minutes) */
+    private static final int ACQUISITION_TIMEOUT_MS = 300000;
 
-    // Single-threaded executor for stitching
+    /** Single-threaded executor for stitching operations to prevent overwhelming system resources */
     private static final ExecutorService STITCH_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "stitching-queue");
         t.setDaemon(true);
         return t;
     });
 
+    private final QuPathGUI gui;
+    private final WorkflowState state;
+
+    /**
+     * Creates a new acquisition manager.
+     *
+     * @param gui The QuPath GUI instance
+     * @param state The current workflow state containing all necessary information
+     */
     public AcquisitionManager(QuPathGUI gui, WorkflowState state) {
         this.gui = gui;
         this.state = state;
     }
 
     /**
-     * Executes the acquisition phase.
+     * Executes the complete acquisition phase.
+     *
+     * <p>This method orchestrates the entire acquisition workflow:
+     * <ol>
+     *   <li>Validates annotations with user confirmation</li>
+     *   <li>Retrieves rotation angles for the imaging modality</li>
+     *   <li>Prepares tiles for acquisition</li>
+     *   <li>Processes each annotation sequentially</li>
+     * </ol>
+     *
+     * @return CompletableFuture containing the updated workflow state, or null if cancelled/failed
      */
     public CompletableFuture<WorkflowState> execute() {
+        logger.info("Starting acquisition phase");
+
         return validateAnnotations()
                 .thenCompose(valid -> {
-                    if (!valid) return CompletableFuture.completedFuture(null);
+                    if (!valid) {
+                        logger.info("Annotation validation failed or cancelled");
+                        return CompletableFuture.completedFuture(null);
+                    }
                     return getRotationAngles();
                 })
                 .thenCompose(this::prepareForAcquisition)
                 .thenCompose(this::processAnnotations)
                 .thenApply(success -> {
-                    if (success) return state;
+                    if (success) {
+                        logger.info("Acquisition phase completed successfully");
+                        return state;
+                    }
                     throw new RuntimeException("Acquisition failed or was cancelled");
                 });
     }
 
     /**
-     * Validates annotations with user confirmation.
+     * Validates annotations with user confirmation dialog.
+     *
+     * <p>Shows a dialog listing all valid annotations and allows the user to confirm
+     * before proceeding with acquisition.
+     *
+     * @return CompletableFuture with true if user confirms, false if cancelled
      */
     private CompletableFuture<Boolean> validateAnnotations() {
         CompletableFuture<Boolean> future = new CompletableFuture<>();
+
+        logger.debug("Validating annotations with classes: {}", Arrays.toString(VALID_ANNOTATION_CLASSES));
 
         UIFunctions.checkValidAnnotationsGUI(
                 Arrays.asList(VALID_ANNOTATION_CLASSES),
@@ -89,7 +139,12 @@ public class AcquisitionManager {
     }
 
     /**
-     * Gets rotation angles for the modality.
+     * Retrieves rotation angles configured for the imaging modality.
+     *
+     * <p>For polarized light imaging or other multi-angle acquisitions, this method
+     * retrieves the configured rotation angles and exposure times.
+     *
+     * @return CompletableFuture containing list of rotation angles with exposure settings
      */
     private CompletableFuture<List<RotationManager.TickExposure>> getRotationAngles() {
         RotationManager rotationManager = new RotationManager(state.sample.modality());
@@ -100,6 +155,17 @@ public class AcquisitionManager {
 
     /**
      * Prepares annotations for acquisition by regenerating tiles.
+     *
+     * <p>This method:
+     * <ul>
+     *   <li>Retrieves current valid annotations</li>
+     *   <li>Cleans up old tiles and directories</li>
+     *   <li>Creates fresh tiles based on camera FOV</li>
+     *   <li>Transforms tile coordinates to stage space</li>
+     * </ul>
+     *
+     * @param angleExposures List of rotation angles, or null for single acquisition
+     * @return CompletableFuture with angle exposures for next phase
      */
     private CompletableFuture<List<RotationManager.TickExposure>> prepareForAcquisition(
             List<RotationManager.TickExposure> angleExposures) {
@@ -108,14 +174,16 @@ public class AcquisitionManager {
             logger.info("Preparing for acquisition with {} angles",
                     angleExposures != null ? angleExposures.size() : 1);
 
-            // Regenerate tiles
+            // Get current annotations
             List<PathObject> currentAnnotations = AnnotationHelper.getCurrentValidAnnotations();
 
             if (currentAnnotations.isEmpty()) {
                 throw new RuntimeException("No valid annotations for acquisition");
             }
 
-            // Delete old tiles and regenerate
+            logger.info("Found {} annotations to acquire", currentAnnotations.size());
+
+            // Clean up old tiles
             TileHelper.deleteAllTiles(gui, state.sample.modality());
             TileHelper.cleanupStaleFolders(
                     state.projectInfo.getTempTileDirectory(),
@@ -131,7 +199,7 @@ public class AcquisitionManager {
                     state.pixelSize
             );
 
-            // Transform tile configurations
+            // Transform tile configurations to stage coordinates
             try {
                 List<String> modifiedDirs = TransformationFunctions.transformTileConfiguration(
                         state.projectInfo.getTempTileDirectory(),
@@ -139,6 +207,7 @@ public class AcquisitionManager {
                 );
                 logger.info("Transformed tile configurations for: {}", modifiedDirs);
             } catch (IOException e) {
+                logger.error("Failed to transform tile configurations", e);
                 throw new RuntimeException("Failed to transform tile configurations", e);
             }
 
@@ -149,15 +218,27 @@ public class AcquisitionManager {
 
     /**
      * Processes all annotations for acquisition.
+     *
+     * <p>Annotations are processed sequentially to:
+     * <ul>
+     *   <li>Provide clear progress feedback</li>
+     *   <li>Allow cancellation between annotations</li>
+     *   <li>Prevent resource exhaustion</li>
+     *   <li>Enable immediate stitching after each acquisition</li>
+     * </ul>
+     *
+     * @param angleExposures Rotation angles for multi-modal acquisition
+     * @return CompletableFuture with true if all successful, false if any failed/cancelled
      */
     private CompletableFuture<Boolean> processAnnotations(
             List<RotationManager.TickExposure> angleExposures) {
 
         if (state.annotations.isEmpty()) {
+            logger.warn("No annotations to process");
             return CompletableFuture.completedFuture(false);
         }
 
-        // Show progress notification
+        // Show initial progress notification
         showAcquisitionStartNotification(angleExposures);
 
         // Process each annotation sequentially
@@ -181,7 +262,7 @@ public class AcquisitionManager {
                 return performSingleAnnotationAcquisition(annotation, angleExposures)
                         .thenApply(success -> {
                             if (success) {
-                                // Launch stitching asynchronously
+                                // Launch stitching asynchronously after successful acquisition
                                 launchStitching(annotation, angleExposures);
                             }
                             return success;
@@ -194,6 +275,17 @@ public class AcquisitionManager {
 
     /**
      * Performs acquisition for a single annotation.
+     *
+     * <p>This method:
+     * <ul>
+     *   <li>Builds the acquisition command with all parameters</li>
+     *   <li>Starts the acquisition on the microscope</li>
+     *   <li>Monitors progress with cancellation support</li>
+     * </ul>
+     *
+     * @param annotation The annotation to acquire
+     * @param angleExposures Rotation angles for this acquisition
+     * @return CompletableFuture with true if successful, false if failed/cancelled
      */
     private CompletableFuture<Boolean> performSingleAnnotationAcquisition(
             PathObject annotation,
@@ -229,6 +321,19 @@ public class AcquisitionManager {
 
     /**
      * Monitors acquisition progress with cancellation support.
+     *
+     * <p>This method:
+     * <ul>
+     *   <li>Calculates expected file count based on tiles and angles</li>
+     *   <li>Shows a progress bar with cancel button</li>
+     *   <li>Polls the microscope server for status updates</li>
+     *   <li>Handles user cancellation requests</li>
+     * </ul>
+     *
+     * @param annotation The annotation being acquired
+     * @param angleExposures Rotation angles for calculating expected files
+     * @return true if completed successfully, false if cancelled/failed
+     * @throws IOException if communication with microscope fails
      */
     private boolean monitorAcquisition(PathObject annotation,
                                        List<RotationManager.TickExposure> angleExposures) throws IOException {
@@ -255,7 +360,7 @@ public class AcquisitionManager {
         // Create progress counter
         AtomicInteger progressCounter = new AtomicInteger(0);
 
-        // Show progress bar
+        // Show progress bar with cancel support
         UIFunctions.ProgressHandle progressHandle = null;
         if (expectedFiles > 0) {
             progressHandle = UIFunctions.showProgressBarAsync(
@@ -278,11 +383,11 @@ public class AcquisitionManager {
         }
 
         try {
-            // Monitor acquisition
+            // Monitor acquisition with regular status updates
             MicroscopeSocketClient.AcquisitionState finalState =
                     socketClient.monitorAcquisition(
                             progress -> progressCounter.set(progress.current),
-                            500,    // Poll every 500ms
+                            500,    // Poll every 500ms for responsive UI
                             ACQUISITION_TIMEOUT_MS
                     );
 
@@ -306,6 +411,7 @@ public class AcquisitionManager {
             }
 
         } catch (InterruptedException e) {
+            logger.error("Acquisition monitoring interrupted", e);
             throw new RuntimeException(e);
         } finally {
             if (progressHandle != null) {
@@ -315,17 +421,27 @@ public class AcquisitionManager {
     }
 
     /**
-     * Launches stitching for completed acquisition.
+     * Launches stitching for a completed acquisition.
+     *
+     * <p>Stitching is performed asynchronously on a dedicated thread to:
+     * <ul>
+     *   <li>Allow the next acquisition to start immediately</li>
+     *   <li>Prevent UI blocking during intensive stitching operations</li>
+     *   <li>Process stitching jobs sequentially to manage resources</li>
+     * </ul>
+     *
+     * @param annotation The annotation that was acquired
+     * @param angleExposures Rotation angles used in acquisition
      */
     private void launchStitching(PathObject annotation,
                                  List<RotationManager.TickExposure> angleExposures) {
 
-        // Extract rotation angles
+        // Extract rotation angles from tick/exposure data
         List<Double> rotationAngles = angleExposures.stream()
                 .map(ae -> ae.ticks)
                 .collect(Collectors.toList());
 
-        // Get required parameters
+        // Get required parameters for stitching
         String configFile = QPPreferenceDialog.getMicroscopeConfigFileProperty();
         MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(configFile);
         double pixelSize = mgr.getDouble("imagingMode", state.sample.modality(), "pixelSize_um");
@@ -350,6 +466,9 @@ public class AcquisitionManager {
 
     // UI notification methods
 
+    /**
+     * Shows initial notification about acquisition start.
+     */
     private void showAcquisitionStartNotification(List<RotationManager.TickExposure> angleExposures) {
         Platform.runLater(() -> {
             Alert alert = new Alert(Alert.AlertType.INFORMATION);
@@ -371,6 +490,9 @@ public class AcquisitionManager {
         });
     }
 
+    /**
+     * Shows progress notification for current annotation.
+     */
     private void showProgressNotification(int current, int total, String annotationName) {
         Platform.runLater(() -> {
             String message = String.format("Acquiring annotation %d of %d: %s",
@@ -379,6 +501,9 @@ public class AcquisitionManager {
         });
     }
 
+    /**
+     * Shows error notification for failed acquisition.
+     */
     private void showAcquisitionError(String annotationName, String errorMessage) {
         Platform.runLater(() ->
                 UIFunctions.notifyUserOfError(
@@ -388,6 +513,9 @@ public class AcquisitionManager {
         );
     }
 
+    /**
+     * Shows notification that acquisition was cancelled.
+     */
     private void showCancellationNotification() {
         Platform.runLater(() ->
                 UIFunctions.notifyUserOfError(
