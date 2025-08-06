@@ -406,7 +406,7 @@ public class GreenBoxDetector {
 
         // Draw detected box
         g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 1.0f));
-        g.setColor(Color.RED);
+        g.setColor(Color.MAGENTA);
         g.setStroke(new BasicStroke(3));
         g.drawRect((int)box.getBoundsX(), (int)box.getBoundsY(),
                 (int)box.getBoundsWidth(), (int)box.getBoundsHeight());

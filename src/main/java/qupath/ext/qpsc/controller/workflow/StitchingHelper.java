@@ -40,12 +40,17 @@ public class StitchingHelper {
      * Performs stitching for a single annotation across all rotation angles.
      *
      * <p>For multi-angle acquisitions (e.g., polarized light), this method
-     * stitches each angle separately and sequentially.
+     * performs a single batch stitching operation that processes all angles
+     * at once. The BasicStitching extension will create separate output files
+     * for each angle, which are then renamed and imported into the project.</p>
+     *
+     * <p>For single acquisitions without rotation angles, standard stitching
+     * is performed using the annotation name as the matching pattern.</p>
      *
      * @param annotation The annotation that was acquired
      * @param sample Sample setup information
      * @param modeWithIndex Imaging mode with index suffix
-     * @param rotationAngles List of rotation angles (null for single acquisition)
+     * @param rotationAngles List of rotation angles (null or empty for single acquisition)
      * @param pixelSize Pixel size in micrometers
      * @param gui QuPath GUI instance
      * @param project QuPath project to update
@@ -66,102 +71,86 @@ public class StitchingHelper {
             logger.info("Stitching {} angles for annotation: {}",
                     rotationAngles.size(), annotation.getName());
 
-            // Stitch each angle sequentially to manage resources
-            CompletableFuture<Void> stitchChain = CompletableFuture.completedFuture(null);
+            // For multi-angle acquisitions, do ONE batch stitch with "." as matching string
+            return CompletableFuture.runAsync(() -> {
+                try {
+                    String annotationName = annotation.getName();
 
-            for (Double angle : rotationAngles) {
-                stitchChain = stitchChain.thenCompose(v ->
-                        stitchSingleAngle(
-                                annotation, angle, sample,
-                                modeWithIndex, pixelSize, gui, project, executor
-                        )
-                );
-            }
+                    logger.info("Performing batch stitching for {} with {} angles",
+                            annotationName, rotationAngles.size());
 
-            return stitchChain;
+                    // Get compression type from preferences
+                    String compression = String.valueOf(
+                            QPPreferenceDialog.getCompressionTypeProperty());
+
+                    // Perform ONE batch stitching operation with "." to process all angles
+                    String outPath = UtilityFunctions.stitchImagesAndUpdateProject(
+                            sample.projectsFolder().getAbsolutePath(),
+                            sample.sampleName(),
+                            modeWithIndex,
+                            annotationName,
+                            ".",  // Use "." to process ALL subdirectories at once
+                            gui,
+                            project,
+                            compression,
+                            pixelSize,
+                            1  // downsample factor
+                    );
+
+                    logger.info("Batch stitching completed for {}, output: {}",
+                            annotationName, outPath);
+
+                } catch (Exception e) {
+                    logger.error("Stitching failed for {}", annotation.getName(), e);
+                    Platform.runLater(() ->
+                            UIFunctions.notifyUserOfError(
+                                    String.format("Stitching failed for %s: %s",
+                                            annotation.getName(), e.getMessage()),
+                                    "Stitching Error"
+                            )
+                    );
+                }
+            }, executor);
         } else {
-            // Single stitch for non-rotational acquisition
-            return stitchSingleAngle(
-                    annotation, null, sample,
-                    modeWithIndex, pixelSize, gui, project, executor
-            );
+            // Single stitch for non-rotational acquisition (no angles)
+            return CompletableFuture.runAsync(() -> {
+                try {
+                    String annotationName = annotation.getName();
+
+                    logger.info("Stitching single acquisition for {}", annotationName);
+
+                    String compression = String.valueOf(
+                            QPPreferenceDialog.getCompressionTypeProperty());
+
+                    // For non-angle acquisitions, use annotation name as matching string
+                    String outPath = UtilityFunctions.stitchImagesAndUpdateProject(
+                            sample.projectsFolder().getAbsolutePath(),
+                            sample.sampleName(),
+                            modeWithIndex,
+                            annotationName,
+                            annotationName,  // Use annotation name as matching string
+                            gui,
+                            project,
+                            compression,
+                            pixelSize,
+                            1
+                    );
+
+                    logger.info("Stitching completed for {}, output: {}",
+                            annotationName, outPath);
+
+                } catch (Exception e) {
+                    logger.error("Stitching failed for {}", annotation.getName(), e);
+                    Platform.runLater(() ->
+                            UIFunctions.notifyUserOfError(
+                                    String.format("Stitching failed for %s: %s",
+                                            annotation.getName(), e.getMessage()),
+                                    "Stitching Error"
+                            )
+                    );
+                }
+            }, executor);
         }
     }
 
-    /**
-     * Stitches a single angle for an annotation.
-     *
-     * <p>This method:
-     * <ol>
-     *   <li>Determines the matching string for tile selection</li>
-     *   <li>Calls the stitching utility with appropriate parameters</li>
-     *   <li>Updates the QuPath project with the result</li>
-     *   <li>Handles errors with user notification</li>
-     * </ol>
-     *
-     * @param annotation The annotation to stitch
-     * @param angle Rotation angle (null for non-rotational)
-     * @param sample Sample information
-     * @param modeWithIndex Imaging mode identifier
-     * @param pixelSize Pixel size in micrometers
-     * @param gui QuPath GUI instance
-     * @param project QuPath project
-     * @param executor Executor for async execution
-     * @return CompletableFuture that completes when stitching is done
-     */
-    private static CompletableFuture<Void> stitchSingleAngle(
-            PathObject annotation,
-            Double angle,
-            SampleSetupController.SampleSetupResult sample,
-            String modeWithIndex,
-            double pixelSize,
-            QuPathGUI gui,
-            Project<BufferedImage> project,
-            ExecutorService executor) {
-
-        return CompletableFuture.runAsync(() -> {
-            try {
-                String annotationName = annotation.getName();
-                // For multi-angle, use angle as matching string; otherwise use annotation name
-                String matchingString = angle != null ? String.valueOf(angle) : annotationName;
-
-                logger.info("Stitching {} for modality {} (angle: {})",
-                        annotationName, modeWithIndex, angle);
-
-                // Get compression type from preferences
-                String compression = String.valueOf(
-                        QPPreferenceDialog.getCompressionTypeProperty());
-
-                // Perform stitching
-                String outPath = UtilityFunctions.stitchImagesAndUpdateProject(
-                        sample.projectsFolder().getAbsolutePath(),
-                        sample.sampleName(),
-                        modeWithIndex,
-                        annotationName,
-                        matchingString,
-                        gui,
-                        project,
-                        compression,
-                        pixelSize,
-                        1  // downsample factor
-                );
-
-                logger.info("Stitching completed for {} (angle: {}), output: {}",
-                        annotationName, angle, outPath);
-
-            } catch (Exception e) {
-                logger.error("Stitching failed for {} (angle: {})",
-                        annotation.getName(), angle, e);
-
-                // Notify user of error on JavaFX thread
-                Platform.runLater(() ->
-                        UIFunctions.notifyUserOfError(
-                                String.format("Stitching failed for %s: %s",
-                                        annotation.getName(), e.getMessage()),
-                                "Stitching Error"
-                        )
-                );
-            }
-        }, executor);
-    }
 }
