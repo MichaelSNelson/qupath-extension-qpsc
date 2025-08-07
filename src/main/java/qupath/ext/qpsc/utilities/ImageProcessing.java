@@ -4,6 +4,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qupath.lib.gui.QuPathGUI;
 import qupath.lib.roi.interfaces.ROI;
+import qupath.lib.scripting.QP;
 
 import java.awt.*;
 import java.nio.file.Files;
@@ -99,7 +100,7 @@ public class ImageProcessing {
 
             // Remove the Bounds annotation to clean up
             hierarchy.removeObject(boundsAnnotation, true);
-
+            QP.resetSelection();
             // Fire update to refresh the viewer
             hierarchy.fireHierarchyChangedEvent(gui.getViewer());
 
