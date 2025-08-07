@@ -701,7 +701,11 @@ public class MicroscopeAlignmentWorkflow {
                 String scriptDir = new File(QPPreferenceDialog.getTissueDetectionScriptProperty()).getParent();
                 if (scriptDir != null) {
                     logger.info("Detecting data bounds...");
-                    dataBounds = ImageProcessing.detectOcus40DataBounds(gui, scriptDir);
+                    dataBounds = UIFunctions.executeWithProgress(
+                            "Processing Image",
+                            "Detecting image boundaries...\nAnalyzing image data - this may take a moment for large images.",
+                            () -> ImageProcessing.detectOcus40DataBounds(gui, scriptDir)
+                    );
                 }
 
                 if (dataBounds == null) {

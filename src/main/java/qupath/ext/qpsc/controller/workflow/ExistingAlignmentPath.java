@@ -408,13 +408,17 @@ public class ExistingAlignmentPath {
                     File scriptFile = new File(tissueScriptPath);
                     String scriptDirectory = scriptFile.getParent();
 
-                    Rectangle bounds = ImageProcessing.detectOcus40DataBounds(gui, scriptDirectory);
+                    Rectangle bounds = UIFunctions.executeWithProgress(
+                            "Processing Image",
+                            "Detecting image boundaries...\nThis may take a moment for large images.",
+                            () -> ImageProcessing.detectOcus40DataBounds(gui, scriptDirectory)
+                    );
                     if (bounds != null) {
                         return bounds;
                     }
                 }
             } catch (Exception e) {
-                logger.warn("Ocus40 detection failed, using calculation", e);
+                logger.warn("Ocus40 detection failed!!!! Using green box without changes to bounds, which will likely be wrong", e);
             }
         }
 

@@ -33,17 +33,13 @@ import javafx.geometry.Insets;
 
 import java.util.*;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import javafx.scene.control.Separator;
 
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -568,5 +564,95 @@ public class UIFunctions {
         );
         var result = dialog.showAndWait();
         return result.isPresent() && result.get().getButtonData() == ButtonBar.ButtonData.YES;
+    }
+
+    /**
+     * Executes a long-running task with a progress dialog.
+     *
+     * @param title Dialog title
+     * @param message Progress message to display
+     * @param task The task to execute
+     * @return The result of the task
+     */
+    public static <T> T executeWithProgress(String title, String message, Callable<T> task) {
+        if (Platform.isFxApplicationThread()) {
+            // If on FX thread, show non-blocking progress
+            Alert progressAlert = new Alert(Alert.AlertType.INFORMATION);
+            progressAlert.setTitle(title);
+            progressAlert.setHeaderText(message);
+            progressAlert.setContentText("Please wait...");
+
+            ProgressBar progressBar = new ProgressBar();
+            progressBar.setProgress(ProgressBar.INDETERMINATE_PROGRESS);
+            progressBar.setPrefWidth(300);
+
+            VBox vbox = new VBox(10);
+            vbox.setAlignment(Pos.CENTER);
+            vbox.getChildren().add(progressBar);
+
+            progressAlert.getDialogPane().setContent(vbox);
+            progressAlert.getButtonTypes().clear();
+            progressAlert.show();
+
+            try {
+                T result = task.call();
+                progressAlert.close();
+                return result;
+            } catch (Exception e) {
+                progressAlert.close();
+                throw new RuntimeException(e);
+            }
+        } else {
+            // If not on FX thread, use CompletableFuture
+            CompletableFuture<T> future = new CompletableFuture<>();
+            CountDownLatch latch = new CountDownLatch(1);
+
+            Platform.runLater(() -> {
+                Alert progressAlert = new Alert(Alert.AlertType.INFORMATION);
+                progressAlert.setTitle(title);
+                progressAlert.setHeaderText(message);
+                progressAlert.setContentText("Please wait...");
+
+                ProgressBar progressBar = new ProgressBar();
+                progressBar.setProgress(ProgressBar.INDETERMINATE_PROGRESS);
+                progressBar.setPrefWidth(300);
+
+                VBox vbox = new VBox(10);
+                vbox.setAlignment(Pos.CENTER);
+                vbox.getChildren().add(progressBar);
+
+                progressAlert.getDialogPane().setContent(vbox);
+                progressAlert.getButtonTypes().clear();
+                progressAlert.show();
+                latch.countDown();
+
+                // Execute task in background
+                CompletableFuture.supplyAsync(() -> {
+                    try {
+                        return task.call();
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
+                }).thenAccept(result -> {
+                    Platform.runLater(() -> {
+                        progressAlert.close();
+                        future.complete(result);
+                    });
+                }).exceptionally(ex -> {
+                    Platform.runLater(() -> {
+                        progressAlert.close();
+                        future.completeExceptionally(ex);
+                    });
+                    return null;
+                });
+            });
+
+            try {
+                latch.await(); // Wait for dialog to be shown
+                return future.get();
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }
     }
 }
