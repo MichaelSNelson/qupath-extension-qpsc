@@ -378,7 +378,7 @@ public class QPProjectFunctions {
      *
      * <p>Filename patterns that force BRIGHTFIELD_H_E type:</p>
      * <ul>
-     *   <li>Contains "ppm" (case-insensitive) - Polarized light microscopy</li>
+     *   <li>Contains "modalities" (case-insensitive) - Polarized light microscopy</li>
      *   <li>Contains "_90" or "90." - 90-degree rotation brightfield</li>
      *   <li>Contains "_bf" - Brightfield designation</li>
      *   <li>Contains "brightfield" - Explicit brightfield naming</li>
@@ -397,9 +397,9 @@ public class QPProjectFunctions {
         String fileName = imageFile.getName().toLowerCase();
 
         // Check if this is a PPM or BF modality based on the filename
-        // PPM files typically contain "ppm" in the name
+        // PPM files typically contain "modalities" in the name
         // BF (brightfield) files typically contain "bf" or "90" (90 degree angle)
-        if (fileName.contains("ppm") ||
+        if (fileName.contains("modalities") ||
                 fileName.contains("_90") ||
                 fileName.contains("90.") ||
                 fileName.contains("_bf") ||

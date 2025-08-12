@@ -2,7 +2,7 @@ package qupath.ext.qpsc.service;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import qupath.ext.qpsc.model.RotationManager;
+import qupath.ext.qpsc.utilities.RotationManager;
 
 import java.util.*;
 import java.util.stream.Collectors;

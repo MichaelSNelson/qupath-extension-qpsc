@@ -1,4 +1,4 @@
-package qupath.ext.qpsc.ui;
+package qupath.ext.qpsc.modalities.ppm.ui;
 
 import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
@@ -11,9 +11,9 @@ import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 import javafx.stage.Modality;
-import javafx.util.converter.IntegerStringConverter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import qupath.ext.qpsc.modalities.ppm.PPMPreferences;
 import qupath.ext.qpsc.preferences.PersistentPreferences;
 
 import java.util.ArrayList;
@@ -116,9 +116,9 @@ public class PPMAngleSelectionController {
 
             // Row 1: Minus angle
             CheckBox minusCheck = new CheckBox(String.format("%.1f 'degrees'", minusAngle));
-            minusCheck.setSelected(PersistentPreferences.getPPMMinusSelected());
+            minusCheck.setSelected(PPMPreferences.getPPMMinusSelected());
 
-            TextField minusExposureField = new TextField(String.valueOf(PersistentPreferences.getPPMMinusExposureMs()));
+            TextField minusExposureField = new TextField(String.valueOf(PPMPreferences.getPPMMinusExposureMs()));
             minusExposureField.setTextFormatter(new TextFormatter<>(integerFilter));
             minusExposureField.setPrefWidth(80);
             minusExposureField.setDisable(!minusCheck.isSelected());
@@ -128,9 +128,9 @@ public class PPMAngleSelectionController {
 
             // Row 2: Zero angle
             CheckBox zeroCheck = new CheckBox("0 'degrees'");
-            zeroCheck.setSelected(PersistentPreferences.getPPMZeroSelected());
+            zeroCheck.setSelected(PPMPreferences.getPPMZeroSelected());
 
-            TextField zeroExposureField = new TextField(String.valueOf(PersistentPreferences.getPPMZeroExposureMs()));
+            TextField zeroExposureField = new TextField(String.valueOf(PPMPreferences.getPPMZeroExposureMs()));
             zeroExposureField.setTextFormatter(new TextFormatter<>(integerFilter));
             zeroExposureField.setPrefWidth(80);
             zeroExposureField.setDisable(!zeroCheck.isSelected());
@@ -140,9 +140,9 @@ public class PPMAngleSelectionController {
 
             // Row 3: Plus angle
             CheckBox plusCheck = new CheckBox(String.format("%.1f 'degrees'", plusAngle));
-            plusCheck.setSelected(PersistentPreferences.getPPMPlusSelected());
+            plusCheck.setSelected(PPMPreferences.getPPMPlusSelected());
 
-            TextField plusExposureField = new TextField(String.valueOf(PersistentPreferences.getPPMPlusExposureMs()));
+            TextField plusExposureField = new TextField(String.valueOf(PPMPreferences.getPPMPlusExposureMs()));
             plusExposureField.setTextFormatter(new TextFormatter<>(integerFilter));
             plusExposureField.setPrefWidth(80);
             plusExposureField.setDisable(!plusCheck.isSelected());
@@ -152,9 +152,9 @@ public class PPMAngleSelectionController {
 
             // Row 4: Brightfield (90 degrees)
             CheckBox brightfieldCheck = new CheckBox("90 'degrees' (Brightfield)");
-            brightfieldCheck.setSelected(PersistentPreferences.getPPMBrightfieldSelected());
+            brightfieldCheck.setSelected(PPMPreferences.getPPMBrightfieldSelected());
 
-            TextField brightfieldExposureField = new TextField(String.valueOf(PersistentPreferences.getPPMBrightfieldExposureMs()));
+            TextField brightfieldExposureField = new TextField(String.valueOf(PPMPreferences.getPPMBrightfieldExposureMs()));
             brightfieldExposureField.setTextFormatter(new TextFormatter<>(integerFilter));
             brightfieldExposureField.setPrefWidth(80);
             brightfieldExposureField.setDisable(!brightfieldCheck.isSelected());
@@ -166,28 +166,28 @@ public class PPMAngleSelectionController {
             minusCheck.selectedProperty().addListener((obs, old, selected) -> {
                 minusExposureField.setDisable(!selected);
                 if (!selected) minusExposureField.clear();
-                PersistentPreferences.setPPMMinusSelected(selected);
+                PPMPreferences.setPPMMinusSelected(selected);
                 logger.debug("PPM minus tick selection updated to: {}", selected);
             });
 
             zeroCheck.selectedProperty().addListener((obs, old, selected) -> {
                 zeroExposureField.setDisable(!selected);
                 if (!selected) zeroExposureField.clear();
-                PersistentPreferences.setPPMZeroSelected(selected);
+                PPMPreferences.setPPMZeroSelected(selected);
                 logger.debug("PPM zero tick selection updated to: {}", selected);
             });
 
             plusCheck.selectedProperty().addListener((obs, old, selected) -> {
                 plusExposureField.setDisable(!selected);
                 if (!selected) plusExposureField.clear();
-                PersistentPreferences.setPPMPlusSelected(selected);
+                PPMPreferences.setPPMPlusSelected(selected);
                 logger.debug("PPM plus tick selection updated to: {}", selected);
             });
 
             brightfieldCheck.selectedProperty().addListener((obs, old, selected) -> {
                 brightfieldExposureField.setDisable(!selected);
                 if (!selected) brightfieldExposureField.clear();
-                PersistentPreferences.setPPMBrightfieldSelected(selected);
+                PPMPreferences.setPPMBrightfieldSelected(selected);
                 logger.debug("PPM brightfield selection updated to: {}", selected);
             });
 
@@ -196,7 +196,7 @@ public class PPMAngleSelectionController {
                 if (!newVal.isEmpty()) {
                     try {
                         int value = Integer.parseInt(newVal);
-                        PersistentPreferences.setPPMMinusExposureMs(value);
+                        PPMPreferences.setPPMMinusExposureMs(value);
                     } catch (NumberFormatException e) {
                         // Ignore - formatter should prevent this
                     }
@@ -207,7 +207,7 @@ public class PPMAngleSelectionController {
                 if (!newVal.isEmpty()) {
                     try {
                         int value = Integer.parseInt(newVal);
-                        PersistentPreferences.setPPMZeroExposureMs(value);
+                        PPMPreferences.setPPMZeroExposureMs(value);
                     } catch (NumberFormatException e) {
                         // Ignore
                     }
@@ -218,7 +218,7 @@ public class PPMAngleSelectionController {
                 if (!newVal.isEmpty()) {
                     try {
                         int value = Integer.parseInt(newVal);
-                        PersistentPreferences.setPPMPlusExposureMs(value);
+                        PPMPreferences.setPPMPlusExposureMs(value);
                     } catch (NumberFormatException e) {
                         // Ignore
                     }
@@ -229,7 +229,7 @@ public class PPMAngleSelectionController {
                 if (!newVal.isEmpty()) {
                     try {
                         int value = Integer.parseInt(newVal);
-                        PersistentPreferences.setPPMBrightfieldExposureMs(value);
+                        PPMPreferences.setPPMBrightfieldExposureMs(value);
                     } catch (NumberFormatException e) {
                         // Ignore
                     }

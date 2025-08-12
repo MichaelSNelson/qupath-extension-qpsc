@@ -2,7 +2,9 @@ package qupath.ext.qpsc.controller;
 
 import javafx.application.Platform;
 import javafx.scene.control.Alert;
-import qupath.ext.qpsc.model.RotationManager;
+import qupath.ext.qpsc.utilities.RotationManager;
+import qupath.ext.qpsc.modalities.common.ModalityHandler;
+import qupath.ext.qpsc.modalities.common.ModalityRegistry;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.service.AcquisitionCommandBuilder;
 import qupath.ext.qpsc.service.microscope.MicroscopeSocketClient;
@@ -26,20 +28,13 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
-import qupath.ext.qpsc.model.RotationManager;
 
 /**
- * Runs the full "bounding box" acquisition workflow using socket communication only:
- * <ol>
- *   <li>Ask user for sample details (name, folder, modality)</li>
- *   <li>Ask user for bounding-box coordinates and focus flag</li>
- *   <li>Create/open a QuPath project and import any open image</li>
- *   <li>Compute tiling grid and write TileConfiguration.txt</li>
- *   <li>Launch microscope acquisition via socket (async)</li>
- *   <li>When acquisition finishes, schedule stitching (async)</li>
- *   <li>When stitching finishes, notify user</li>
- *   <li>Zip or delete tiles per preference</li>
- * </ol>
+ * Runs the full "bounding box" acquisition workflow using socket communication only.
+ * Updated to use the new modality architecture for cleaner separation of concerns.
+ *
+ * @author Mike Nelson
+ * @version 4.0
  */
 public class BoundingBoxWorkflow {
 
@@ -113,7 +108,8 @@ public class BoundingBoxWorkflow {
                     Project<BufferedImage> project = (Project<BufferedImage>) pd.get("currentQuPathProject");
 
                     // 5) Compute frame size in microns from YAML
-                    MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(QPPreferenceDialog.getMicroscopeConfigFileProperty());
+                    MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(
+                            QPPreferenceDialog.getMicroscopeConfigFileProperty());
                     double pixelSize = mgr.getDouble("imagingMode", sample.modality(), "pixelSize_um");
 
                     // Get detector properties (width/height) from resources_LOCI
@@ -144,14 +140,30 @@ public class BoundingBoxWorkflow {
                         return;  // Exit the workflow
                     }
 
-                    // 7) Get rotation angles based on modality
-                    logger.info("Checking rotation requirements for modality: {}", sample.modality());
-                    RotationManager rotationManager = new RotationManager(sample.modality());
+                    // 7) Get modality handler and rotation angles
+                    logger.info("Getting modality handler for: {}", sample.modality());
+                    ModalityRegistry registry = ModalityRegistry.getInstance();
+                    ModalityHandler modalityHandler = registry.getHandler(sample.modality());
 
-                    rotationManager.getRotationTicksWithExposure(sample.modality())
-                            .thenApply(angleExposures -> {
-                                // Check if we have angle overrides from the dialog
-                                if (bb.angleOverrides() != null && !bb.angleOverrides().isEmpty()) {
+                    logger.info("Using modality handler: {} (requires rotation: {})",
+                            modalityHandler.getClass().getSimpleName(),
+                            modalityHandler.requiresRotation());
+
+                    // Get rotation angles if needed
+                    CompletableFuture<List<RotationManager.TickExposure>> anglesFuture;
+
+                    if (modalityHandler.requiresRotation()) {
+                        anglesFuture = modalityHandler.getRotationAngles(sample.modality(), mgr);
+                    } else {
+                        // No rotation needed
+                        anglesFuture = CompletableFuture.completedFuture(Collections.emptyList());
+                    }
+
+                    anglesFuture.thenApply(angleExposures -> {
+                                // Check if we have angle overrides from the dialog (PPM only)
+                                if (bb.angleOverrides() != null && !bb.angleOverrides().isEmpty() &&
+                                        ModalityRegistry.isPPMModality(sample.modality())) {
+
                                     logger.info("Using user-specified PPM angles: plus={}, minus={}",
                                             bb.angleOverrides().get("plus"),
                                             bb.angleOverrides().get("minus"));
@@ -198,20 +210,23 @@ public class BoundingBoxWorkflow {
                                     try {
                                         logger.info("Building acquisition command for socket communication");
 
-                                        // Build acquisition command with all necessary parameters
+                                        // Build acquisition command with base parameters
                                         AcquisitionCommandBuilder acquisitionBuilder = AcquisitionCommandBuilder.builder()
                                                 .yamlPath(configFileLocation)
                                                 .projectsFolder(projectsFolder)
                                                 .sampleLabel(sample.sampleName())
                                                 .scanType(modeWithIndex)
-                                                .regionName(boundsMode)
-                                                .angleExposures(angleExposures);
+                                                .regionName(boundsMode);
 
-                                        // Add any additional modality-specific parameters here in the future
-                                        // For example:
-                                        // if (sample.modality().startsWith("LaserScan")) {
-                                        //     acquisitionBuilder.laserPower(25.0).laserWavelength(488);
-                                        // }
+                                        // Let the modality handler enhance the command with specific parameters
+                                        Map<String, Object> userParameters = new HashMap<>();
+                                        userParameters.put("angleExposures", angleExposures);
+
+                                        acquisitionBuilder = modalityHandler.enhanceAcquisitionCommand(
+                                                acquisitionBuilder,
+                                                sample.modality(),
+                                                mgr,
+                                                userParameters);
 
                                         logger.info("Starting acquisition with parameters:");
                                         logger.info("  Config: {}", configFileLocation);
@@ -219,7 +234,9 @@ public class BoundingBoxWorkflow {
                                         logger.info("  Sample: {}", sample.sampleName());
                                         logger.info("  Mode: {}", modeWithIndex);
                                         logger.info("  Region: {}", boundsMode);
-                                        logger.info("  Angle-Exposure pairs: {}", angleExposures);
+                                        if (!angleExposures.isEmpty()) {
+                                            logger.info("  Angle-Exposure pairs: {}", angleExposures);
+                                        }
 
                                         // Start acquisition via socket
                                         MicroscopeController.getInstance().startAcquisition(acquisitionBuilder);
@@ -230,9 +247,10 @@ public class BoundingBoxWorkflow {
                                         MicroscopeSocketClient socketClient = MicroscopeController.getInstance().getSocketClient();
 
                                         // Calculate expected files for progress bar
-                                        int expectedFiles = MinorFunctions.countTifEntriesInTileConfig(
+                                        int tilesPerAngle = MinorFunctions.countTifEntriesInTileConfig(
                                                 List.of(Paths.get(tempTileDir, boundsMode).toString())
-                                        ) * angleExposures.size();
+                                        );
+                                        int expectedFiles = tilesPerAngle * Math.max(1, angleExposures.size());
 
                                         // Create progress counter that will be updated by the monitoring callback
                                         AtomicInteger progressCounter = new AtomicInteger(0);

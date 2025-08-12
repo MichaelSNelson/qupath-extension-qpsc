@@ -27,7 +27,7 @@ import java.util.regex.Pattern;
  *
  * <p>Transform Chain:
  * <pre>
- * QuPath Full-Res ←→ Macro (Flipped) ←→ Macro (Original) ←→ Stage
+ * QuPath Full-Res - Macro (Flipped) - Macro (Original) - Stage
  * </pre>
  *
  * @author Mike Nelson
