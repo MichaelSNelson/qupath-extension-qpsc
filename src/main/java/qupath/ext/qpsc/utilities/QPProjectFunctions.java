@@ -16,10 +16,14 @@ import qupath.lib.images.ImageData;
 import qupath.lib.images.servers.ImageServer;
 import qupath.lib.images.servers.ImageServers;
 import qupath.lib.images.servers.TransformedServerBuilder;
+import qupath.lib.measurements.MeasurementList;
+import qupath.lib.objects.PathObject;
+import qupath.lib.objects.PathObjects;
 import qupath.lib.projects.Project;
 import qupath.lib.projects.ProjectIO;
 import qupath.lib.projects.ProjectImageEntry;
 import qupath.lib.projects.Projects;
+import qupath.lib.roi.RoiTools;
 import qupath.lib.scripting.QP;
 
 import java.awt.geom.AffineTransform;
@@ -430,12 +434,18 @@ public class QPProjectFunctions {
      *       may be embedded in the file.</li>
      *   <li><b>Flipping required:</b> A TransformedServerBuilder is used to apply the necessary
      *       affine transformations. However, this approach cannot preserve associated images due to
-     *       limitations in how QuPath handles transformed servers.</li>
+     *       limitations in how QuPath handles transformed servers. Any existing objects (annotations,
+     *       detections, etc.) will be transformed to match the flipped coordinate system.</li>
      * </ol>
      *
      * <p><b>Important Note on Associated Images:</b> When flipping is applied, any associated images
      * (such as macro overview images commonly found in whole slide images) will be lost. This is a
      * known limitation of using TransformedServerBuilder in QuPath.</p>
+     *
+     * <p><b>Object Transformation:</b> When flipping is applied, all existing PathObjects in the image
+     * (annotations, detections, tiles, etc.) are automatically transformed to maintain their correct
+     * positions in the flipped coordinate system. All object properties including classifications,
+     * measurements, names, and colors are preserved.</p>
      *
      * <p><b>Coordinate System:</b> The flipping transformations assume a standard image coordinate
      * system where (0,0) is at the top-left corner, X increases to the right, and Y increases
@@ -528,6 +538,27 @@ public class QPProjectFunctions {
             transform.translate(0, -server.getHeight());
         }
 
+        // First, check if the current image in QuPath has objects we need to transform
+        ImageData<BufferedImage> currentImageData = null;
+        boolean hasExistingObjects = false;
+
+        // Check if there's a currently open image with the same path
+        var currentGUI = QuPathGUI.getInstance();
+        if (currentGUI != null && currentGUI.getImageData() != null) {
+            var currentServerPath = currentGUI.getImageData().getServerPath();
+            // Check if this is the same image
+            if (currentServerPath != null &&
+                    (currentServerPath.equals(imageUri) || currentServerPath.contains(imageFile.getName()))) {
+                currentImageData = currentGUI.getImageData();
+                var allObjects = currentImageData.getHierarchy().getAllObjects(false);
+                hasExistingObjects = !allObjects.isEmpty();
+                if (hasExistingObjects) {
+                    logger.info("Found {} existing objects in current image that need to be transformed",
+                            allObjects.size());
+                }
+            }
+        }
+
         // Create a transformed server that applies our affine transformation
         ImageServer<BufferedImage> flipped = new TransformedServerBuilder(server)
                 .transform(transform)
@@ -538,6 +569,9 @@ public class QPProjectFunctions {
 
         // Set up the image data
         ImageData<BufferedImage> imageData = entry.readImageData();
+        //TODO validate this
+        QP.transformAllObjects(transform);
+
 
         // Determine and set the image type using our unified method
         var imageType = determineImageType(imageFile, flipped, imageData);
@@ -623,15 +657,6 @@ public class QPProjectFunctions {
             }
         };
         qupathGUI.getViewer().imageDataProperty().addListener(listener);
-    }
-
-    /** Saves the current ImageData into its ProjectImageEntry. */
-    public static void saveCurrentImageData() throws IOException {
-        ProjectImageEntry<BufferedImage> entry = QP.getProjectEntry();
-        if (entry != null && QP.getCurrentImageData() != null) {
-            entry.saveImageData(QP.getCurrentImageData());
-            logger.info("Saved current image data to project entry");
-        }
     }
 
 }
