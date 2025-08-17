@@ -135,7 +135,7 @@ public class SampleSetupController {
             // Load modalities from config
             Set<String> modalities = MicroscopeConfigManager
                     .getInstance(QPPreferenceDialog.getMicroscopeConfigFileProperty())
-                    .getSection("imagingMode")
+                    .getSection("imaging_mode")
                     .keySet();
 
             ComboBox<String> modalityBox = new ComboBox<>(

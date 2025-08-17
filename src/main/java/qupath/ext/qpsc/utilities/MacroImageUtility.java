@@ -15,6 +15,8 @@ import qupath.lib.roi.interfaces.ROI;
 
 import java.awt.*;
 import java.awt.image.BufferedImage;
+import java.io.File;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 
@@ -188,40 +190,56 @@ public class MacroImageUtility {
      * @param scannerName The scanner that produced this image (e.g., "Ocus40")
      * @return CroppedMacroResult containing the cropped image and offset information
      */
+    /**
+     * Crops the macro image based on scanner configuration.
+     *
+     * @param macroImage The original macro image
+     * @param scannerName The scanner that produced this image (e.g., "Ocus40")
+     * @return CroppedMacroResult containing the cropped image and offset information
+     */
     public static CroppedMacroResult cropToSlideArea(BufferedImage macroImage, String scannerName) {
-        // Implementation remains the same as before
         if (macroImage == null) {
             throw new IllegalArgumentException("Macro image cannot be null");
         }
 
-        MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(
-                QPPreferenceDialog.getMicroscopeConfigFileProperty()
-        );
+        // Load scanner-specific config
+        String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
+        File configDir = new File(configPath).getParentFile();
+        File scannerConfigFile = new File(configDir, "config_" + scannerName + ".yml");
 
-        // Check if scanner is configured
-        if (!mgr.isScannerConfigured(scannerName)) {
-            logger.warn("Scanner '{}' not configured. Available scanners: {}. Using generic settings.",
-                    scannerName, mgr.getAvailableScanners());
-            scannerName = "Generic";
+        if (!scannerConfigFile.exists()) {
+            logger.warn("Scanner config file not found: {}. Using default crop settings.",
+                    scannerConfigFile.getAbsolutePath());
+            return cropToSlideArea(macroImage, DEFAULT_SLIDE_X_MIN, DEFAULT_SLIDE_X_MAX,
+                    DEFAULT_SLIDE_Y_MIN, DEFAULT_SLIDE_Y_MAX);
         }
 
+        // Load the scanner config
+        Map<String, Object> scannerConfig = MinorFunctions.loadYamlFile(scannerConfigFile.getAbsolutePath());
 
         // Check if cropping is needed
-        if (!mgr.scannerRequiresCropping(scannerName)) {
+        Boolean requiresCropping = MinorFunctions.getYamlBoolean(scannerConfig, "macro", "requires_cropping");
+        if (requiresCropping == null || !requiresCropping) {
             logger.info("Scanner '{}' does not require cropping, returning original image", scannerName);
             return new CroppedMacroResult(macroImage, macroImage.getWidth(), macroImage.getHeight(), 0, 0);
         }
 
         // Get slide bounds
-        MicroscopeConfigManager.SlideBounds bounds = mgr.getScannerSlideBounds(scannerName);
-        if (bounds == null) {
-            logger.error("Scanner '{}' requires cropping but has no configured bounds. Using defaults.", scannerName);
+        Integer xMin = MinorFunctions.getYamlInteger(scannerConfig, "macro", "slide_bounds", "x_min");
+        Integer xMax = MinorFunctions.getYamlInteger(scannerConfig, "macro", "slide_bounds", "x_max");
+        Integer yMin = MinorFunctions.getYamlInteger(scannerConfig, "macro", "slide_bounds", "y_min");
+        Integer yMax = MinorFunctions.getYamlInteger(scannerConfig, "macro", "slide_bounds", "y_max");
+
+        if (xMin == null || xMax == null || yMin == null || yMax == null) {
+            logger.error("Scanner '{}' requires cropping but slide bounds are not properly configured. Using defaults.",
+                    scannerName);
             return cropToSlideArea(macroImage, DEFAULT_SLIDE_X_MIN, DEFAULT_SLIDE_X_MAX,
                     DEFAULT_SLIDE_Y_MIN, DEFAULT_SLIDE_Y_MAX);
         }
 
-        logger.info("Cropping macro image for scanner '{}' using bounds: {}", scannerName, bounds);
-        return cropToSlideArea(macroImage, bounds.xMin, bounds.xMax, bounds.yMin, bounds.yMax);
+        logger.info("Cropping macro image for scanner '{}' using bounds: X[{}-{}], Y[{}-{}]",
+                scannerName, xMin, xMax, yMin, yMax);
+        return cropToSlideArea(macroImage, xMin, xMax, yMin, yMax);
     }
 
     /**
@@ -231,27 +249,31 @@ public class MacroImageUtility {
      * @throws IllegalStateException if scanner is not configured or pixel size is missing
      */
     public static double getMacroPixelSize(String scannerName) {
-        MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(
-                QPPreferenceDialog.getMicroscopeConfigFileProperty()
-        );
+        // Load scanner-specific config
+        String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
+        File configDir = new File(configPath).getParentFile();
+        File scannerConfigFile = new File(configDir, "config_" + scannerName + ".yml");
 
-        if (!mgr.isScannerConfigured(scannerName)) {
+        if (!scannerConfigFile.exists()) {
             String error = String.format(
-                    "Scanner '%s' is not configured in the microscope configuration file. " +
-                            "Available scanners: %s. Please add scanner configuration or select a different scanner.",
-                    scannerName, mgr.getAvailableScanners()
+                    "Scanner configuration file not found: %s\n" +
+                            "Please ensure the scanner '%s' has a configuration file.",
+                    scannerConfigFile.getAbsolutePath(), scannerName
             );
             logger.error(error);
             throw new IllegalStateException(error);
         }
 
-        Double pixelSize = mgr.getScannerMacroPixelSize(scannerName);
+        // Load the scanner config
+        Map<String, Object> scannerConfig = MinorFunctions.loadYamlFile(scannerConfigFile.getAbsolutePath());
+        Double pixelSize = MinorFunctions.getYamlDouble(scannerConfig, "macro", "pixel_size_um");
+
         if (pixelSize == null || pixelSize <= 0) {
             String error = String.format(
-                    "Scanner '%s' has no valid macro pixel size configured. " +
-                            "This is required for accurate alignment. " +
-                            "Please add 'macro.pixelSize_um' to the scanner configuration.",
-                    scannerName
+                    "Scanner '%s' has no valid macro pixel size configured.\n" +
+                            "This is required for accurate alignment.\n" +
+                            "Please add 'macro: pixel_size_um: <value>' to %s",
+                    scannerName, scannerConfigFile.getName()
             );
             logger.error(error);
             throw new IllegalStateException(error);
@@ -260,7 +282,6 @@ public class MacroImageUtility {
         logger.info("Using macro pixel size {} µm for scanner '{}'", pixelSize, scannerName);
         return pixelSize;
     }
-
     /**
      * Get macro pixel size for the scanner selected in preferences.
      * @return The macro pixel size in microns

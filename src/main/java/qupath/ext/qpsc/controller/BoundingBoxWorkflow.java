@@ -112,22 +112,34 @@ public class BoundingBoxWorkflow {
                     @SuppressWarnings("unchecked")
                     Project<BufferedImage> project = (Project<BufferedImage>) pd.get("currentQuPathProject");
 
-                    // 5) Compute frame size in microns from YAML
-                    MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(QPPreferenceDialog.getMicroscopeConfigFileProperty());
-                    double pixelSize = mgr.getDouble("imagingMode", sample.modality(), "pixelSize_um");
+                    // 5) Get camera FOV from server
+                    logger.info("Getting camera FOV for modality: {}", sample.modality());
 
-                    // Get detector properties (width/height) from resources_LOCI
-                    int cameraWidth = mgr.getInteger("imagingMode", sample.modality(), "detector", "width_px");
-                    int cameraHeight = mgr.getInteger("imagingMode", sample.modality(), "detector", "height_px");
+                    double frameWidthMicrons, frameHeightMicrons;
+                    try {
+                        double[] fov = MicroscopeController.getInstance().getCameraFOVFromConfig(sample.modality());
+                        frameWidthMicrons = fov[0];
+                        frameHeightMicrons = fov[1];
+                        logger.info("Camera FOV for {}: {} x {} microns", sample.modality(), frameWidthMicrons, frameHeightMicrons);
+                    } catch (IOException e) {
+                        UIFunctions.notifyUserOfError(
+                                "Failed to get camera FOV for modality " + sample.modality() + ": " + e.getMessage() +
+                                        "\n\nPlease check configuration file.",
+                                "FOV Error"
+                        );
+                        return; // Exit the workflow
+                    }
 
-                    double frameWidth = pixelSize * cameraWidth;
-                    double frameHeight = pixelSize * cameraHeight;
+// Get pixel size for stitching metadata (still needed)
+                    MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(
+                            QPPreferenceDialog.getMicroscopeConfigFileProperty());
+                    double pixelSize = mgr.getDouble("imaging_mode", sample.modality(), "pixel_size_um");
 
-                    // 6) Create tile configuration using new API
+// 6) Create tile configuration using new API
                     TilingRequest request = new TilingRequest.Builder()
                             .outputFolder(tempTileDir)
                             .modalityName(modeWithIndex)
-                            .frameSize(frameWidth, frameHeight)
+                            .frameSize(frameWidthMicrons, frameHeightMicrons)  // Use microns directly
                             .overlapPercent(overlapPercent)
                             .boundingBox(bb.x1(), bb.y1(), bb.x2(), bb.y2())
                             .invertAxes(invertX, invertY)

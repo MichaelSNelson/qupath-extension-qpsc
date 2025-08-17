@@ -52,7 +52,7 @@ public class RotationManager {
         );
 
         // Check if this is a PPM modality by name
-        boolean isPPMModality = modality != null && modality.startsWith("PPM_");
+        boolean isPPMModality = modality != null && modality.startsWith("ppm_");
 
         if (isPPMModality) {
             // Get PPM config from global section

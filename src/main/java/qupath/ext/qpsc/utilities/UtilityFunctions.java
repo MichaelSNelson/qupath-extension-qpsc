@@ -86,7 +86,7 @@ public class UtilityFunctions {
      *
      * @param projectsFolderPath  Root folder containing per-sample subfolders
      * @param sampleLabel         Subfolder name for this sample (e.g., "Sample_001")
-     * @param imagingModeWithIndex Subfolder name under sampleLabel (e.g., "PPM_10x_1", "BF_20x_2")
+     * @param imagingModeWithIndex Subfolder name under sampleLabel (e.g., "ppm_10x_1", "bf_20x_2")
      * @param annotationName      Annotation identifier (e.g., "Tissue_12345_67890") or "bounds" for full slide
      * @param matchingString      Pattern to match subdirectories. Use "." for all subdirectories,
      *                           or specific angle value (e.g., "-5.0", "90.0") for single angle

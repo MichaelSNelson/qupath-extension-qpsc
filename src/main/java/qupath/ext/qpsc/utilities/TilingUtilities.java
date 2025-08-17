@@ -2,6 +2,10 @@ package qupath.ext.qpsc.utilities;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import qupath.ext.qpsc.controller.MicroscopeController;
+import qupath.ext.qpsc.preferences.QPPreferenceDialog;
+import qupath.ext.qpsc.ui.SampleSetupController;
+import qupath.lib.gui.QuPathGUI;
 import qupath.lib.objects.PathObject;
 import qupath.lib.objects.PathObjects;
 import qupath.lib.regions.ImagePlane;
@@ -50,10 +54,10 @@ public class TilingUtilities {
 
         if (request.hasBoundingBox()) {
             logger.info("Creating tiles for bounding box");
-            createBoundingBoxTiles(request);
+            processBoundingBoxTilingRequest(request);
         } else if (request.hasAnnotations()) {
             logger.info("Creating tiles for {} annotations", request.getAnnotations().size());
-            createAnnotationTiles(request);
+            processAnnotationTilingRequest(request);
         } else {
             throw new IllegalArgumentException("Must provide either bounding box or annotations");
         }
@@ -70,7 +74,7 @@ public class TilingUtilities {
      * @param request the tiling parameters including the bounding box
      * @throws IOException if unable to create directories or write configuration
      */
-    private static void createBoundingBoxTiles(TilingRequest request) throws IOException {
+    private static void processBoundingBoxTilingRequest(TilingRequest request) throws IOException {
         BoundingBox bb = request.getBoundingBox();
 
         // Calculate grid bounds
@@ -106,7 +110,7 @@ public class TilingUtilities {
                 startX, startY, width, height);
 
         // Generate the tile grid
-        createTileGrid(startX, startY, width, height, request, configPath, null);
+        processTileGridRequest(startX, startY, width, height, request, configPath, null);
     }
 
     /**
@@ -119,7 +123,7 @@ public class TilingUtilities {
      * @param request the tiling parameters including the annotation list
      * @throws IOException if unable to create directories or write configurations
      */
-    private static void createAnnotationTiles(TilingRequest request) throws IOException {
+    private static void processAnnotationTilingRequest(TilingRequest request) throws IOException {
         // First, name and lock all annotations
         for (PathObject annotation : request.getAnnotations()) {
             String name = String.format("%d_%d",
@@ -167,7 +171,7 @@ public class TilingUtilities {
 
             // Generate tiles
 
-            createTileGrid(x, y, w, h, request, configPath, roi);
+            processTileGridRequest(x, y, w, h, request, configPath, roi);
         }
     }
 
@@ -193,7 +197,7 @@ public class TilingUtilities {
      * @throws IOException if unable to write the configuration file
      */
 
-    private static void createTileGrid(
+    private static void processTileGridRequest(
             double startX, double startY,
             double width, double height,
             TilingRequest request,
@@ -304,4 +308,157 @@ public class TilingUtilities {
         }
     }
 
+    /**
+     * Creates tiles for annotations using camera FOV from the microscope server.
+     *
+     * <p>This method:
+     * <ol>
+     *   <li>Removes existing tiles for the modality</li>
+     *   <li>Gets camera FOV from the microscope server</li>
+     *   <li>Converts FOV to QuPath pixels based on image calibration</li>
+     *   <li>Creates detection tiles for each annotation</li>
+     * </ol>
+     *
+     * @param annotations List of annotations to tile
+     * @param sampleSetup Sample setup information containing modality
+     * @param tempTileDirectory Directory for tile configuration files
+     * @param modeWithIndex Imaging mode identifier with index (e.g., "bf_10x_1")
+     * @throws IOException if communication with server fails or tile creation fails
+     * @throws IllegalArgumentException if annotations are empty or invalid
+     * @since 0.3.0
+     */
+    public static void createTilesForAnnotations(
+            List<PathObject> annotations,
+            SampleSetupController.SampleSetupResult sampleSetup,
+            String tempTileDirectory,
+            String modeWithIndex) throws IOException {
+
+        if (annotations == null || annotations.isEmpty()) {
+            throw new IllegalArgumentException("No annotations provided for tiling");
+        }
+
+        logger.info("Creating tiles for {} annotations in modality {}",
+                annotations.size(), modeWithIndex);
+
+        QuPathGUI gui = QuPathGUI.getInstance();
+        if (gui.getImageData() == null) {
+            throw new IllegalStateException("No image is open in QuPath");
+        }
+
+        // Remove existing tiles for this modality
+        String modalityBase = sampleSetup.modality().replaceAll("(_\\d+)$", "");
+        removeExistingModalityTiles(gui, modalityBase);
+
+        double[] fovMicrons = MicroscopeController.getInstance().getCameraFOVFromConfig(sampleSetup.modality());
+        double frameWidthMicrons = fovMicrons[0];
+        double frameHeightMicrons = fovMicrons[1];
+
+        logger.info("Camera FOV from server: {} x {} microns",
+                frameWidthMicrons, frameHeightMicrons);
+
+        // Validate FOV is reasonable (between 0.1mm and 50mm)
+        if (frameWidthMicrons < 100 || frameWidthMicrons > 50000 ||
+                frameHeightMicrons < 100 || frameHeightMicrons > 50000) {
+            throw new IOException(String.format(
+                    "Camera FOV seems unreasonable: %.1f x %.1f µm. Expected between 100-50000 µm",
+                    frameWidthMicrons, frameHeightMicrons));
+        }
+
+        // Get the actual image pixel size from QuPath
+        double imagePixelSize = gui.getImageData().getServer()
+                .getPixelCalibration().getAveragedPixelSizeMicrons();
+
+        // Convert to image pixels
+        double frameWidthPixels = frameWidthMicrons / imagePixelSize;
+        double frameHeightPixels = frameHeightMicrons / imagePixelSize;
+
+        // Get tiling parameters from preferences
+        double overlapPercent = QPPreferenceDialog.getTileOverlapPercentProperty();
+        boolean invertedX = QPPreferenceDialog.getInvertedXProperty();
+        boolean invertedY = QPPreferenceDialog.getInvertedYProperty();
+
+        logger.info("Frame size in QuPath pixels: {} x {} ({}% overlap)",
+                frameWidthPixels, frameHeightPixels, overlapPercent);
+
+        // Validate tile counts before creation
+        validateAnnotationTileCounts(annotations, frameWidthPixels, frameHeightPixels, overlapPercent);
+
+        // Create new tiles
+        TilingRequest request = new TilingRequest.Builder()
+                .outputFolder(tempTileDirectory)
+                .modalityName(modeWithIndex)
+                .frameSize(frameWidthPixels, frameHeightPixels)
+                .overlapPercent(overlapPercent)
+                .annotations(annotations)
+                .invertAxes(invertedX, invertedY)
+                .createDetections(true)
+                .addBuffer(true)
+                .build();
+
+        createTiles(request);
+        logger.info("Created tiles for {} annotations", annotations.size());
+    }
+
+    /**
+     * Removes all detection tiles for a given modality.
+     *
+     * @param gui QuPath GUI instance
+     * @param modalityBase Base modality name without index suffix
+     */
+    private static void removeExistingModalityTiles(QuPathGUI gui, String modalityBase) {
+        var hierarchy = gui.getViewer().getHierarchy();
+        List<PathObject> tilesToRemove = hierarchy.getDetectionObjects().stream()
+                .filter(o -> o.getPathClass() != null &&
+                        o.getPathClass().toString().contains(modalityBase))
+                .toList();
+
+        if (!tilesToRemove.isEmpty()) {
+            logger.info("Removing {} existing tiles for modality: {}",
+                    tilesToRemove.size(), modalityBase);
+            hierarchy.removeObjects(tilesToRemove, true);
+            hierarchy.fireHierarchyChangedEvent(gui.getViewer());
+        }
+    }
+
+    /**
+     * Validates that tile counts are reasonable for all annotations.
+     *
+     * @param annotations Annotations to validate
+     * @param frameWidth Frame width in pixels
+     * @param frameHeight Frame height in pixels
+     * @param overlapPercent Overlap percentage
+     * @throws IllegalArgumentException if any annotation would create too many tiles
+     */
+    private static void validateAnnotationTileCounts(List<PathObject> annotations,
+                                                     double frameWidth, double frameHeight, double overlapPercent) {
+
+        final int MAX_TILES_PER_ANNOTATION = 10000;
+
+        for (PathObject ann : annotations) {
+            if (ann.getROI() != null) {
+                double annWidth = ann.getROI().getBoundsWidth();
+                double annHeight = ann.getROI().getBoundsHeight();
+
+                // Calculate effective frame size considering overlap
+                double effectiveFrameWidth = frameWidth * (1 - overlapPercent/100.0);
+                double effectiveFrameHeight = frameHeight * (1 - overlapPercent/100.0);
+
+                double tilesX = Math.ceil(annWidth / effectiveFrameWidth);
+                double tilesY = Math.ceil(annHeight / effectiveFrameHeight);
+                double totalTiles = tilesX * tilesY;
+
+                if (totalTiles > MAX_TILES_PER_ANNOTATION) {
+                    throw new IllegalArgumentException(String.format(
+                            "Annotation '%s' would require %.0f tiles (%.0fx%.0f). Maximum allowed is %d.\n" +
+                                    "This usually indicates incorrect pixel size settings.\n" +
+                                    "Annotation size: %.0fx%.0f pixels, Frame size: %.0fx%.0f pixels",
+                            ann.getName(), totalTiles, tilesX, tilesY, MAX_TILES_PER_ANNOTATION,
+                            annWidth, annHeight, frameWidth, frameHeight));
+                }
+
+                logger.debug("Annotation '{}' will create {} tiles ({}x{})",
+                        ann.getName(), totalTiles, tilesX, tilesY);
+            }
+        }
+    }
 }

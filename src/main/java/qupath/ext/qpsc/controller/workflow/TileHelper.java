@@ -2,6 +2,7 @@ package qupath.ext.qpsc.controller.workflow;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import qupath.ext.qpsc.controller.MicroscopeController;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.ui.SampleSetupController;
 import qupath.ext.qpsc.utilities.MicroscopeConfigManager;
@@ -42,20 +43,13 @@ public class TileHelper {
 
     /**
      * Creates tiles for the given annotations.
-     *
-     * <p>This method:
-     * <ol>
-     *   <li>Calculates camera frame size in image pixels</li>
-     *   <li>Validates tile counts to prevent excessive tiling</li>
-     *   <li>Creates detection objects representing tiles</li>
-     *   <li>Writes tile configuration files for acquisition</li>
-     * </ol>
+     * UPDATED: Now delegates to unified method in TilingUtilities.
      *
      * @param annotations List of annotations to tile
      * @param sample Sample setup information
      * @param tempTileDirectory Directory for tile configuration files
      * @param modeWithIndex Imaging mode identifier
-     * @param macroPixelSize Macro image pixel size (currently unused)
+     * @param macroPixelSize Macro image pixel size (no longer used)
      */
     public static void createTilesForAnnotations(
             List<PathObject> annotations,
@@ -67,64 +61,24 @@ public class TileHelper {
         logger.info("Creating tiles for {} annotations in modality {}",
                 annotations.size(), modeWithIndex);
 
-        // Get microscope configuration
-        MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(
-                QPPreferenceDialog.getMicroscopeConfigFileProperty()
-        );
-
-        // Get camera and imaging parameters
-        double pixelSize = mgr.getDouble("imagingMode", sample.modality(), "pixelSize_um");
-        int cameraWidth = mgr.getInteger("imagingMode", sample.modality(), "detector", "width_px");
-        int cameraHeight = mgr.getInteger("imagingMode", sample.modality(), "detector", "height_px");
-
-        // Get the actual image pixel size from QuPath
-        QuPathGUI gui = QuPathGUI.getInstance();
-        double imagePixelSize = gui.getImageData().getServer()
-                .getPixelCalibration().getAveragedPixelSizeMicrons();
-        logger.info("Image pixel size from QuPath: {} µm", imagePixelSize);
-
-        // Calculate frame dimensions in microns
-        double frameWidthMicrons = pixelSize * cameraWidth;
-        double frameHeightMicrons = pixelSize * cameraHeight;
-
-        // Convert to image pixels
-        double frameWidthPixels = frameWidthMicrons / imagePixelSize;
-        double frameHeightPixels = frameHeightMicrons / imagePixelSize;
-
-        // Get tiling parameters
-        double overlapPercent = QPPreferenceDialog.getTileOverlapPercentProperty();
-        boolean invertedX = QPPreferenceDialog.getInvertedXProperty();
-        boolean invertedY = QPPreferenceDialog.getInvertedYProperty();
-
-        logger.info("Frame size in QuPath pixels: {} x {} ({}% overlap)",
-                frameWidthPixels, frameHeightPixels, overlapPercent);
-
         try {
-            // Remove existing tiles for this modality
-            String modalityBase = sample.modality().replaceAll("(_\\d+)$", "");
-            deleteAllTiles(gui, modalityBase);
-
-            // Validate tile counts before creation
-            validateTileCounts(annotations, frameWidthPixels, frameHeightPixels, overlapPercent);
-
-            // Create new tiles
-            TilingRequest request = new TilingRequest.Builder()
-                    .outputFolder(tempTileDirectory)
-                    .modalityName(modeWithIndex)
-                    .frameSize(frameWidthPixels, frameHeightPixels)
-                    .overlapPercent(overlapPercent)
-                    .annotations(annotations)
-                    .invertAxes(invertedX, invertedY)
-                    .createDetections(true)
-                    .addBuffer(true)
-                    .build();
-
-            TilingUtilities.createTiles(request);
-            logger.info("Created tiles for {} annotations", annotations.size());
+            // Delegate to the unified method in TilingUtilities
+            TilingUtilities.createTilesForAnnotations(
+                    annotations,
+                    sample,
+                    tempTileDirectory,
+                    modeWithIndex
+            );
 
         } catch (IOException e) {
-            logger.error("Failed to create tiles", e);
-            throw new RuntimeException("Failed to create tiles: " + e.getMessage(), e);
+            logger.error("Failed to get camera FOV from server", e);
+            throw new RuntimeException(
+                    "Failed to get camera FOV from server: " + e.getMessage() +
+                            "\nPlease check server connection.", e);
+        } catch (IllegalArgumentException e) {
+            logger.error("Invalid tile configuration", e);
+            throw new RuntimeException(
+                    "Invalid tile configuration: " + e.getMessage(), e);
         }
     }
 

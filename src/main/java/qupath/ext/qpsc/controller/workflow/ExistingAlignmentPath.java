@@ -16,6 +16,7 @@ import qupath.lib.roi.interfaces.ROI;
 
 import java.awt.*;
 import java.awt.geom.AffineTransform;
+import java.awt.geom.Point2D;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.util.Map;
@@ -124,7 +125,7 @@ public class ExistingAlignmentPath {
     private CompletableFuture<MacroImageContext> processMacroImage(double pixelSize) {
         return CompletableFuture.supplyAsync(() -> {
             state.pixelSize = pixelSize;
-
+            logger.info("Loaded macro pixel size: {} µm", pixelSize);
             BufferedImage originalMacro = MacroImageUtility.retrieveMacroImage(gui);
             if (originalMacro == null) {
                 throw new RuntimeException("Cannot retrieve macro image");
@@ -273,6 +274,25 @@ public class ExistingAlignmentPath {
         AffineTransform fullResToStage = new AffineTransform(macroToStage);
         fullResToStage.concatenate(fullResToMacro);
 
+        // Test if the saved transform expects unflipped macro coordinates
+
+        logger.info("Green box in flipped macro: ({}, {})", greenBox.getBoundsX(), greenBox.getBoundsY());
+//
+//// Calculate where this would be in unflipped coordinates
+//        double unflippedX = context.macroContext.croppedResult.getCroppedImage().getWidth() - greenBox.getBoundsX() - greenBox.getBoundsWidth();
+//        double unflippedY = context.macroContext.croppedResult.getCroppedImage().getHeight() - greenBox.getBoundsY() - greenBox.getBoundsHeight();
+//        logger.info("Green box in unflipped macro would be: ({}, {})", unflippedX, unflippedY);
+
+// Test both versions
+        Point2D flippedGreenBoxCenter = new Point2D.Double(
+                greenBox.getCentroidX(), greenBox.getCentroidY());
+
+
+        Point2D stageFlipped = new Point2D.Double();
+        macroToStage.transform(flippedGreenBoxCenter, stageFlipped);
+
+        logger.info("Macro center → Stage (using flipped): ({}, {})", stageFlipped.getX(), stageFlipped.getY());
+
         logger.info("Created full-res→stage transform");
         return fullResToStage;
     }
@@ -336,7 +356,7 @@ public class ExistingAlignmentPath {
 
         if (scannerConfigFile.exists()) {
             Map<String, Object> scannerConfig = MinorFunctions.loadYamlFile(scannerConfigFile.getAbsolutePath());
-            Double pixelSize = MinorFunctions.getYamlDouble(scannerConfig, "macro", "pixelSize_um");
+            Double pixelSize = MinorFunctions.getYamlDouble(scannerConfig, "macro", "pixel_size_um");
 
             if (pixelSize != null && pixelSize > 0) {
                 return pixelSize;
@@ -346,7 +366,7 @@ public class ExistingAlignmentPath {
         // No fallback - throw exception
         throw new IllegalStateException(
                 "Scanner '" + scannerName + "' has no valid macro pixel size configured.\n" +
-                        "Please add 'macro.pixelSize_um' to the scanner configuration file:\n" +
+                        "Please add 'macro.pixel_size_um' to the scanner configuration file:\n" +
                         scannerConfigFile.getAbsolutePath()
         );
     }
@@ -362,13 +382,13 @@ public class ExistingAlignmentPath {
 
         if (scannerConfigFile.exists()) {
             Map<String, Object> scannerConfig = MinorFunctions.loadYamlFile(scannerConfigFile.getAbsolutePath());
-            Boolean requiresCropping = MinorFunctions.getYamlBoolean(scannerConfig, "macro", "requiresCropping");
+            Boolean requiresCropping = MinorFunctions.getYamlBoolean(scannerConfig, "macro", "requires_cropping");
 
             if (requiresCropping != null && requiresCropping) {
-                Integer xMin = MinorFunctions.getYamlInteger(scannerConfig, "macro", "slideBounds", "xMin");
-                Integer xMax = MinorFunctions.getYamlInteger(scannerConfig, "macro", "slideBounds", "xMax");
-                Integer yMin = MinorFunctions.getYamlInteger(scannerConfig, "macro", "slideBounds", "yMin");
-                Integer yMax = MinorFunctions.getYamlInteger(scannerConfig, "macro", "slideBounds", "yMax");
+                Integer xMin = MinorFunctions.getYamlInteger(scannerConfig, "macro", "slide_bounds", "x_min");
+                Integer xMax = MinorFunctions.getYamlInteger(scannerConfig, "macro", "slide_bounds", "x_max");
+                Integer yMin = MinorFunctions.getYamlInteger(scannerConfig, "macro", "slide_bounds", "y_min");
+                Integer yMax = MinorFunctions.getYamlInteger(scannerConfig, "macro", "slide_bounds", "y_max");
 
                 if (xMin != null && xMax != null && yMin != null && yMax != null) {
                     return MacroImageUtility.cropToSlideArea(originalMacro, xMin, xMax, yMin, yMax);
@@ -441,27 +461,100 @@ public class ExistingAlignmentPath {
         );
     }
 
+//    /**
+//     * Validates transform against stage boundaries.
+//     */
+//    private boolean validateTransform(AffineTransform transform) {
+//        MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(
+//                QPPreferenceDialog.getMicroscopeConfigFileProperty());
+//
+//        double stageXMin = mgr.getDouble("stage", "x_limit", "low");
+//        double stageXMax = mgr.getDouble("stage", "x_limit", "high");
+//        double stageYMin = mgr.getDouble("stage", "y_limit", "low");
+//        double stageYMax = mgr.getDouble("stage", "y_limit", "high");
+//
+//        int width = gui.getImageData().getServer().getWidth();
+//        int height = gui.getImageData().getServer().getHeight();
+//
+//        return TransformationFunctions.validateTransform(
+//                transform, width, height,
+//                stageXMin, stageXMax, stageYMin, stageYMax
+//        );
+//    }
     /**
-     * Validates transform against stage boundaries.
+     * Validates transform against stage boundaries with detailed logging.
      */
     private boolean validateTransform(AffineTransform transform) {
         MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(
                 QPPreferenceDialog.getMicroscopeConfigFileProperty());
 
-        double stageXMin = mgr.getDouble("stage", "xlimit", "low");
-        double stageXMax = mgr.getDouble("stage", "xlimit", "high");
-        double stageYMin = mgr.getDouble("stage", "ylimit", "low");
-        double stageYMax = mgr.getDouble("stage", "ylimit", "high");
+        double stageXMin = mgr.getDouble("stage", "x_limit", "low");
+        double stageXMax = mgr.getDouble("stage", "x_limit", "high");
+        double stageYMin = mgr.getDouble("stage", "y_limit", "low");
+        double stageYMax = mgr.getDouble("stage", "y_limit", "high");
+
+        logger.info("Stage boundaries from config:");
+        logger.info("  X: {} to {} µm", stageXMin, stageXMax);
+        logger.info("  Y: {} to {} µm", stageYMin, stageYMax);
 
         int width = gui.getImageData().getServer().getWidth();
         int height = gui.getImageData().getServer().getHeight();
 
-        return TransformationFunctions.validateTransform(
-                transform, width, height,
-                stageXMin, stageXMax, stageYMin, stageYMax
-        );
-    }
+        logger.info("Image dimensions: {} x {} pixels", width, height);
 
+        // Log transform details
+        TransformationFunctions.logTransformDetails("Full-res to stage", transform);
+
+        // Test key points with detailed logging
+        double[][] testPoints = {
+                {0, 0},                    // Top-left
+                {width/2, 0},              // Top-center
+                {width, 0},                // Top-right
+                {0, height/2},             // Middle-left
+                {width/2, height/2},       // Center
+                {width, height/2},         // Middle-right
+                {0, height},               // Bottom-left
+                {width/2, height},         // Bottom-center
+                {width, height}            // Bottom-right
+        };
+
+        String[] labels = {
+                "Top-left", "Top-center", "Top-right",
+                "Middle-left", "Center", "Middle-right",
+                "Bottom-left", "Bottom-center", "Bottom-right"
+        };
+
+        boolean allValid = true;
+        logger.info("Testing transform at key image points:");
+
+        for (int i = 0; i < testPoints.length; i++) {
+            double[] qpCoords = testPoints[i];
+            double[] stageCoords = TransformationFunctions.transformQuPathFullResToStage(
+                    qpCoords, transform);
+
+            boolean xValid = stageCoords[0] >= stageXMin && stageCoords[0] <= stageXMax;
+            boolean yValid = stageCoords[1] >= stageYMin && stageCoords[1] <= stageYMax;
+
+            String status = (xValid && yValid) ? "VALID" : "INVALID";
+            logger.info("  {} ({}, {}) → ({}, {}) [{}]",
+                    labels[i], qpCoords[0], qpCoords[1],
+                    stageCoords[0], stageCoords[1], status);
+
+            if (!xValid || !yValid) {
+                allValid = false;
+                if (!xValid) {
+                    logger.warn("    X coordinate {} is outside range [{}, {}]",
+                            stageCoords[0], stageXMin, stageXMax);
+                }
+                if (!yValid) {
+                    logger.warn("    Y coordinate {} is outside range [{}, {}]",
+                            stageCoords[1], stageYMin, stageYMax);
+                }
+            }
+        }
+
+        return allValid;
+    }
     // Inner context classes
 
     /**

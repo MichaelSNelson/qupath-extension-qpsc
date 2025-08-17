@@ -303,7 +303,7 @@ public class MinorFunctions {
      * Gets a nested value from a YAML map structure.
      *
      * @param yamlData The loaded YAML data
-     * @param keys Path to the value (e.g., "macro", "pixelSize_um")
+     * @param keys Path to the value (e.g., "macro", "pixel_size_um")
      * @return The value at the specified path, or null if not found
      */
     @SuppressWarnings("unchecked")

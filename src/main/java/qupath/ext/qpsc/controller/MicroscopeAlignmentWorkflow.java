@@ -241,16 +241,16 @@ public class MicroscopeAlignmentWorkflow {
         // Check if this scanner has macro configuration
         Map<String, Object> macroConfig = (Map<String, Object>) scannerConfig.get("macro");
         if (macroConfig != null) {
-            Boolean cropRequired = MinorFunctions.getYamlBoolean(scannerConfig, "macro", "requiresCropping");
+            Boolean cropRequired = MinorFunctions.getYamlBoolean(scannerConfig, "macro", "requires_cropping");
             requiresCropping = cropRequired != null && cropRequired;
         }
 
         if (requiresCropping) {
             // Get slide bounds from scanner config
-            Integer xMin = MinorFunctions.getYamlInteger(scannerConfig, "macro", "slideBounds", "xMin");
-            Integer xMax = MinorFunctions.getYamlInteger(scannerConfig, "macro", "slideBounds", "xMax");
-            Integer yMin = MinorFunctions.getYamlInteger(scannerConfig, "macro", "slideBounds", "yMin");
-            Integer yMax = MinorFunctions.getYamlInteger(scannerConfig, "macro", "slideBounds", "yMax");
+            Integer xMin = MinorFunctions.getYamlInteger(scannerConfig, "macro", "slide_bounds", "x_min");
+            Integer xMax = MinorFunctions.getYamlInteger(scannerConfig, "macro", "slide_bounds", "x_max");
+            Integer yMin = MinorFunctions.getYamlInteger(scannerConfig, "macro", "slide_bounds", "y_min");
+            Integer yMax = MinorFunctions.getYamlInteger(scannerConfig, "macro", "slide_bounds", "y_max");
 
             if (xMin != null && xMax != null && yMin != null && yMax != null) {
                 croppedResult = MacroImageUtility.cropToSlideArea(originalMacroImage, xMin, xMax, yMin, yMax);
@@ -455,13 +455,13 @@ public class MicroscopeAlignmentWorkflow {
                 try {
                     // Load the scanner configuration directly
                     Map<String, Object> scannerConfig = MinorFunctions.loadYamlFile(selectedScannerConfigPath);
-                    Double pixelSize = MinorFunctions.getYamlDouble(scannerConfig, "macro", "pixelSize_um");
+                    Double pixelSize = MinorFunctions.getYamlDouble(scannerConfig, "macro", "pixel_size_um");
 
                     if (pixelSize == null || pixelSize <= 0) {
                         String error = String.format(
                                 "Scanner '%s' has no valid macro pixel size configured. " +
                                         "This is required for accurate alignment. " +
-                                        "Please add 'macro: pixelSize_um:' to the scanner configuration.",
+                                        "Please add 'macro: pixel_size_um:' to the scanner configuration.",
                                 selectedScanner
                         );
                         logger.error(error);
@@ -591,9 +591,6 @@ public class MicroscopeAlignmentWorkflow {
                 modeWithIndex, invertedX, invertedY);
     }
 
-    /**
-     * Helper method to create tiles for given annotations.
-     */
     private static void createTilesForAnnotations(
             QuPathGUI gui,
             List<PathObject> annotations,
@@ -604,51 +601,14 @@ public class MicroscopeAlignmentWorkflow {
             boolean invertedY) {
 
         try {
-            // Remove existing tiles from previous runs of this modality
-            String modalityBase = sampleSetup.modality().replaceAll("(_\\d+)$", "");
-            gui.getViewer().getHierarchy().getDetectionObjects().stream()
-                    .filter(o -> o.getClassification() != null &&
-                            o.getClassification().contains(modalityBase))
-                    .toList()  // Collect to list first to avoid concurrent modification
-                    .forEach(o -> gui.getViewer().getHierarchy().removeObject(o, false));
-            gui.getViewer().getHierarchy().fireHierarchyChangedEvent(gui.getViewer());
-            logger.info("Removed existing tiles for modality base: {}", modalityBase);
+            // Simply delegate to the unified method in TilingUtilities
+            TilingUtilities.createTilesForAnnotations(
+                    annotations,
+                    sampleSetup,
+                    tempTileDirectory,
+                    modeWithIndex
+            );
 
-            // Get camera parameters from config
-            MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(
-                    QPPreferenceDialog.getMicroscopeConfigFileProperty());
-
-            double pixelSize = mgr.getDouble("imagingMode", sampleSetup.modality(), "pixelSize_um");
-            int cameraWidth = mgr.getInteger("imagingMode", sampleSetup.modality(), "detector", "width_px");
-            int cameraHeight = mgr.getInteger("imagingMode", sampleSetup.modality(), "detector", "height_px");
-
-            double mainPixelSize = gui.getImageData().getServer()
-                    .getPixelCalibration().getAveragedPixelSizeMicrons();
-
-            double frameWidthMicrons = pixelSize * cameraWidth;
-            double frameHeightMicrons = pixelSize * cameraHeight;
-
-            // Convert to QuPath pixels (full resolution)
-            double frameWidthQP = frameWidthMicrons / mainPixelSize;
-            double frameHeightQP = frameHeightMicrons / mainPixelSize;
-            double overlapPercent = QPPreferenceDialog.getTileOverlapPercentProperty();
-
-            logger.info("Creating tiles: frame size {}x{} QP pixels ({}x{} µm) for modality {}",
-                    frameWidthQP, frameHeightQP, frameWidthMicrons, frameHeightMicrons, sampleSetup.modality());
-
-            // Build tiling request - tiles in full resolution coordinates
-            TilingRequest request = new TilingRequest.Builder()
-                    .outputFolder(tempTileDirectory)
-                    .modalityName(modeWithIndex)
-                    .frameSize(frameWidthQP, frameHeightQP)
-                    .overlapPercent(overlapPercent)
-                    .annotations(annotations)
-                    .invertAxes(invertedX, invertedY)
-                    .createDetections(true)  // Important for alignment
-                    .addBuffer(true)
-                    .build();
-
-            TilingUtilities.createTiles(request);
             logger.info("Created detection tiles for alignment");
 
         } catch (IOException e) {
@@ -656,6 +616,12 @@ public class MicroscopeAlignmentWorkflow {
             UIFunctions.notifyUserOfError(
                     "Failed to create tiles: " + e.getMessage(),
                     "Tiling Error"
+            );
+        } catch (IllegalArgumentException e) {
+            logger.error("Invalid tile configuration", e);
+            UIFunctions.notifyUserOfError(
+                    "Invalid tile configuration: " + e.getMessage(),
+                    "Configuration Error"
             );
         }
     }
@@ -763,17 +729,22 @@ public class MicroscopeAlignmentWorkflow {
             // This transform will map macro pixel coordinates directly to stage micrometers
             AffineTransform macroToStageTransform = new AffineTransform();
 
-            // Scale by macro pixel size (converts pixels to micrometers)
+            // The correct order for the transform:
+            // 1. Translate green box center to origin (in pixels)
+            // 2. Scale from pixels to micrometers
+            // 3. Translate to stage position (in micrometers)
+
+            // Since AffineTransform methods apply in reverse order, we do:
+            // First: translate to stage position
+            macroToStageTransform.translate(stageCenter.getX(), stageCenter.getY());
+            // Second: scale pixels to micrometers
             macroToStageTransform.scale(macroPixelSize, macroPixelSize);
+            // Third: move green box center to origin
+            macroToStageTransform.translate(-greenBoxCenterX, -greenBoxCenterY);
 
-            // Translate to align the centers
-            // After scaling, we need to translate so green box center maps to stage center
-            double translateX = stageCenter.getX() / macroPixelSize - greenBoxCenterX;
-            double translateY = stageCenter.getY() / macroPixelSize - greenBoxCenterY;
-            macroToStageTransform.translate(translateX, translateY);
-
-            logger.info("Transform created with scale {} and translation ({}, {})",
-                    macroPixelSize, translateX, translateY);
+            logger.info("Transform created:");
+            logger.info("  Green box center ({}, {}) pixels -> Stage center ({}, {}) µm",
+                    greenBoxCenterX, greenBoxCenterY, stageCenter.getX(), stageCenter.getY());
 
             // Step 7: Validate the transform
             // Log some key point transformations for debugging

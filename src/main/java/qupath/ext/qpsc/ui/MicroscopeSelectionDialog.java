@@ -175,7 +175,7 @@ public class MicroscopeSelectionDialog {
                             }
 
                             if (hasMacro) {
-                                Double pixelSize = MinorFunctions.getYamlDouble(configData, "macro", "pixelSize_um");
+                                Double pixelSize = MinorFunctions.getYamlDouble(configData, "macro", "pixel_size_um");
 
                                 info.append("Macro image: SUPPORTED");
                                 if (pixelSize != null) {
@@ -184,7 +184,7 @@ public class MicroscopeSelectionDialog {
                                 info.append("\n");
 
                                 // Check if cropping is required
-                                Boolean cropRequired = MinorFunctions.getYamlBoolean(configData, "macro", "requiresCropping");
+                                Boolean cropRequired = MinorFunctions.getYamlBoolean(configData, "macro", "requires_cropping");
                                 if (cropRequired != null && cropRequired) {
                                     info.append("Requires slide area cropping\n");
                                 }

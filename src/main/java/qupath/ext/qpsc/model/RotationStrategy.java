@@ -19,7 +19,7 @@ public interface RotationStrategy {
 
     /**
      * Determines if this strategy applies to the given modality.
-     * @param modalityName The imaging modality (e.g., "BF_10x", "PPM_20x")
+     * @param modalityName The imaging modality (e.g., "bf_10x", "ppm_20x")
      * @return true if this strategy should handle the modality
      */
     boolean appliesTo(String modalityName);
@@ -101,7 +101,7 @@ class PPMRotationStrategy implements RotationStrategy {
 
     @Override
     public boolean appliesTo(String modalityName) {
-        return modalityName != null && modalityName.startsWith("PPM_");
+        return modalityName != null && modalityName.startsWith("ppm_");
     }
 
     @Override

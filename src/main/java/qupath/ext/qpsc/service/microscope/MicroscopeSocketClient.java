@@ -105,7 +105,8 @@ public class MicroscopeSocketClient implements AutoCloseable {
         /** Get acquisition progress */
         PROGRESS("progress"),
         /** Cancel acquisition */
-        CANCEL("cancel__");
+        CANCEL("cancel__"),
+        GETFOV("getfov__");
 
         private final byte[] value;
 
@@ -261,6 +262,28 @@ public class MicroscopeSocketClient implements AutoCloseable {
             logger.info("Disconnected from microscope server");
         }
     }
+    /**
+     * Gets the current camera field of view in microns.
+     * This returns the actual FOV dimensions accounting for the current objective
+     * and camera settings, eliminating the need for manual calculations.
+     *
+     * @return Array containing [width, height] in microns
+     * @throws IOException if communication fails
+     */
+    public double[] getCameraFOV() throws IOException {
+        byte[] response = executeCommand(Command.GETFOV, null, 8);
+
+        ByteBuffer buffer = ByteBuffer.wrap(response);
+        buffer.order(ByteOrder.BIG_ENDIAN);
+
+        float fovX = buffer.getFloat();
+        float fovY = buffer.getFloat();
+
+        logger.info("Camera FOV: {} x {} microns", fovX, fovY);
+        return new double[] { fovX, fovY };
+    }
+
+
 
     /**
      * Gets the current XY position of the microscope stage.
@@ -277,7 +300,7 @@ public class MicroscopeSocketClient implements AutoCloseable {
         float x = buffer.getFloat();
         float y = buffer.getFloat();
 
-        logger.debug("Stage XY position: ({}, {})", x, y);
+        logger.info("Stage XY position: ({}, {})", x, y);
         return new double[] { x, y };
     }
 
@@ -294,7 +317,7 @@ public class MicroscopeSocketClient implements AutoCloseable {
         buffer.order(ByteOrder.BIG_ENDIAN);
 
         float z = buffer.getFloat();
-        logger.debug("Stage Z position: {}", z);
+        logger.info("Stage Z position: {}", z);
         return z;
     }
 

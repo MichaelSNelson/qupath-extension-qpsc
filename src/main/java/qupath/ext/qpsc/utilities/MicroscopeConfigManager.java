@@ -49,8 +49,8 @@ public class MicroscopeConfigManager {
         // Dynamically build field-to-section map from the top-level of resources_LOCI.yml
         this.lociSectionMap = new HashMap<>();
         for (String section : resourceData.keySet()) {
-            if (section.startsWith("ID_")) {
-                String field = section.substring(3) // remove "ID_"
+            if (section.startsWith("ID_") || section.startsWith("id_")) {
+                String field = section.substring(3) // remove "id_"
                         .replaceAll("_", "")           // e.g. "OBJECTIVE_LENS" → "OBJECTIVELENS"
                         .toLowerCase();                // "OBJECTIVELENS" → "objectivelens"
                 lociSectionMap.put(field, section);
@@ -94,6 +94,18 @@ public class MicroscopeConfigManager {
         String resPath = computeResourcePath(configPath);
         resourceData.clear();
         resourceData.putAll(loadConfig(resPath));
+    }
+    /**
+     * Retrieves a section from the resources file directly.
+     * This bypasses the normal config lookup and goes straight to resources.
+     *
+     * @param sectionName The top-level section name in resources (e.g., "id_detector")
+     * @return Map containing the section data, or null if not found
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getResourceSection(String sectionName) {
+        Object section = resourceData.get(sectionName);
+        return (section instanceof Map<?, ?>) ? (Map<String, Object>) section : null;
     }
 
     /**
@@ -156,7 +168,7 @@ public class MicroscopeConfigManager {
      * <p>
      * All warning/error messages use strings from the resource bundle for localization.
      *
-     * @param keys Sequence of keys (e.g., "imagingMode", "BF_10x", "detector", "width_px").
+     * @param keys Sequence of keys (e.g., "imaging_mode", "bf_10x", "detector", "width_px").
      * @return The value at the end of the key path, or null if not found.
      */
     @SuppressWarnings("unchecked")
@@ -218,7 +230,7 @@ public class MicroscopeConfigManager {
      * @param parentField   The key referring to a hardware part ("detector", "objectiveLens", etc.)
      * @param resourceData  The parsed LOCI resource map
      * @param res           The strings ResourceBundle
-     * @return Section name in resourceData (e.g., "ID_Detector"), or null if not found
+     * @return Section name in resourceData (e.g., "id_detector"), or null if not found
      */
     private static String findResourceSectionForID(String parentField, Map<String, Object> resourceData, ResourceBundle res) {
         for (String section : resourceData.keySet()) {
@@ -381,64 +393,6 @@ public class MicroscopeConfigManager {
         return getAvailableScanners().contains(scannerName);
     }
 
-    /**
-     * Get scanner type
-     */
-    public String getScannerType(String scannerName) {
-        String type = getString("scanners", scannerName, "type");
-        return type != null ? type : "Generic";
-    }
-
-    /**
-     * Check if scanner requires macro cropping
-     */
-    public boolean scannerRequiresCropping(String scannerName) {
-        Boolean requiresCropping = getBoolean("scanners", scannerName, "macro", "requiresCropping");
-        if (requiresCropping == null) {
-            logger.warn("No requiresCropping setting for scanner '{}', defaulting to false", scannerName);
-            return false;
-        }
-        return requiresCropping;
-    }
-
-    /**
-     * Get macro pixel size for scanner
-     */
-    public double getScannerMacroPixelSize(String scannerName) {
-        Double pixelSize = getDouble("scanners", scannerName, "macro", "pixelSize_um");
-        if (pixelSize == null || pixelSize <= 0) {
-            throw new IllegalStateException(
-                    "Scanner '" + scannerName + "' has no valid macro pixel size configured. " +
-                            "Please add 'macro.pixelSize_um' to the scanner configuration."
-            );
-        }
-        return pixelSize;
-    }
-
-    /**
-     * Get slide bounds for scanner
-     */
-    public SlideBounds getScannerSlideBounds(String scannerName) {
-        if (!scannerRequiresCropping(scannerName)) {
-            return null;
-        }
-
-        try {
-            Integer xMin = getInteger("scanners", scannerName, "macro", "slideBounds", "xMin");
-            Integer xMax = getInteger("scanners", scannerName, "macro", "slideBounds", "xMax");
-            Integer yMin = getInteger("scanners", scannerName, "macro", "slideBounds", "yMin");
-            Integer yMax = getInteger("scanners", scannerName, "macro", "slideBounds", "yMax");
-
-            if (xMin != null && xMax != null && yMin != null && yMax != null) {
-                return new SlideBounds(xMin, xMax, yMin, yMax);
-            }
-        } catch (Exception e) {
-            logger.error("Error reading slide bounds for scanner '{}'", scannerName, e);
-        }
-
-        logger.warn("Slide bounds not properly configured for scanner '{}'", scannerName);
-        return null;
-    }
 
     /**
      * Container for slide boundary information

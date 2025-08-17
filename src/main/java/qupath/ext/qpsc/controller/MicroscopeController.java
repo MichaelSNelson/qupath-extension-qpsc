@@ -309,7 +309,24 @@ public class MicroscopeController {
     public AffineTransform getCurrentTransform() {
         return this.currentTransform.get();
     }
-
+    /**
+     * Gets the current camera field of view in microns.
+     * This queries the microscope server for the actual FOV dimensions,
+     * which accounts for the current objective and camera configuration.
+     *
+     * @return Array containing [width, height] in microns
+     * @throws IOException if communication fails
+     */
+    public double[] getCameraFOV() throws IOException {
+        try {
+            double[] fov = socketClient.getCameraFOV();
+            logger.info("Camera FOV: {} x {} microns", fov[0], fov[1]);
+            return fov;
+        } catch (IOException e) {
+            logger.error("Failed to get camera FOV: {}", e.getMessage());
+            throw new IOException("Failed to get camera FOV via socket", e);
+        }
+    }
     /**
      * Checks if the given XY coordinates are within stage bounds.
      *
@@ -319,21 +336,29 @@ public class MicroscopeController {
      */
     public boolean isWithinBoundsXY(double x, double y) {
         String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
-        var xlimits = MicroscopeConfigManager.getInstance(configPath).getSection("stage", "xlimit");
-        var ylimits = MicroscopeConfigManager.getInstance(configPath).getSection("stage", "ylimit");
+        MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(configPath);
 
-        if (xlimits == null || ylimits == null) {
-            logger.error("Stage limits missing from config");
-            return false;
+        // Try to get limits using getDouble with proper path
+        Double xLow = mgr.getDouble("stage", "x_limit", "low");
+        Double xHigh = mgr.getDouble("stage", "x_limit", "high");
+        Double yLow = mgr.getDouble("stage", "y_limit", "low");
+        Double yHigh = mgr.getDouble("stage", "y_limit", "high");
+
+        if (xLow == null || xHigh == null || yLow == null || yHigh == null) {
+            logger.error("Stage limits missing from config - xLow: {}, xHigh: {}, yLow: {}, yHigh: {}",
+                    xLow, xHigh, yLow, yHigh);
+            // Default to allowing movement if limits not configured
+            logger.warn("Stage limits not configured, allowing movement");
+            return true;
         }
-
-        double xLow = ((Number)xlimits.get("low")).doubleValue();
-        double xHigh = ((Number)xlimits.get("high")).doubleValue();
-        double yLow = ((Number)ylimits.get("low")).doubleValue();
-        double yHigh = ((Number)ylimits.get("high")).doubleValue();
 
         boolean withinX = (x >= Math.min(xLow, xHigh) && x <= Math.max(xLow, xHigh));
         boolean withinY = (y >= Math.min(yLow, yHigh) && y <= Math.max(yLow, yHigh));
+
+        if (!withinX || !withinY) {
+            logger.warn("Position ({}, {}) outside stage bounds: X[{}, {}], Y[{}, {}]",
+                    x, y, xLow, xHigh, yLow, yHigh);
+        }
 
         return withinX && withinY;
     }
@@ -346,17 +371,101 @@ public class MicroscopeController {
      */
     public boolean isWithinBoundsZ(double z) {
         String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
-        var zlimits = MicroscopeConfigManager.getInstance(configPath).getSection("stage", "zlimit");
+        MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(configPath);
 
-        if (zlimits == null) {
-            logger.error("Stage Z limits missing from config");
-            return false;
+        // Try to get limits using getDouble with proper path
+        Double zLow = mgr.getDouble("stage", "z_limit", "low");
+        Double zHigh = mgr.getDouble("stage", "z_limit", "high");
+
+        if (zLow == null || zHigh == null) {
+            logger.error("Stage Z limits missing from config - zLow: {}, zHigh: {}", zLow, zHigh);
+            // Default to allowing movement if limits not configured
+            logger.warn("Stage Z limits not configured, allowing movement");
+            return true;
         }
 
-        double zLow = ((Number)zlimits.get("low")).doubleValue();
-        double zHigh = ((Number)zlimits.get("high")).doubleValue();
+        boolean withinZ = (z >= Math.min(zLow, zHigh) && z <= Math.max(zLow, zHigh));
 
-        return (z >= Math.min(zLow, zHigh) && z <= Math.max(zLow, zHigh));
+        if (!withinZ) {
+            logger.warn("Z position {} outside stage bounds: [{}, {}]", z, zLow, zHigh);
+        }
+
+        return withinZ;
+    }
+
+    /**
+     * Calculates camera field of view for a specific modality from configuration files.
+     * This method reads pixel size and detector dimensions from the config to compute FOV,
+     * avoiding the need to query the server which doesn't know the active objective.
+     *
+     * @param modality The imaging modality (e.g., "bf_10x", "bf_40x", "ppm_20x")
+     * @return Array containing [width, height] in microns
+     * @throws IOException if configuration is missing or invalid
+     */
+    public double[] getCameraFOVFromConfig(String modality) throws IOException {
+        logger.info("Calculating camera FOV from config for modality: {}", modality);
+
+        String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
+        MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(configPath);
+
+        // Get pixel size for the modality
+        Double pixelSize = mgr.getDouble("imaging_mode", modality, "pixel_size_um");
+        if (pixelSize == null) {
+            throw new IOException("No pixel size found for modality: " + modality);
+        }
+
+        // Try to get detector/camera from the modality first
+        String detectorName = mgr.getString("imaging_mode", modality, "detector");
+
+        // If not found at modality level, check for camera at microscope level
+        if (detectorName == null) {
+            logger.debug("No detector at modality level, checking microscope level camera");
+            detectorName = mgr.getString("microscope", "camera");
+        }
+
+        if (detectorName == null) {
+            throw new IOException("No detector/camera specified for modality: " + modality +
+                    " (checked both modality and microscope levels)");
+        }
+
+        logger.debug("Using detector/camera: {} for modality: {}", detectorName, modality);
+
+
+        // Try to get dimensions through the config manager's traversal
+        Integer width = mgr.getInteger("imaging_mode", modality, "detector", "width_px");
+        Integer height = mgr.getInteger("imaging_mode", modality, "detector", "height_px");
+
+        if (width == null || height == null) {
+            // If that didn't work, try direct resource lookup
+            logger.debug("Attempting direct resource lookup for detector: {}", detectorName);
+            Map<String, Object> detectorSection = mgr.getResourceSection("id_detector");
+            if (detectorSection != null && detectorSection.containsKey(detectorName)) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> detectorInfo = (Map<String, Object>) detectorSection.get(detectorName);
+                if (detectorInfo != null) {
+                    Object widthObj = detectorInfo.get("width_px");
+                    Object heightObj = detectorInfo.get("height_px");
+                    if (widthObj instanceof Number && heightObj instanceof Number) {
+                        width = ((Number) widthObj).intValue();
+                        height = ((Number) heightObj).intValue();
+                    }
+                }
+            }
+        }
+
+        if (width == null || height == null) {
+            throw new IOException(String.format(
+                    "No detector dimensions found for modality '%s' with detector '%s'",
+                    modality, detectorName));
+        }
+
+        double fovWidth = width * pixelSize;
+        double fovHeight = height * pixelSize;
+
+        logger.info("Camera FOV for {}: {:.1f} x {:.1f} µm ({}x{} pixels @ {} µm/pixel)",
+                modality, fovWidth, fovHeight, width, height, pixelSize);
+
+        return new double[]{fovWidth, fovHeight};
     }
 
     /**

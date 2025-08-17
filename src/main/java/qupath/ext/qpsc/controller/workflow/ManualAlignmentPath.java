@@ -108,7 +108,7 @@ public class ManualAlignmentPath {
                         Map<String, Object> scannerConfig = MinorFunctions.loadYamlFile(
                                 scannerConfigFile.getAbsolutePath());
                         Double pixelSize = MinorFunctions.getYamlDouble(
-                                scannerConfig, "macro", "pixelSize_um");
+                                scannerConfig, "macro", "pixel_size_um");
 
                         if (pixelSize != null && pixelSize > 0) {
                             logger.info("Loaded pixel size {} from scanner config", pixelSize);

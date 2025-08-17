@@ -568,6 +568,7 @@ public class UIFunctions {
 
     /**
      * Executes a long-running task with a progress dialog.
+     * Enhanced version with proper cleanup and timeout handling.
      *
      * @param title Dialog title
      * @param message Progress message to display
@@ -575,84 +576,264 @@ public class UIFunctions {
      * @return The result of the task
      */
     public static <T> T executeWithProgress(String title, String message, Callable<T> task) {
+        logger.debug("executeWithProgress called with title: {}", title);
+
         if (Platform.isFxApplicationThread()) {
-            // If on FX thread, show non-blocking progress
-            Alert progressAlert = new Alert(Alert.AlertType.INFORMATION);
-            progressAlert.setTitle(title);
-            progressAlert.setHeaderText(message);
-            progressAlert.setContentText("Please wait...");
+            // If on FX thread, we need to handle this carefully to avoid blocking
+            logger.warn("executeWithProgress called on FX thread - using non-blocking approach");
+
+            // Create a simple progress stage instead of Alert
+            Stage progressStage = new Stage();
+            progressStage.setTitle(title);
+            progressStage.initModality(Modality.APPLICATION_MODAL);
+            progressStage.setResizable(false);
+            progressStage.setOnCloseRequest(e -> e.consume()); // Prevent closing during operation
+
+            VBox vbox = new VBox(15);
+            vbox.setPadding(new Insets(20));
+            vbox.setAlignment(Pos.CENTER);
+
+            Label headerLabel = new Label(message);
+            headerLabel.setWrapText(true);
+            headerLabel.setPrefWidth(350);
 
             ProgressBar progressBar = new ProgressBar();
             progressBar.setProgress(ProgressBar.INDETERMINATE_PROGRESS);
             progressBar.setPrefWidth(300);
 
-            VBox vbox = new VBox(10);
-            vbox.setAlignment(Pos.CENTER);
-            vbox.getChildren().add(progressBar);
+            Label statusLabel = new Label("Please wait...");
 
-            progressAlert.getDialogPane().setContent(vbox);
-            progressAlert.getButtonTypes().clear();
-            progressAlert.show();
+            Button cancelButton = new Button("Cancel");
+            cancelButton.setDisable(true); // Initially disabled
 
-            try {
-                T result = task.call();
-                progressAlert.close();
-                return result;
-            } catch (Exception e) {
-                progressAlert.close();
-                throw new RuntimeException(e);
-            }
-        } else {
-            // If not on FX thread, use CompletableFuture
-            CompletableFuture<T> future = new CompletableFuture<>();
-            CountDownLatch latch = new CountDownLatch(1);
+            vbox.getChildren().addAll(headerLabel, progressBar, statusLabel, cancelButton);
 
-            Platform.runLater(() -> {
-                Alert progressAlert = new Alert(Alert.AlertType.INFORMATION);
-                progressAlert.setTitle(title);
-                progressAlert.setHeaderText(message);
-                progressAlert.setContentText("Please wait...");
+            Scene scene = new Scene(vbox);
+            progressStage.setScene(scene);
 
-                ProgressBar progressBar = new ProgressBar();
-                progressBar.setProgress(ProgressBar.INDETERMINATE_PROGRESS);
-                progressBar.setPrefWidth(300);
+            // Use a CompletableFuture to run the task asynchronously
+            CompletableFuture<T> future = CompletableFuture.supplyAsync(() -> {
+                try {
+                    logger.debug("Starting task execution");
+                    return task.call();
+                } catch (Exception e) {
+                    logger.error("Task failed with exception", e);
+                    throw new RuntimeException(e);
+                }
+            });
 
-                VBox vbox = new VBox(10);
-                vbox.setAlignment(Pos.CENTER);
-                vbox.getChildren().add(progressBar);
-
-                progressAlert.getDialogPane().setContent(vbox);
-                progressAlert.getButtonTypes().clear();
-                progressAlert.show();
-                latch.countDown();
-
-                // Execute task in background
-                CompletableFuture.supplyAsync(() -> {
-                    try {
-                        return task.call();
-                    } catch (Exception e) {
-                        throw new RuntimeException(e);
-                    }
-                }).thenAccept(result -> {
-                    Platform.runLater(() -> {
-                        progressAlert.close();
-                        future.complete(result);
-                    });
-                }).exceptionally(ex -> {
-                    Platform.runLater(() -> {
-                        progressAlert.close();
-                        future.completeExceptionally(ex);
-                    });
-                    return null;
+            // Handle completion
+            future.whenComplete((result, error) -> {
+                Platform.runLater(() -> {
+                    logger.debug("Task completed, closing progress dialog");
+                    progressStage.close();
                 });
             });
 
+            // Show the progress stage
+            progressStage.show();
+
+            // Process events while waiting (this is the key part)
             try {
-                latch.await(); // Wait for dialog to be shown
+                while (!future.isDone()) {
+                    Thread.sleep(50);
+                    // This allows the UI to remain responsive
+                    Platform.runLater(() -> {});
+                }
+
                 return future.get();
             } catch (Exception e) {
-                throw new RuntimeException(e);
+                logger.error("Error waiting for task completion", e);
+                progressStage.close();
+                throw new RuntimeException("Task execution failed", e);
+            }
+
+        } else {
+            // Not on FX thread - safer approach
+            logger.debug("executeWithProgress called from background thread");
+
+            CompletableFuture<T> future = new CompletableFuture<>();
+            CountDownLatch dialogShownLatch = new CountDownLatch(1);
+
+            // Create reference holder for the stage
+            final Stage[] stageHolder = new Stage[1];
+
+            Platform.runLater(() -> {
+                try {
+                    Stage progressStage = new Stage();
+                    stageHolder[0] = progressStage;
+
+                    progressStage.setTitle(title);
+                    progressStage.initModality(Modality.APPLICATION_MODAL);
+                    progressStage.setResizable(false);
+
+                    VBox vbox = new VBox(15);
+                    vbox.setPadding(new Insets(20));
+                    vbox.setAlignment(Pos.CENTER);
+
+                    Label headerLabel = new Label(message);
+                    headerLabel.setWrapText(true);
+                    headerLabel.setPrefWidth(350);
+
+                    ProgressBar progressBar = new ProgressBar();
+                    progressBar.setProgress(ProgressBar.INDETERMINATE_PROGRESS);
+                    progressBar.setPrefWidth(300);
+
+                    Label statusLabel = new Label("Please wait...");
+
+                    vbox.getChildren().addAll(headerLabel, progressBar, statusLabel);
+
+                    Scene scene = new Scene(vbox);
+                    progressStage.setScene(scene);
+
+                    // Prevent closing while task is running
+                    progressStage.setOnCloseRequest(e -> {
+                        if (!future.isDone()) {
+                            e.consume();
+                            statusLabel.setText("Processing... Please wait for completion.");
+                        }
+                    });
+
+                    progressStage.show();
+                    dialogShownLatch.countDown();
+
+                } catch (Exception e) {
+                    logger.error("Failed to create progress dialog", e);
+                    dialogShownLatch.countDown();
+                    future.completeExceptionally(e);
+                }
+            });
+
+            // Execute task in background
+            CompletableFuture.runAsync(() -> {
+                try {
+                    // Wait for dialog to be shown
+                    dialogShownLatch.await(5, TimeUnit.SECONDS);
+
+                    logger.debug("Executing task in background");
+                    T result = task.call();
+                    logger.debug("Task completed successfully");
+
+                    Platform.runLater(() -> {
+                        if (stageHolder[0] != null) {
+                            stageHolder[0].close();
+                        }
+                        future.complete(result);
+                    });
+
+                } catch (Exception e) {
+                    logger.error("Task execution failed", e);
+                    Platform.runLater(() -> {
+                        if (stageHolder[0] != null) {
+                            stageHolder[0].close();
+                        }
+                        future.completeExceptionally(e);
+                    });
+                }
+            });
+
+            // Add timeout to prevent infinite waiting
+            ScheduledExecutorService timeoutExecutor = Executors.newSingleThreadScheduledExecutor();
+            timeoutExecutor.schedule(() -> {
+                if (!future.isDone()) {
+                    logger.warn("Task timed out after 5 minutes");
+                    Platform.runLater(() -> {
+                        if (stageHolder[0] != null) {
+                            stageHolder[0].close();
+                        }
+                    });
+                    future.completeExceptionally(new TimeoutException("Task timed out after 5 minutes"));
+                }
+            }, 5, TimeUnit.MINUTES);
+
+            try {
+                T result = future.get();
+                timeoutExecutor.shutdown();
+                return result;
+            } catch (InterruptedException e) {
+                logger.error("Task interrupted", e);
+                Thread.currentThread().interrupt();
+                throw new RuntimeException("Task was interrupted", e);
+            } catch (ExecutionException e) {
+                logger.error("Task execution failed", e);
+                Throwable cause = e.getCause();
+                if (cause instanceof RuntimeException) {
+                    throw (RuntimeException) cause;
+                }
+                throw new RuntimeException("Task execution failed", cause);
+            } finally {
+                timeoutExecutor.shutdownNow();
+                // Ensure dialog is closed
+                Platform.runLater(() -> {
+                    if (stageHolder[0] != null && stageHolder[0].isShowing()) {
+                        stageHolder[0].close();
+                    }
+                });
             }
         }
     }
+    /**
+     * Shows a simple, non-blocking progress notification that auto-closes.
+     * Use this for quick operations where you just want to inform the user.
+     *
+     * @param title The title of the notification
+     * @param message The message to display
+     * @param durationSeconds How long to show the notification (0 = until manually closed)
+     * @return A Runnable that can be called to close the notification early
+     */
+    public static Runnable showProgressNotification(String title, String message, int durationSeconds) {
+        logger.debug("Showing progress notification: {}", title);
+
+        final Stage[] stageHolder = new Stage[1];
+
+        Platform.runLater(() -> {
+            Stage notificationStage = new Stage();
+            stageHolder[0] = notificationStage;
+
+            notificationStage.setTitle(title);
+            notificationStage.initModality(Modality.NONE); // Non-blocking
+            notificationStage.setAlwaysOnTop(true);
+            notificationStage.setResizable(false);
+
+            VBox vbox = new VBox(10);
+            vbox.setPadding(new Insets(15));
+            vbox.setAlignment(Pos.CENTER);
+            vbox.setMinWidth(300);
+
+            Label messageLabel = new Label(message);
+            messageLabel.setWrapText(true);
+
+            ProgressBar progressBar = new ProgressBar();
+            progressBar.setProgress(ProgressBar.INDETERMINATE_PROGRESS);
+            progressBar.setPrefWidth(250);
+
+            vbox.getChildren().addAll(messageLabel, progressBar);
+
+            Scene scene = new Scene(vbox);
+            notificationStage.setScene(scene);
+
+            // Position in corner
+            notificationStage.setX(javafx.stage.Screen.getPrimary().getVisualBounds().getMaxX() - 320);
+            notificationStage.setY(javafx.stage.Screen.getPrimary().getVisualBounds().getMaxY() - 120);
+
+            notificationStage.show();
+
+            // Auto-close after duration if specified
+            if (durationSeconds > 0) {
+                PauseTransition pause = new PauseTransition(Duration.seconds(durationSeconds));
+                pause.setOnFinished(e -> notificationStage.close());
+                pause.play();
+            }
+        });
+
+        // Return a runnable that can close the notification
+        return () -> {
+            Platform.runLater(() -> {
+                if (stageHolder[0] != null && stageHolder[0].isShowing()) {
+                    stageHolder[0].close();
+                }
+            });
+        };
+    }
+
 }

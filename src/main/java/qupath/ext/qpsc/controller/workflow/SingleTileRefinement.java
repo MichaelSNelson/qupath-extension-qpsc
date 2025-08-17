@@ -132,17 +132,6 @@ public class SingleTileRefinement {
         double[] estimatedStageCoords = TransformationFunctions.transformQuPathFullResToStage(
                 tileCoords, initialTransform);
 
-        // Validate stage bounds
-        if (!validateStageBounds(estimatedStageCoords)) {
-            UIFunctions.notifyUserOfError(
-                    "Selected tile is outside stage bounds!\n" +
-                            "Please select a different tile or create a new alignment.",
-                    "Stage Bounds Error"
-            );
-            future.complete(initialTransform);
-            return;
-        }
-
         // Center viewer on tile
         centerViewerOnTile(gui, selectedTile);
 
@@ -159,31 +148,6 @@ public class SingleTileRefinement {
         showRefinementDialog(tileCoords, initialTransform, future);
     }
 
-    /**
-     * Validates that stage coordinates are within allowed bounds.
-     *
-     * @param stageCoords Stage coordinates to validate
-     * @return true if coordinates are valid, false otherwise
-     */
-    private static boolean validateStageBounds(double[] stageCoords) {
-        MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(
-                QPPreferenceDialog.getMicroscopeConfigFileProperty());
-
-        double stageXMin = mgr.getDouble("stage", "xlimit", "low");
-        double stageXMax = mgr.getDouble("stage", "xlimit", "high");
-        double stageYMin = mgr.getDouble("stage", "ylimit", "low");
-        double stageYMax = mgr.getDouble("stage", "ylimit", "high");
-
-        boolean valid = stageCoords[0] >= stageXMin && stageCoords[0] <= stageXMax &&
-                stageCoords[1] >= stageYMin && stageCoords[1] <= stageYMax;
-
-        if (!valid) {
-            logger.warn("Stage coordinates ({}, {}) outside bounds: X[{}, {}], Y[{}, {}]",
-                    stageCoords[0], stageCoords[1], stageXMin, stageXMax, stageYMin, stageYMax);
-        }
-
-        return valid;
-    }
 
     /**
      * Centers the QuPath viewer on the selected tile.

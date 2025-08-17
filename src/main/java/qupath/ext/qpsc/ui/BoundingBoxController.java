@@ -54,7 +54,7 @@ public class BoundingBoxController {
                     ? SampleSetupController.getLastSampleSetup().modality()
                     : PersistentPreferences.getLastModality();
 
-            boolean isPPMModality = lastModality != null && lastModality.startsWith("PPM_");
+            boolean isPPMModality = lastModality != null && lastModality.startsWith("ppm_");
 
             // 1) Create and configure the dialog window
             Dialog<BoundingBoxResult> dlg = new Dialog<>();

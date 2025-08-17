@@ -444,7 +444,7 @@ public class AcquisitionManager {
         // Get required parameters for stitching
         String configFile = QPPreferenceDialog.getMicroscopeConfigFileProperty();
         MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(configFile);
-        double pixelSize = mgr.getDouble("imagingMode", state.sample.modality(), "pixelSize_um");
+        double pixelSize = mgr.getDouble("imaging_mode", state.sample.modality(), "pixel_size_um");
 
         Project<BufferedImage> project = (Project<BufferedImage>) state.projectInfo.getCurrentProject();
 
