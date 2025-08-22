@@ -1,0 +1,338 @@
+package qupath.ext.qpsc.ui;
+
+import javafx.application.Platform;
+import javafx.beans.binding.Bindings;
+import javafx.collections.FXCollections;
+import javafx.collections.ObservableList;
+import javafx.geometry.Insets;
+import javafx.scene.Node;
+import javafx.scene.control.*;
+import javafx.scene.layout.*;
+import javafx.scene.paint.Color;
+import javafx.stage.Modality;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import qupath.ext.qpsc.preferences.PersistentPreferences;
+import qupath.lib.objects.PathObject;
+import qupath.lib.objects.classes.PathClass;
+import qupath.lib.scripting.QP;
+
+import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.stream.Collectors;
+
+/**
+ * Combined dialog for annotation validation and class selection.
+ * First tab shows annotations to acquire, second tab allows class filtering.
+ */
+public class AnnotationAcquisitionDialog {
+    private static final Logger logger = LoggerFactory.getLogger(AnnotationAcquisitionDialog.class);
+
+    private static final String[] DEFAULT_CLASSES = {"Tissue", "Scanned Area", "Bounding Box"};
+
+    /**
+     * Shows the combined acquisition dialog.
+     *
+     * @param availableClasses All unique annotation classes in the current image
+     * @param preselectedClasses Classes selected from previous runs
+     * @return CompletableFuture with selected classes and whether to proceed
+     */
+    public static CompletableFuture<AcquisitionResult> showDialog(
+            Set<String> availableClasses,
+            List<String> preselectedClasses) {
+
+        CompletableFuture<AcquisitionResult> future = new CompletableFuture<>();
+
+        Platform.runLater(() -> {
+            Dialog<AcquisitionResult> dialog = new Dialog<>();
+            dialog.initModality(Modality.APPLICATION_MODAL);
+            dialog.setTitle("Annotation Acquisition");
+            dialog.setHeaderText(null);
+
+            // Create observable list for selected classes
+            ObservableList<String> selectedClasses = FXCollections.observableArrayList(preselectedClasses);
+
+            // Create tabs
+            TabPane tabPane = new TabPane();
+            tabPane.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
+
+            // Tab 1: Acquisition Summary (main tab)
+            Tab summaryTab = new Tab("Acquire Regions");
+            VBox summaryContent = createSummaryContent(selectedClasses);
+            summaryTab.setContent(summaryContent);
+
+            // Tab 2: Class Selection
+            Tab classTab = new Tab("Filter Classes");
+            VBox classContent = createClassSelectionContent(availableClasses, selectedClasses);
+            classTab.setContent(classContent);
+
+            tabPane.getTabs().addAll(summaryTab, classTab);
+
+            dialog.getDialogPane().setContent(tabPane);
+            dialog.getDialogPane().setPrefWidth(550);
+            dialog.getDialogPane().setPrefHeight(450);
+
+            ButtonType collectButton = new ButtonType("Collect Regions", ButtonBar.ButtonData.OK_DONE);
+            ButtonType cancelButton = new ButtonType("Cancel", ButtonBar.ButtonData.CANCEL_CLOSE);
+            dialog.getDialogPane().getButtonTypes().addAll(collectButton, cancelButton);
+
+            // Style the collect button
+            Node collectNode = dialog.getDialogPane().lookupButton(collectButton);
+            collectNode.setStyle("-fx-base: #5a9fd4; -fx-font-weight: bold;");
+
+            // Disable collect button if no annotations match
+            Label countLabel = (Label) summaryContent.lookup("#countLabel");
+            collectNode.disableProperty().bind(
+                    Bindings.createBooleanBinding(
+                            () -> getMatchingAnnotations(selectedClasses).isEmpty(),
+                            selectedClasses
+                    )
+            );
+
+            dialog.setResultConverter(button -> {
+                if (button == collectButton) {
+                    // Save preferences if remember is checked
+                    CheckBox rememberCb = (CheckBox) classContent.lookup("#rememberCheckBox");
+                    if (rememberCb != null && rememberCb.isSelected()) {
+                        PersistentPreferences.setSelectedAnnotationClasses(new ArrayList<>(selectedClasses));
+                    }
+                    return new AcquisitionResult(new ArrayList<>(selectedClasses), true);
+                }
+                return new AcquisitionResult(Collections.emptyList(), false);
+            });
+
+            // Set initial focus to summary tab
+            Platform.runLater(() -> tabPane.getSelectionModel().select(summaryTab));
+
+            dialog.showAndWait().ifPresentOrElse(
+                    result -> future.complete(result),
+                    () -> future.complete(new AcquisitionResult(Collections.emptyList(), false))
+            );
+        });
+
+        return future;
+    }
+
+    /**
+     * Creates the summary content showing what will be acquired.
+     */
+    private static VBox createSummaryContent(ObservableList<String> selectedClasses) {
+        VBox content = new VBox(15);
+        content.setPadding(new Insets(20));
+
+        // Header
+        Label headerLabel = new Label("Annotations to be acquired:");
+        headerLabel.setStyle("-fx-font-size: 14px; -fx-font-weight: bold;");
+        content.getChildren().add(headerLabel);
+
+        // Annotation list
+        ListView<String> annotationList = new ListView<>();
+        annotationList.setPrefHeight(250);
+        annotationList.setStyle("-fx-font-size: 12px;");
+
+        // Count label
+        Label countLabel = new Label();
+        countLabel.setId("countLabel");
+        countLabel.setStyle("-fx-font-size: 16px; -fx-font-weight: bold;");
+
+        // Info label
+        Label infoLabel = new Label("Tip: Use the 'Filter Classes' tab to select which annotation types to acquire");
+        infoLabel.setStyle("-fx-font-size: 11px; -fx-font-style: italic;");
+        infoLabel.setWrapText(true);
+
+        // Update content when selected classes change
+        selectedClasses.addListener((javafx.collections.ListChangeListener<String>) change -> {
+            updateSummaryDisplay(selectedClasses, annotationList, countLabel);
+        });
+
+        // Initial update
+        updateSummaryDisplay(selectedClasses, annotationList, countLabel);
+
+        content.getChildren().addAll(annotationList, countLabel, new Separator(), infoLabel);
+
+        return content;
+    }
+
+    /**
+     * Creates the class selection content.
+     */
+    private static VBox createClassSelectionContent(Set<String> availableClasses,
+                                                    ObservableList<String> selectedClasses) {
+        VBox content = new VBox(10);
+        content.setPadding(new Insets(15));
+
+        Label instructionLabel = new Label("Select which annotation classes to include:");
+        instructionLabel.setStyle("-fx-font-weight: bold;");
+        content.getChildren().add(instructionLabel);
+
+        // Quick selection buttons
+        HBox quickButtons = new HBox(10);
+        Button selectAllBtn = new Button("All");
+        Button selectNoneBtn = new Button("None");
+        Button selectDefaultBtn = new Button("Common Types");
+        selectDefaultBtn.setTooltip(new Tooltip("Select: " + String.join(", ", DEFAULT_CLASSES)));
+        quickButtons.getChildren().addAll(selectAllBtn, selectNoneBtn, selectDefaultBtn);
+        content.getChildren().add(quickButtons);
+
+        content.getChildren().add(new Separator());
+
+        // Checkbox list
+        ScrollPane scrollPane = new ScrollPane();
+        VBox checkBoxContainer = new VBox(5);
+        checkBoxContainer.setPadding(new Insets(5));
+
+        // Sort classes for consistent display
+        List<String> sortedClasses = new ArrayList<>(availableClasses);
+        Collections.sort(sortedClasses);
+
+        // Create checkboxes
+        List<CheckBox> checkBoxes = new ArrayList<>();
+        for (String className : sortedClasses) {
+            CheckBox cb = new CheckBox(className);
+
+            // Pre-select based on current selection
+            cb.setSelected(selectedClasses.contains(className));
+
+            // Update selected classes when checkbox changes
+            cb.selectedProperty().addListener((obs, wasSelected, isSelected) -> {
+                if (isSelected && !selectedClasses.contains(className)) {
+                    selectedClasses.add(className);
+                } else if (!isSelected) {
+                    selectedClasses.remove(className);
+                }
+            });
+
+            // Highlight default classes
+            if (Arrays.asList(DEFAULT_CLASSES).contains(className)) {
+                cb.setStyle("-fx-font-weight: bold;");
+            }
+
+            // Show annotation count for this class
+            long count = QP.getAnnotationObjects().stream()
+                    .filter(ann -> ann.getROI() != null && !ann.getROI().isEmpty())
+                    .filter(ann -> ann.getPathClass() != null &&
+                            className.equals(ann.getPathClass().getName()))
+                    .count();
+
+            if (count > 0) {
+                cb.setText(String.format("%s (%d)", className, count));
+            }
+
+            checkBoxes.add(cb);
+            checkBoxContainer.getChildren().add(cb);
+        }
+
+        scrollPane.setContent(checkBoxContainer);
+        scrollPane.setFitToWidth(true);
+        scrollPane.setPrefHeight(200);
+        content.getChildren().add(scrollPane);
+
+        // Remember selection checkbox
+        content.getChildren().add(new Separator());
+        CheckBox rememberCb = new CheckBox("Remember these selections for next time");
+        rememberCb.setId("rememberCheckBox");
+        rememberCb.setSelected(PersistentPreferences.getRememberAnnotationSelection());
+        content.getChildren().add(rememberCb);
+
+        // Quick button actions
+        selectAllBtn.setOnAction(e -> {
+            checkBoxes.forEach(cb -> cb.setSelected(true));
+        });
+
+        selectNoneBtn.setOnAction(e -> {
+            checkBoxes.forEach(cb -> cb.setSelected(false));
+        });
+
+        selectDefaultBtn.setOnAction(e -> {
+            checkBoxes.forEach(cb -> {
+                String className = cb.getText().split(" \\(")[0]; // Remove count
+                cb.setSelected(Arrays.asList(DEFAULT_CLASSES).contains(className));
+            });
+        });
+
+        return content;
+    }
+
+    /**
+     * Updates the summary display with current annotations.
+     */
+    private static void updateSummaryDisplay(ObservableList<String> selectedClasses,
+                                             ListView<String> listView,
+                                             Label countLabel) {
+        listView.getItems().clear();
+
+        List<PathObject> matchingAnnotations = getMatchingAnnotations(selectedClasses);
+
+        if (selectedClasses.isEmpty()) {
+            listView.getItems().add("No annotation classes selected");
+            countLabel.setText("0 annotations will be acquired");
+            countLabel.setTextFill(Color.RED);
+            return;
+        }
+
+        // Group by class for display
+        Map<String, List<PathObject>> annotationsByClass = matchingAnnotations.stream()
+                .collect(Collectors.groupingBy(ann -> ann.getPathClass().getName()));
+
+        // Display each class with its annotations
+        for (String className : selectedClasses) {
+            List<PathObject> classAnnotations = annotationsByClass.getOrDefault(className, Collections.emptyList());
+
+            if (!classAnnotations.isEmpty()) {
+                listView.getItems().add(String.format("━━ %s (%d) ━━", className, classAnnotations.size()));
+
+                // Show individual annotations with names
+                for (PathObject ann : classAnnotations) {
+                    String name = ann.getName();
+                    if (name == null || name.isEmpty()) {
+                        name = String.format("Unnamed at (%.0f, %.0f)",
+                                ann.getROI().getCentroidX(),
+                                ann.getROI().getCentroidY());
+                    }
+                    listView.getItems().add("   • " + name);
+                }
+            } else {
+                listView.getItems().add(String.format("━━ %s (none found) ━━", className));
+            }
+        }
+
+        // Update total count
+        int totalCount = matchingAnnotations.size();
+        countLabel.setText(String.format("%d annotation%s will be acquired",
+                totalCount, totalCount == 1 ? "" : "s"));
+
+        if (totalCount == 0) {
+            countLabel.setTextFill(Color.RED);
+        } else {
+            countLabel.setTextFill(Color.GREEN.darker());
+        }
+    }
+
+    /**
+     * Gets all annotations matching the selected classes.
+     */
+    private static List<PathObject> getMatchingAnnotations(List<String> selectedClasses) {
+        if (selectedClasses.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        return QP.getAnnotationObjects().stream()
+                .filter(ann -> ann.getROI() != null && !ann.getROI().isEmpty())
+                .filter(ann -> ann.getPathClass() != null &&
+                        selectedClasses.contains(ann.getPathClass().getName()))
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Result from the acquisition dialog.
+     */
+    public static class AcquisitionResult {
+        public final List<String> selectedClasses;
+        public final boolean proceed;
+
+        public AcquisitionResult(List<String> selectedClasses, boolean proceed) {
+            this.selectedClasses = selectedClasses;
+            this.proceed = proceed;
+        }
+    }
+}

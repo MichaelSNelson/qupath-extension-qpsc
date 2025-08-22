@@ -2,31 +2,32 @@ package qupath.ext.qpsc.controller.workflow;
 
 import javafx.application.Platform;
 import javafx.scene.control.Alert;
-import javafx.scene.control.ButtonType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qupath.ext.qpsc.controller.ExistingImageWorkflow.WorkflowState;
 import qupath.ext.qpsc.controller.MicroscopeController;
 import qupath.ext.qpsc.model.RotationManager;
+import qupath.ext.qpsc.preferences.PersistentPreferences;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.service.AcquisitionCommandBuilder;
 import qupath.ext.qpsc.service.microscope.MicroscopeSocketClient;
-import qupath.ext.qpsc.ui.SampleSetupController;
+import qupath.ext.qpsc.ui.AnnotationAcquisitionDialog;
 import qupath.ext.qpsc.ui.UIFunctions;
 import qupath.ext.qpsc.utilities.MicroscopeConfigManager;
 import qupath.ext.qpsc.utilities.MinorFunctions;
-import qupath.ext.qpsc.utilities.TilingRequest;
 import qupath.ext.qpsc.utilities.TransformationFunctions;
 import qupath.fx.dialogs.Dialogs;
 import qupath.lib.gui.QuPathGUI;
 import qupath.lib.objects.PathObject;
+import qupath.lib.objects.classes.PathClass;
 import qupath.lib.projects.Project;
+import qupath.lib.scripting.QP;
 
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.nio.file.Paths;
-import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -55,8 +56,6 @@ import java.util.stream.Collectors;
 public class AcquisitionManager {
     private static final Logger logger = LoggerFactory.getLogger(AcquisitionManager.class);
 
-    /** Valid annotation classes that can be used for acquisition */
-    private static final String[] VALID_ANNOTATION_CLASSES = {"Tissue", "Scanned Area", "Bounding Box"};
 
     /** Maximum time to wait for acquisition completion (5 minutes) */
     private static final int ACQUISITION_TIMEOUT_MS = 300000;
@@ -128,16 +127,34 @@ public class AcquisitionManager {
     private CompletableFuture<Boolean> validateAnnotations() {
         CompletableFuture<Boolean> future = new CompletableFuture<>();
 
-        logger.debug("Validating annotations with classes: {}", Arrays.toString(VALID_ANNOTATION_CLASSES));
+        // Get all unique annotation classes in current image
+        Set<PathClass> existingClasses = MinorFunctions.getExistingClassifications(QP.getCurrentImageData());
+        Set<String> existingClassNames = existingClasses.stream()
+                .map(PathClass::toString)
+                .collect(Collectors.toSet());
 
-        UIFunctions.checkValidAnnotationsGUI(
-                Arrays.asList(VALID_ANNOTATION_CLASSES),
-                future::complete
-        );
+        logger.info("Found {} unique annotation classes: {}",
+                existingClassNames.size(), existingClassNames);
 
-        return future;
+        // Get preferences
+        List<String> preselected = PersistentPreferences.getSelectedAnnotationClasses();
+
+        // Show selection dialog
+        return AnnotationAcquisitionDialog.showDialog(existingClassNames, preselected)
+                .thenApply(result -> {
+                    if (!result.proceed || result.selectedClasses.isEmpty()) {
+                        logger.info("Acquisition cancelled or no classes selected");
+                        return false;
+                    }
+
+                    // Store selected classes in state
+                    state.selectedAnnotationClasses = result.selectedClasses;
+                    logger.info("User selected {} classes for acquisition: {}",
+                            result.selectedClasses.size(), result.selectedClasses);
+
+                    return true;
+                });
     }
-
     /**
      * Retrieves rotation angles configured for the imaging modality.
      *
@@ -175,8 +192,9 @@ public class AcquisitionManager {
                     angleExposures != null ? angleExposures.size() : 1);
 
             // Get current annotations
-            List<PathObject> currentAnnotations = AnnotationHelper.getCurrentValidAnnotations();
-
+            List<PathObject> currentAnnotations = AnnotationHelper.getCurrentValidAnnotations(
+                    state.selectedAnnotationClasses
+            );
             if (currentAnnotations.isEmpty()) {
                 throw new RuntimeException("No valid annotations for acquisition");
             }

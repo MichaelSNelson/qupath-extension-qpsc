@@ -73,11 +73,17 @@ public class ExistingAlignmentPath {
         logger.info("Path A: Using existing alignment with green box detection");
 
         // Validate macro image availability
-        if (!MacroImageUtility.isMacroImageAvailable(gui)) {
-            logger.error("No macro image available for green box detection");
+        BufferedImage macroImage = MacroImageUtility.retrieveMacroImageWithFallback(
+                gui,
+                state.sample != null ? state.sample.sampleName() : null
+        );
+
+        if (macroImage == null) {
+            logger.error("No macro image available (neither from slide nor saved)");
             Platform.runLater(() ->
                     UIFunctions.notifyUserOfError(
-                            "No macro image found. Cannot use existing alignment.",
+                            "No macro image found in slide and no saved macro image available.\n" +
+                                    "Cannot use existing alignment without a macro image.",
                             "Macro Image Required"
                     )
             );
@@ -126,18 +132,39 @@ public class ExistingAlignmentPath {
         return CompletableFuture.supplyAsync(() -> {
             state.pixelSize = pixelSize;
             logger.info("Loaded macro pixel size: {} µm", pixelSize);
-            BufferedImage originalMacro = MacroImageUtility.retrieveMacroImage(gui);
-            if (originalMacro == null) {
+
+            // Get macro image (might be from slide or saved)
+            BufferedImage macroImage = MacroImageUtility.retrieveMacroImageWithFallback(
+                    gui,
+                    state.sample.sampleName()
+            );
+
+            if (macroImage == null) {
                 throw new RuntimeException("Cannot retrieve macro image");
             }
 
-            // Crop based on scanner configuration
-            MacroImageUtility.CroppedMacroResult croppedResult = cropMacroImage(originalMacro);
+            // Check if this is a saved macro image (already processed)
+            boolean isSavedImage = !MacroImageUtility.isMacroImageAvailable(gui);
 
-            // Apply flips for display
-            BufferedImage displayImage = applyFlips(croppedResult.getCroppedImage());
-
-            return new MacroImageContext(croppedResult, displayImage);
+            if (isSavedImage) {
+                logger.info("Using saved macro image - already cropped and flipped");
+                // Image is already processed, create dummy cropped result
+                MacroImageUtility.CroppedMacroResult croppedResult =
+                        new MacroImageUtility.CroppedMacroResult(
+                                macroImage,
+                                macroImage.getWidth(),
+                                macroImage.getHeight(),
+                                0, 0
+                        );
+                // The saved image is already flipped, so use it directly
+                return new MacroImageContext(croppedResult, macroImage, macroImage);
+            } else {
+                // Normal processing for fresh macro image
+                logger.info("Processing macro image from slide");
+                MacroImageUtility.CroppedMacroResult croppedResult = cropMacroImage(macroImage);
+                BufferedImage displayImage = applyFlips(croppedResult.getCroppedImage());
+                return new MacroImageContext(croppedResult, displayImage, displayImage);
+            }
         });
     }
 
@@ -205,7 +232,7 @@ public class ExistingAlignmentPath {
     private CompletableFuture<WorkflowState> createTransform(GreenBoxContext context) {
         return CompletableFuture.supplyAsync(() -> {
             // Get annotations
-            state.annotations = AnnotationHelper.ensureAnnotationsExist(gui, state.pixelSize);
+            state.annotations = AnnotationHelper.ensureAnnotationsExist(gui, state.pixelSize, state.selectedAnnotationClasses);
             if (state.annotations.isEmpty()) {
                 throw new RuntimeException("No valid annotations found");
             }
@@ -223,14 +250,14 @@ public class ExistingAlignmentPath {
 
             // Save if not requesting refinement
             if (!state.alignmentChoice.refinementRequested()) {
-                saveSlideAlignment();
+                saveSlideAlignment(context);
             }
 
             return state;
         }).thenCompose(currentState -> {
             // Handle refinement if requested
             if (state.alignmentChoice.refinementRequested()) {
-                return performRefinement();
+                return performRefinement(context);
             } else {
                 return CompletableFuture.completedFuture(currentState);
             }
@@ -305,7 +332,7 @@ public class ExistingAlignmentPath {
      *
      * @return CompletableFuture containing the refined workflow state
      */
-    private CompletableFuture<WorkflowState> performRefinement() {
+    private CompletableFuture<WorkflowState> performRefinement(GreenBoxContext context) {
         // Create tiles for refinement
         TileHelper.createTilesForAnnotations(
                 state.annotations,
@@ -322,7 +349,7 @@ public class ExistingAlignmentPath {
                 state.transform = refinedTransform;
                 MicroscopeController.getInstance().setCurrentTransform(refinedTransform);
             }
-            saveSlideAlignment();
+            saveSlideAlignment(context);
             return state;
         });
     }
@@ -333,13 +360,19 @@ public class ExistingAlignmentPath {
      * <p>Saves the transform to the project for future reuse with this
      * specific slide.
      */
-    private void saveSlideAlignment() {
+    private void saveSlideAlignment(GreenBoxContext context) {
         Project<BufferedImage> project = (Project<BufferedImage>) state.projectInfo.getCurrentProject();
+
+        // Get the processed macro image from the state
+        BufferedImage processedMacroImage = context.getProcessedMacroImage();
+
         AffineTransformManager.saveSlideAlignment(
                 project,
                 state.sample.sampleName(),
                 state.sample.modality(),
-                state.transform
+                state.transform,
+                processedMacroImage
+
         );
         logger.info("Saved slide-specific alignment");
     }
@@ -408,10 +441,14 @@ public class ExistingAlignmentPath {
         boolean flipX = QPPreferenceDialog.getFlipMacroXProperty();
         boolean flipY = QPPreferenceDialog.getFlipMacroYProperty();
 
+        BufferedImage processedImage;
         if (flipX || flipY) {
-            return MacroImageUtility.flipMacroImage(image, flipX, flipY);
+            processedImage = MacroImageUtility.flipMacroImage(image, flipX, flipY);
+        } else {
+            processedImage = image;
         }
-        return image;
+
+        return processedImage;
     }
 
     /**
@@ -563,10 +600,14 @@ public class ExistingAlignmentPath {
     private static class MacroImageContext {
         final MacroImageUtility.CroppedMacroResult croppedResult;
         final BufferedImage displayImage;
+        final BufferedImage processedMacroImage;  // Add this
 
-        MacroImageContext(MacroImageUtility.CroppedMacroResult croppedResult, BufferedImage displayImage) {
+        MacroImageContext(MacroImageUtility.CroppedMacroResult croppedResult,
+                          BufferedImage displayImage,
+                          BufferedImage processedMacroImage) {  // Add parameter
             this.croppedResult = croppedResult;
             this.displayImage = displayImage;
+            this.processedMacroImage = processedMacroImage;  // Store it
         }
     }
 
@@ -580,6 +621,9 @@ public class ExistingAlignmentPath {
         GreenBoxContext(MacroImageContext macroContext, GreenBoxDetector.DetectionResult greenBoxResult) {
             this.macroContext = macroContext;
             this.greenBoxResult = greenBoxResult;
+        }
+        BufferedImage getProcessedMacroImage() {
+            return macroContext.processedMacroImage;
         }
     }
 }

@@ -14,6 +14,7 @@ import qupath.lib.gui.QuPathGUI;
 import qupath.lib.objects.PathObject;
 
 import java.awt.geom.AffineTransform;
+import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.*;
@@ -35,17 +36,12 @@ public class ExistingImageWorkflow {
     private static final Logger logger = LoggerFactory.getLogger(ExistingImageWorkflow.class);
     private static final ResourceBundle res = ResourceBundle.getBundle("qupath.ext.qpsc.ui.strings");
 
-    // Constants
-    private static final String[] VALID_ANNOTATION_CLASSES = {"Tissue", "Scanned Area", "Bounding Box"};
-    private static final int MAX_TILES_PER_ANNOTATION = 10000;
-    private static final int ACQUISITION_TIMEOUT_MS = 300000; // 5 minutes
-
-    // Single-threaded executor for stitching
-    private static final ExecutorService STITCH_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
-        Thread t = new Thread(r, "stitching-queue");
-        t.setDaemon(true);
-        return t;
-    });
+//    // Single-threaded executor for stitching
+//    private static final ExecutorService STITCH_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
+//        Thread t = new Thread(r, "stitching-queue");
+//        t.setDaemon(true);
+//        return t;
+//    });
 
     /**
      * Main entry point - runs the complete workflow from start to finish.
@@ -361,5 +357,7 @@ public class ExistingImageWorkflow {
         public List<CompletableFuture<Void>> stitchingFutures = new ArrayList<>();
         public boolean useExistingSlideAlignment = false;
         public double pixelSize;
+        public List<String> selectedAnnotationClasses = Arrays.asList("Tissue", "Scanned Area", "Bounding Box");
+
     }
 }

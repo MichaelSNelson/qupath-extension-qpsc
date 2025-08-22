@@ -10,8 +10,10 @@ import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.lib.gui.QuPathGUI;
 import qupath.lib.images.servers.ImageServer;
 import qupath.lib.images.servers.ImageServerMetadata;
+import qupath.lib.projects.Project;
 import qupath.lib.roi.ROIs;
 import qupath.lib.roi.interfaces.ROI;
+import qupath.lib.scripting.QP;
 
 import java.awt.*;
 import java.awt.image.BufferedImage;
@@ -391,7 +393,59 @@ public class MacroImageUtility {
 
         return null;
     }
+    /**
+     * Retrieves macro image with fallback to saved version.
+     * First attempts to get the macro image from the current slide's associated images.
+     * If not found and a sample name is provided, attempts to load a previously saved macro image.
+     *
+     * @param gui QuPath GUI instance
+     * @param sampleName Sample name for saved image lookup (optional, can be null)
+     * @return The macro image (either from slide or saved version), or null if neither is available
+     */
+    public static BufferedImage retrieveMacroImageWithFallback(QuPathGUI gui, String sampleName) {
+        // First try to get from the current image
+        BufferedImage macroImage = retrieveMacroImage(gui);
 
+        if (macroImage == null && sampleName != null && gui.getProject() != null) {
+            // Try to load saved macro image
+            logger.info("No macro image in slide, checking for saved version...");
+            macroImage = AffineTransformManager.loadSavedMacroImage(
+                    (Project<BufferedImage>) gui.getProject(),
+                    sampleName
+            );
+
+            if (macroImage != null) {
+                logger.info("Successfully loaded saved macro image for sample: {}", sampleName);
+            } else {
+                logger.debug("No saved macro image found for sample: {}", sampleName);
+            }
+        }
+
+        return macroImage;
+    }
+
+    /**
+     * Retrieves macro image with fallback, using the current project entry to determine sample name.
+     * Convenience method that automatically extracts the sample name from the current project entry.
+     *
+     * @param gui QuPath GUI instance
+     * @return The macro image (either from slide or saved version), or null if neither is available
+     */
+    public static BufferedImage retrieveMacroImageWithFallback(QuPathGUI gui) {
+        // Try to get sample name from current project entry
+        String sampleName = null;
+        if (gui.getProject() != null && QP.getProjectEntry() != null) {
+            // Extract sample name from entry name (remove file extension if present)
+            String entryName = QP.getProjectEntry().getImageName();
+            if (entryName != null) {
+                // Remove common image extensions
+                sampleName = entryName.replaceFirst("\\.(tiff?|svs|ndpi|scn|vsi|mrxs)$", "");
+                logger.debug("Extracted sample name from project entry: {}", sampleName);
+            }
+        }
+
+        return retrieveMacroImageWithFallback(gui, sampleName);
+    }
     /**
      * Checks if a macro image is available without actually retrieving it.
      * Useful for enabling/disabling UI elements based on macro availability.

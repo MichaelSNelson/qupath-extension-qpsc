@@ -13,6 +13,7 @@ import qupath.ext.qpsc.ui.SampleSetupController;
 import qupath.lib.projects.Project;
 import qupath.lib.roi.interfaces.ROI;
 
+import javax.imageio.ImageIO;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.NoninvertibleTransformException;
 import java.awt.image.BufferedImage;
@@ -381,14 +382,62 @@ public class AffineTransformManager {
         }
     }
     /**
-     * Saves a slide-specific alignment to the project folder
+     * Saves a slide-specific alignment transform and its associated processed macro image to the project folder.
+     *
+     * <p>This method creates a persistent record of the alignment between macro coordinates and stage coordinates
+     * for a specific slide. The alignment data is saved as a JSON file containing the transform matrix,
+     * metadata, and timestamp. Additionally, the processed (flipped and cropped) macro image used for
+     * the alignment is saved as a PNG file.</p>
+     *
+     * <p>Both files are saved in an "alignmentFiles" subdirectory within the project folder, using the
+     * sample name as the base filename:</p>
+     * <ul>
+     *   <li>{sampleName}_alignment.json - Contains the transform and metadata</li>
+     *   <li>{sampleName}_alignment.png - Contains the processed macro image</li>
+     * </ul>
+     *
+     * <p>The JSON file structure includes:</p>
+     * <pre>
+     * {
+     *   "sampleName": "sample identifier",
+     *   "modality": "imaging modality",
+     *   "timestamp": "creation timestamp",
+     *   "transform": [scaleX, shearY, shearX, scaleY, translateX, translateY]
+     * }
+     * </pre>
+     *
+     * <p>The transform array represents the affine transformation matrix in the standard Java
+     * AffineTransform format, mapping macro image coordinates to stage micrometers.</p>
+     *
+     * @param project The QuPath project containing the slide. Must not be null and must have a valid path.
+     * @param sampleName The unique identifier for the sample/slide. Used as the base filename for saved files.
+     *                   Must not be null or empty.
+     * @param modality The imaging modality used (e.g., "Brightfield", "Polarized"). Stored as metadata
+     *                 in the JSON file. May be null.
+     * @param transform The affine transform mapping macro coordinates to stage coordinates. Must not be null.
+     *                  The transform components are extracted and saved as a 6-element array.
+     * @param processedMacroImage The flipped and cropped macro image used for alignment. If not null,
+     *                            this image is saved as a PNG file alongside the alignment data.
+     *                            The image should already be processed (flipped/cropped) according to
+     *                            the scanner configuration.
+     *
+     * @throws NullPointerException if project, sampleName, or transform is null
+     * @throws IllegalStateException if the project path cannot be determined
+     * @throws IOException if there is an error creating directories or writing files (caught internally
+     *                     and logged, does not propagate)
+     *
+     * @see #loadSlideAlignment(Project, String)
+     * @see AffineTransform
+     * @see javax.imageio.ImageIO#write(RenderedImage, String, File)
+     *
+     * @since 0.4.0
      */
-// In AffineTransformManager.java
     public static void saveSlideAlignment(
             Project<BufferedImage> project,
             String sampleName,
             String modality,
-            AffineTransform transform) {
+            AffineTransform transform,
+            BufferedImage processedMacroImage) {  // Add this parameter
 
         try {
             // Get project folder
@@ -404,7 +453,7 @@ public class AffineTransformManager {
             String filename = sampleName + "_alignment.json";
             File alignmentFile = new File(alignmentDir, filename);
 
-            // Create a map to store the transform data
+            // Save the transform data as JSON (existing code)
             Map<String, Object> alignmentData = new HashMap<>();
             alignmentData.put("sampleName", sampleName);
             alignmentData.put("modality", modality);
@@ -424,13 +473,19 @@ public class AffineTransformManager {
             Files.write(alignmentFile.toPath(), json.getBytes(StandardCharsets.UTF_8));
 
             logger.info("Saved slide-specific alignment to: {}", alignmentFile.getAbsolutePath());
-            logger.info("CRITICAL: Saving slide alignment with scale: X={}, Y={}",
-                    transform.getScaleX(), transform.getScaleY());
+
+            // Save the processed macro image if provided
+            if (processedMacroImage != null) {
+                String imageFilename = sampleName + "_alignment.png";
+                File imageFile = new File(alignmentDir, imageFilename);
+                ImageIO.write(processedMacroImage, "png", imageFile);
+                logger.info("Saved processed macro image to: {}", imageFile.getAbsolutePath());
+            }
+
         } catch (Exception e) {
             logger.error("Failed to save slide alignment", e);
         }
     }
-
     public static AffineTransform loadSlideAlignment(
             Project<BufferedImage> project,
             String sampleName) {
@@ -532,5 +587,38 @@ public class AffineTransformManager {
         return null;
     }
 
+    /**
+     * Loads the saved macro image for a specific slide alignment.
+     *
+     * @param project The QuPath project
+     * @param sampleName The sample name
+     * @return The saved macro image, or null if not found
+     */
+    public static BufferedImage loadSavedMacroImage(Project<BufferedImage> project, String sampleName) {
+        try {
+            File projectDir = project.getPath().toFile().getParentFile();
+            File alignmentDir = new File(projectDir, "alignmentFiles");
+
+            if (!alignmentDir.exists()) {
+                return null;
+            }
+
+            String imageFilename = sampleName + "_alignment.png";
+            File imageFile = new File(alignmentDir, imageFilename);
+
+            if (!imageFile.exists()) {
+                logger.debug("No saved macro image found at: {}", imageFile.getAbsolutePath());
+                return null;
+            }
+
+            BufferedImage macroImage = ImageIO.read(imageFile);
+            logger.info("Loaded saved macro image from: {}", imageFile.getAbsolutePath());
+            return macroImage;
+
+        } catch (Exception e) {
+            logger.error("Failed to load saved macro image", e);
+            return null;
+        }
+    }
 
 }

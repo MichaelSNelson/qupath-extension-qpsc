@@ -3,6 +3,10 @@ package qupath.ext.qpsc.preferences;
 import javafx.beans.property.StringProperty;
 import qupath.lib.gui.prefs.PathPrefs;
 
+import java.util.Arrays;
+import java.util.List;
+import java.util.stream.Collectors;
+
 /**
  * PersistentPreferences
  *
@@ -619,5 +623,44 @@ public class PersistentPreferences {
 
     public static void setSocketLastConnectionTime(String time) {
         socketLastConnectionTimeSaved.setValue(time);
+    }
+
+    // ================== EXISTING IMAGE WORKFLOW ==================
+
+
+    // Add these new preferences for annotation class selection
+    private static final StringProperty selectedAnnotationClassesSaved =
+            PathPrefs.createPersistentPreference("SelectedAnnotationClasses", "Tissue,Scanned Area,Bounding Box");
+
+    private static final StringProperty rememberAnnotationSelectionSaved =
+            PathPrefs.createPersistentPreference("RememberAnnotationSelection", "true");
+
+    // Add new methods
+    public static List<String> getSelectedAnnotationClasses() {
+        String stored = selectedAnnotationClassesSaved.getValue();
+        if (stored == null || stored.trim().isEmpty()) {
+            // Return default classes if nothing stored
+            return Arrays.asList("Tissue", "Scanned Area", "Bounding Box");
+        }
+        return Arrays.stream(stored.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .collect(Collectors.toList());
+    }
+
+    public static void setSelectedAnnotationClasses(final List<String> classes) {
+        if (classes == null || classes.isEmpty()) {
+            selectedAnnotationClassesSaved.setValue("");
+        } else {
+            selectedAnnotationClassesSaved.setValue(String.join(",", classes));
+        }
+    }
+
+    public static boolean getRememberAnnotationSelection() {
+        return Boolean.parseBoolean(rememberAnnotationSelectionSaved.getValue());
+    }
+
+    public static void setRememberAnnotationSelection(final boolean remember) {
+        rememberAnnotationSelectionSaved.setValue(String.valueOf(remember));
     }
 }

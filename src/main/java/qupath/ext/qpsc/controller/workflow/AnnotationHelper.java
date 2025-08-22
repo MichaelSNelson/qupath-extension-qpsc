@@ -3,6 +3,7 @@ package qupath.ext.qpsc.controller.workflow;
 import javafx.application.Platform;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import qupath.ext.qpsc.preferences.PersistentPreferences;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.ui.UIFunctions;
 import qupath.ext.qpsc.utilities.MinorFunctions;
@@ -40,15 +41,13 @@ import java.util.stream.Collectors;
 public class AnnotationHelper {
     private static final Logger logger = LoggerFactory.getLogger(AnnotationHelper.class);
 
-    /** Valid annotation classes that can be used for acquisition */
-    private static final String[] VALID_ANNOTATION_CLASSES = {"Tissue", "Scanned Area", "Bounding Box"};
 
     /**
      * Ensures annotations exist for acquisition.
      *
      * <p>This method follows this logic:
      * <ol>
-     *   <li>Check for existing valid annotations</li>
+     *   <li>Check for existing valid annotations based on selected classes</li>
      *   <li>If none found, check for configured tissue detection script</li>
      *   <li>If no script configured, prompt user to select one</li>
      *   <li>Run tissue detection to create annotations</li>
@@ -57,13 +56,14 @@ public class AnnotationHelper {
      *
      * @param gui QuPath GUI instance
      * @param macroPixelSize Pixel size of macro image in micrometers
+     * @param validClasses List of class names to consider valid
      * @return List of valid annotations (may be empty if none created)
      */
-    public static List<PathObject> ensureAnnotationsExist(QuPathGUI gui, double macroPixelSize) {
-        logger.info("Ensuring annotations exist for acquisition");
+    public static List<PathObject> ensureAnnotationsExist(QuPathGUI gui, double macroPixelSize, List<String> validClasses) {
+        logger.info("Ensuring annotations exist for acquisition with classes: {}", validClasses);
 
         // Get existing annotations
-        List<PathObject> annotations = getCurrentValidAnnotations();
+        List<PathObject> annotations = getCurrentValidAnnotations(validClasses);
 
         if (!annotations.isEmpty()) {
             logger.info("Found {} existing valid annotations", annotations.size());
@@ -102,7 +102,7 @@ public class AnnotationHelper {
                 logger.info("Tissue detection completed");
 
                 // Re-collect annotations after tissue detection
-                annotations = getCurrentValidAnnotations();
+                annotations = getCurrentValidAnnotations(validClasses);
                 logger.info("Found {} annotations after tissue detection", annotations.size());
 
             } catch (Exception e) {
@@ -115,7 +115,7 @@ public class AnnotationHelper {
             Platform.runLater(() ->
                     UIFunctions.notifyUserOfError(
                             "No valid annotations found. Please create annotations with one of these classes:\n" +
-                                    String.join(", ", VALID_ANNOTATION_CLASSES),
+                                    String.join(", ", validClasses),
                             "No Annotations"
                     )
             );
@@ -127,27 +127,45 @@ public class AnnotationHelper {
     }
 
     /**
-     * Gets current valid annotations from the image hierarchy.
+     * Ensures annotations exist using the default selected classes from preferences.
      *
-     * <p>Valid annotations must:
-     * <ul>
-     *   <li>Have a non-empty ROI</li>
-     *   <li>Have one of the valid path classes</li>
-     * </ul>
+     * @param gui QuPath GUI instance
+     * @param macroPixelSize Pixel size of macro image in micrometers
+     * @return List of valid annotations (may be empty if none created)
+     */
+    public static List<PathObject> ensureAnnotationsExist(QuPathGUI gui, double macroPixelSize) {
+        List<String> selectedClasses = PersistentPreferences.getSelectedAnnotationClasses();
+        return ensureAnnotationsExist(gui, macroPixelSize, selectedClasses);
+    }
+
+
+    /**
+     * Gets current valid annotations from the image hierarchy using custom class list.
+     *
+     * @param validClasses List of class names to consider valid
+     * @return List of valid annotations
+     */
+    public static List<PathObject> getCurrentValidAnnotations(List<String> validClasses) {
+        var annotations = QP.getAnnotationObjects().stream()
+                .filter(ann -> ann.getROI() != null && !ann.getROI().isEmpty())
+                .filter(ann -> ann.getPathClass() != null &&
+                        validClasses.contains(ann.getPathClass().getName()))
+                .collect(Collectors.toList());
+
+        logger.debug("Found {} valid annotations from {} total with classes: {}",
+                annotations.size(), QP.getAnnotationObjects().size(), validClasses);
+
+        return annotations;
+    }
+
+    /**
+     * Gets current valid annotations using selected classes from preferences.
      *
      * @return List of valid annotations
      */
     public static List<PathObject> getCurrentValidAnnotations() {
-        var annotations = QP.getAnnotationObjects().stream()
-                .filter(ann -> ann.getROI() != null && !ann.getROI().isEmpty())
-                .filter(ann -> ann.getPathClass() != null &&
-                        Arrays.asList(VALID_ANNOTATION_CLASSES).contains(ann.getPathClass().getName()))
-                .collect(Collectors.toList());
-
-        logger.debug("Found {} valid annotations from {} total",
-                annotations.size(), QP.getAnnotationObjects().size());
-
-        return annotations;
+        List<String> selectedClasses = PersistentPreferences.getSelectedAnnotationClasses();
+        return getCurrentValidAnnotations(selectedClasses);
     }
 
     /**
@@ -182,6 +200,8 @@ public class AnnotationHelper {
             logger.info("Auto-named {} annotations", unnamedCount);
         }
     }
+
+    //TODO this should probably be a part of another dialog.
 
     /**
      * Prompts user to select a tissue detection script.

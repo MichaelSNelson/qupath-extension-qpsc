@@ -7,6 +7,11 @@ import java.util.HashMap;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import qupath.lib.images.ImageData;
+import qupath.lib.objects.PathObject;
+import qupath.lib.objects.classes.PathClass;
+import qupath.lib.objects.classes.PathClassTools;
+import qupath.lib.objects.hierarchy.PathObjectHierarchy;
 
 import java.io.BufferedWriter;
 import java.io.File;
@@ -368,6 +373,38 @@ public class MinorFunctions {
         }
         return null;
     }
+
+    /**
+     * Retrieves all unique classifications from annotations in the current image
+     * @param imageData The current ImageData
+     * @return Set of unique PathClass objects found in the hierarchy
+     */
+    public static Set<PathClass> getExistingClassifications(ImageData<?> imageData) {
+        Set<PathClass> classifications = new HashSet<>();
+
+        if (imageData == null) {
+            logger.warn("No image data available");
+            return classifications;
+        }
+
+        PathObjectHierarchy hierarchy = imageData.getHierarchy();
+
+        // Iterate through all objects and collect unique classifications
+        for (PathObject pathObject : hierarchy.getAnnotationObjects()) {
+            PathClass pathClass = pathObject.getPathClass();
+
+            // Only add valid, non-ignored classes
+            if (PathClassTools.isValidClass(pathClass) &&
+                    !PathClassTools.isIgnoredClass(pathClass)) {
+                classifications.add(pathClass);
+                logger.debug("Found classification: {}", pathClass);
+            }
+        }
+
+        logger.info("Found {} unique classifications in hierarchy", classifications.size());
+        return classifications;
+    }
+
 }
 
 

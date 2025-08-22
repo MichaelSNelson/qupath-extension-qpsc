@@ -197,7 +197,8 @@ public class MicroscopeAlignmentWorkflow {
             int cropOffsetY,
             int originalMacroWidth,
             int originalMacroHeight,
-            Rectangle dataBounds  // NEW: Store detected data bounds
+            Rectangle dataBounds,
+            BufferedImage processedMacroImag
     ) {}
 
     /**
@@ -279,6 +280,14 @@ public class MicroscopeAlignmentWorkflow {
         boolean flipX = QPPreferenceDialog.getFlipMacroXProperty();
         boolean flipY = QPPreferenceDialog.getFlipMacroYProperty();
 
+        //save a copy of the cropped macro image for future use/realignment
+        BufferedImage processedMacroImage = null;
+        if (flipX || flipY) {
+            processedMacroImage = MacroImageUtility.flipMacroImage(croppedMacroImage, flipX, flipY);
+        } else {
+            processedMacroImage = croppedMacroImage;
+        }
+
         GreenBoxDetector.DetectionResult greenBoxResult = null;
         AffineTransform greenBoxTransform = null;
 
@@ -343,13 +352,14 @@ public class MicroscopeAlignmentWorkflow {
                 greenBoxResult,
                 tissueResult,
                 greenBoxTransform,
-                macroWidth,          // Cropped width
-                macroHeight,         // Cropped height
+                macroWidth,
+                macroHeight,
                 croppedResult.getCropOffsetX(),
                 croppedResult.getCropOffsetY(),
-                originalMacroWidth,  // Original width
-                originalMacroHeight, // Original height
-                dataBounds          // NEW: Include data bounds
+                originalMacroWidth,
+                originalMacroHeight,
+                dataBounds,
+                processedMacroImage  // Add this
         );
     }
 

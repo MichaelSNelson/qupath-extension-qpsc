@@ -143,7 +143,7 @@ public class ManualAlignmentPath {
      */
     private CompletableFuture<WorkflowState> createManualAlignment() {
         // Get or create annotations
-        state.annotations = AnnotationHelper.ensureAnnotationsExist(gui, state.pixelSize);
+        state.annotations = AnnotationHelper.ensureAnnotationsExist(gui, state.pixelSize, state.selectedAnnotationClasses);
 
         if (state.annotations.isEmpty()) {
             throw new RuntimeException("No annotations available for manual alignment");
@@ -177,11 +177,13 @@ public class ManualAlignmentPath {
 
             // Save slide-specific transform
             Project<BufferedImage> project = (Project<BufferedImage>) state.projectInfo.getCurrentProject();
+
             AffineTransformManager.saveSlideAlignment(
                     project,
                     state.sample.sampleName(),
                     state.sample.modality(),
-                    transform
+                    transform,
+                    null
             );
 
             logger.info("Saved slide-specific transform");
