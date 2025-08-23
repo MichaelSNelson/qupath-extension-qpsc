@@ -13,8 +13,11 @@ import javafx.stage.Modality;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qupath.ext.qpsc.preferences.PersistentPreferences;
+import qupath.lib.gui.QuPathGUI;
 import qupath.lib.objects.PathObject;
 import qupath.lib.objects.classes.PathClass;
+import qupath.lib.objects.hierarchy.events.PathObjectHierarchyEvent;
+import qupath.lib.objects.hierarchy.events.PathObjectHierarchyListener;
 import qupath.lib.scripting.QP;
 
 import java.util.*;
@@ -33,7 +36,7 @@ public class AnnotationAcquisitionDialog {
     /**
      * Shows the combined acquisition dialog.
      *
-     * @param availableClasses All unique annotation classes in the current image
+     * @param availableClasses Initial set of annotation classes in the current image
      * @param preselectedClasses Classes selected from previous runs
      * @return CompletableFuture with selected classes and whether to proceed
      */
@@ -45,12 +48,15 @@ public class AnnotationAcquisitionDialog {
 
         Platform.runLater(() -> {
             Dialog<AcquisitionResult> dialog = new Dialog<>();
-            dialog.initModality(Modality.APPLICATION_MODAL);
+            dialog.initModality(Modality.NONE); // Non-modal as requested
             dialog.setTitle("Annotation Acquisition");
             dialog.setHeaderText(null);
 
             // Create observable list for selected classes
             ObservableList<String> selectedClasses = FXCollections.observableArrayList(preselectedClasses);
+
+            // Create observable set for all available classes (will be updated dynamically)
+            ObservableList<String> allAvailableClasses = FXCollections.observableArrayList(availableClasses);
 
             // Create tabs
             TabPane tabPane = new TabPane();
@@ -63,10 +69,47 @@ public class AnnotationAcquisitionDialog {
 
             // Tab 2: Class Selection
             Tab classTab = new Tab("Filter Classes");
-            VBox classContent = createClassSelectionContent(availableClasses, selectedClasses);
+            VBox classContent = createClassSelectionContent(allAvailableClasses, selectedClasses);
             classTab.setContent(classContent);
 
             tabPane.getTabs().addAll(summaryTab, classTab);
+
+            // Add hierarchy listener to update when annotations change
+            PathObjectHierarchyListener hierarchyListener = new PathObjectHierarchyListener() {
+                @Override
+                public void hierarchyChanged(PathObjectHierarchyEvent event) {
+                    Platform.runLater(() -> {
+                        // Update available classes
+                        Set<String> currentClasses = QP.getAnnotationObjects().stream()
+                                .filter(ann -> ann.getPathClass() != null)
+                                .map(ann -> ann.getPathClass().getName())
+                                .collect(Collectors.toSet());
+
+                        // Add any new classes not already in the list
+                        for (String className : currentClasses) {
+                            if (!allAvailableClasses.contains(className)) {
+                                allAvailableClasses.add(className);
+                                logger.debug("Added new class to available: {}", className);
+                            }
+                        }
+
+                        // Refresh the class selection tab
+                        VBox newClassContent = createClassSelectionContent(allAvailableClasses, selectedClasses);
+                        classTab.setContent(newClassContent);
+
+                        // Update summary display
+                        updateSummaryDisplay(selectedClasses,
+                                (ListView<String>) summaryContent.lookup("#annotationList"),
+                                (Label) summaryContent.lookup("#countLabel"));
+                    });
+                }
+            };
+
+            // Add the listener
+            QuPathGUI gui = QuPathGUI.getInstance();
+            if (gui != null && gui.getImageData() != null) {
+                gui.getImageData().getHierarchy().addListener(hierarchyListener);
+            }
 
             dialog.getDialogPane().setContent(tabPane);
             dialog.getDialogPane().setPrefWidth(550);
@@ -81,7 +124,6 @@ public class AnnotationAcquisitionDialog {
             collectNode.setStyle("-fx-base: #5a9fd4; -fx-font-weight: bold;");
 
             // Disable collect button if no annotations match
-            Label countLabel = (Label) summaryContent.lookup("#countLabel");
             collectNode.disableProperty().bind(
                     Bindings.createBooleanBinding(
                             () -> getMatchingAnnotations(selectedClasses).isEmpty(),
@@ -89,6 +131,7 @@ public class AnnotationAcquisitionDialog {
                     )
             );
 
+            // Set up proper result handling
             dialog.setResultConverter(button -> {
                 if (button == collectButton) {
                     // Save preferences if remember is checked
@@ -97,8 +140,17 @@ public class AnnotationAcquisitionDialog {
                         PersistentPreferences.setSelectedAnnotationClasses(new ArrayList<>(selectedClasses));
                     }
                     return new AcquisitionResult(new ArrayList<>(selectedClasses), true);
+                } else {
+                    // Cancel was clicked
+                    return new AcquisitionResult(Collections.emptyList(), false);
                 }
-                return new AcquisitionResult(Collections.emptyList(), false);
+            });
+
+            // Clean up listener when dialog closes
+            dialog.setOnHidden(e -> {
+                if (gui != null && gui.getImageData() != null) {
+                    gui.getImageData().getHierarchy().removeListener(hierarchyListener);
+                }
             });
 
             // Set initial focus to summary tab
@@ -127,6 +179,7 @@ public class AnnotationAcquisitionDialog {
 
         // Annotation list
         ListView<String> annotationList = new ListView<>();
+        annotationList.setId("annotationList");
         annotationList.setPrefHeight(250);
         annotationList.setStyle("-fx-font-size: 12px;");
 
@@ -148,7 +201,14 @@ public class AnnotationAcquisitionDialog {
         // Initial update
         updateSummaryDisplay(selectedClasses, annotationList, countLabel);
 
-        content.getChildren().addAll(annotationList, countLabel, new Separator(), infoLabel);
+        // Add refresh button
+        Button refreshBtn = new Button("Refresh");
+        refreshBtn.setOnAction(e -> updateSummaryDisplay(selectedClasses, annotationList, countLabel));
+
+        HBox buttonBox = new HBox(10);
+        buttonBox.getChildren().add(refreshBtn);
+
+        content.getChildren().addAll(annotationList, countLabel, buttonBox, new Separator(), infoLabel);
 
         return content;
     }
@@ -156,7 +216,7 @@ public class AnnotationAcquisitionDialog {
     /**
      * Creates the class selection content.
      */
-    private static VBox createClassSelectionContent(Set<String> availableClasses,
+    private static VBox createClassSelectionContent(ObservableList<String> availableClasses,
                                                     ObservableList<String> selectedClasses) {
         VBox content = new VBox(10);
         content.setPadding(new Insets(15));
@@ -189,6 +249,7 @@ public class AnnotationAcquisitionDialog {
         List<CheckBox> checkBoxes = new ArrayList<>();
         for (String className : sortedClasses) {
             CheckBox cb = new CheckBox(className);
+            cb.setUserData(className);
 
             // Pre-select based on current selection
             cb.setSelected(selectedClasses.contains(className));

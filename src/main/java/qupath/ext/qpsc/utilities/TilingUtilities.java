@@ -110,7 +110,7 @@ public class TilingUtilities {
                 startX, startY, width, height);
 
         // Generate the tile grid
-        processTileGridRequest(startX, startY, width, height, request, configPath, null);
+        processTileGridRequest(startX, startY, width, height, request, configPath, null, null);
     }
 
     /**
@@ -171,7 +171,7 @@ public class TilingUtilities {
 
             // Generate tiles
 
-            processTileGridRequest(x, y, w, h, request, configPath, roi);
+            processTileGridRequest(x, y, w, h, request, configPath, roi, annotationName);
         }
     }
 
@@ -187,13 +187,14 @@ public class TilingUtilities {
      *   <li>TileConfiguration.txt generation in ImageJ/Fiji format</li>
      * </ul>
      *
-     * @param startX the left edge of the grid area
-     * @param startY the top edge of the grid area
-     * @param width the total width to cover
-     * @param height the total height to cover
-     * @param request the tiling parameters
-     * @param configPath the output path for TileConfiguration.txt
-     * @param filterROI optional ROI to filter tiles (only tiles intersecting this ROI are kept)
+     * @param startX         the left edge of the grid area
+     * @param startY         the top edge of the grid area
+     * @param width          the total width to cover
+     * @param height         the total height to cover
+     * @param request        the tiling parameters
+     * @param configPath     the output path for TileConfiguration.txt
+     * @param filterROI      optional ROI to filter tiles (only tiles intersecting this ROI are kept)
+     * @param annotationName
      * @throws IOException if unable to write the configuration file
      */
 
@@ -202,7 +203,7 @@ public class TilingUtilities {
             double width, double height,
             TilingRequest request,
             String configPath,
-            ROI filterROI) throws IOException {
+            ROI filterROI, String annotationName) throws IOException {
 
         // Calculate step sizes based on overlap
         double overlapFraction = request.getOverlapPercent() / 100.0;
@@ -281,7 +282,13 @@ public class TilingUtilities {
                             tileROI,
                             QP.getPathClass(request.getModalityName())
                     );
-                    tile.setName(String.valueOf(tileIndex));
+                    // Set name to include both tile number and annotation name
+                    if (annotationName != null) {
+                        tile.setName(String.format("%d_%s", tileIndex, annotationName));
+                    } else {
+                        tile.setName(String.valueOf(tileIndex));
+                    }
+
                     tile.getMeasurements().put("TileNumber", tileIndex);
                     tile.getMeasurements().put("Row", gridRow);
                     tile.getMeasurements().put("Column", gridCol);
