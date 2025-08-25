@@ -2,7 +2,9 @@ package qupath.ext.qpsc.controller;
 
 import javafx.application.Platform;
 import javafx.scene.control.Alert;
-import qupath.ext.qpsc.model.RotationManager;
+import qupath.ext.qpsc.modality.AngleExposure;
+import qupath.ext.qpsc.modality.ModalityHandler;
+import qupath.ext.qpsc.modality.ModalityRegistry;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.service.AcquisitionCommandBuilder;
 import qupath.ext.qpsc.service.microscope.MicroscopeSocketClient;
@@ -26,7 +28,6 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
-import qupath.ext.qpsc.model.RotationManager;
 
 /**
  * Runs the full "bounding box" acquisition workflow using socket communication only:
@@ -158,44 +159,19 @@ public class BoundingBoxWorkflow {
 
                     // 7) Get rotation angles based on modality
                     logger.info("Checking rotation requirements for modality: {}", sample.modality());
-                    RotationManager rotationManager = new RotationManager(sample.modality());
+                    ModalityHandler modalityHandler = ModalityRegistry.getHandler(sample.modality());
 
-                    rotationManager.getRotationTicksWithExposure(sample.modality())
+                    modalityHandler.getRotationAngles(sample.modality())
                             .thenApply(angleExposures -> {
-                                // Check if we have angle overrides from the dialog
                                 if (bb.angleOverrides() != null && !bb.angleOverrides().isEmpty()) {
-                                    logger.info("Using user-specified PPM angles: plus={}, minus={}",
-                                            bb.angleOverrides().get("plus"),
-                                            bb.angleOverrides().get("minus"));
-
-                                    // Create new angle exposures with user-specified angles
-                                    List<RotationManager.TickExposure> overriddenExposures = new ArrayList<>();
-
-                                    // Find and replace the angles while keeping exposures
-                                    for (RotationManager.TickExposure ae : angleExposures) {
-                                        if (ae.ticks < 0) {
-                                            // Replace minus angle
-                                            overriddenExposures.add(new RotationManager.TickExposure(
-                                                    bb.angleOverrides().get("minus"), ae.exposureMs));
-                                        } else if (ae.ticks > 0 && ae.ticks < 90) {
-                                            // Replace plus angle
-                                            overriddenExposures.add(new RotationManager.TickExposure(
-                                                    bb.angleOverrides().get("plus"), ae.exposureMs));
-                                        } else {
-                                            // Keep 0 and 90 degrees unchanged
-                                            overriddenExposures.add(ae);
-                                        }
-                                    }
-
-                                    logger.info("Overridden angle exposures: {}", overriddenExposures);
-                                    return overriddenExposures;
+                                    return modalityHandler.applyAngleOverrides(angleExposures, bb.angleOverrides());
                                 }
                                 return angleExposures;
                             })
                             .thenAccept(angleExposures -> {
                                 // Extract just the angles for logging and file counting
                                 List<Double> rotationAngles = angleExposures.stream()
-                                        .map(ae -> ae.ticks)
+                                        .map(ae -> ae.ticks())
                                         .collect(Collectors.toList());
                                 logger.info("Rotation angles for {}: {}", sample.modality(), rotationAngles);
 
@@ -242,9 +218,10 @@ public class BoundingBoxWorkflow {
                                         MicroscopeSocketClient socketClient = MicroscopeController.getInstance().getSocketClient();
 
                                         // Calculate expected files for progress bar
+                                        int angleCount = Math.max(1, angleExposures.size());
                                         int expectedFiles = MinorFunctions.countTifEntriesInTileConfig(
                                                 List.of(Paths.get(tempTileDir, boundsMode).toString())
-                                        ) * angleExposures.size();
+                                        ) * angleCount;
 
                                         // Create progress counter that will be updated by the monitoring callback
                                         AtomicInteger progressCounter = new AtomicInteger(0);
@@ -335,9 +312,11 @@ public class BoundingBoxWorkflow {
                                                 Platform.runLater(() ->
                                                         qupath.fx.dialogs.Dialogs.showInfoNotification(
                                                                 "Stitching",
-                                                                "Stitching " + sample.sampleName() + " for all angles…"));
+                                                                angleExposures.size() > 1
+                                                                        ? "Stitching " + sample.sampleName() + " for all angles…"
+                                                                        : "Stitching " + sample.sampleName() + "…"));
 
-                                                String matchingPattern = (rotationAngles != null && !rotationAngles.isEmpty()) ? "." : boundsMode;
+                                                String matchingPattern = angleExposures.size() > 1 ? "." : boundsMode;
 
                                                 String outPath = UtilityFunctions.stitchImagesAndUpdateProject(
                                                         projectsFolder,
@@ -349,7 +328,8 @@ public class BoundingBoxWorkflow {
                                                         project,
                                                         String.valueOf(QPPreferenceDialog.getCompressionTypeProperty()),
                                                         pixelSize,
-                                                        1
+                                                        1,
+                                                        modalityHandler
                                                 );
 
                                                 logger.info("Stitching completed. Last output path: {}", outPath);
@@ -357,7 +337,9 @@ public class BoundingBoxWorkflow {
                                                 Platform.runLater(() ->
                                                         qupath.fx.dialogs.Dialogs.showInfoNotification(
                                                                 "Stitching complete",
-                                                                "All angles stitched successfully"));
+                                                                angleExposures.size() > 1
+                                                                        ? "All angles stitched successfully"
+                                                                        : "Stitching complete"));
 
                                             } catch (Exception e) {
                                                 logger.error("Stitching failed", e);

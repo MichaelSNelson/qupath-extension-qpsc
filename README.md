@@ -26,10 +26,13 @@ The extension bridges QuPath, Python-based microscope controllers (e.g., Pycro-M
 - **Flexible Acquisition Workflows**:
     - **Bounding Box Tiling**: Define a region in QuPath, auto-compute acquisition tiles, and trigger microscopy scans.
     - **Existing Image Registration**: Register new tile scans to previously acquired macro images with affine transformation support.
+- **Modality Handlers**: Imaging modes are resolved through pluggable handlers (e.g., PPM). Modalities with no special requirements use a no-op handler.
 - **Integration with Python Controllers**: Robust CLI command execution, heartbeat monitoring, and real-time progress reporting between QuPath and your Python microscope backend.
 - **Project & Data Management**: Automatic project creation, tile config, and stitched OME-TIFF integration.
 - **Extensible GUI**: Easily add dialogs for new acquisition/analysis routines.
 - **Error Handling**: User notifications for bounds violations, acquisition errors, and resource validation.
+
+> **Note:** Polarized (PPM) acquisitions always use the PPM modality prefix (e.g., `ppm_20x`). Even at 90° rotation the run is still PPM rather than "brightfield". Modalities without the `ppm` prefix perform single-pass acquisitions with no polarization.
 
 ---
 
@@ -81,10 +84,10 @@ qupath-extension-qpsc/
 │   │   │       └── ext/
 │   │   │           └── qpsc/
 │   │   │               ├── controller/
-│   │   │               ├── ui/
-│   │   │               ├── model/
+│   │   │               ├── modality/
 │   │   │               ├── preferences/
 │   │   │               ├── service/
+│   │   │               ├── ui/
 │   │   │               ├── utilities/
 │   │   │               ├── QPScopeChecks.java
 │   │   │               └── SetupScope.java
@@ -119,13 +122,13 @@ qupath-extension-qpsc/
 Legend
 controller/ – Main workflow logic for acquisition, bounding box, existing image, etc.
 
-ui/ – User dialogs (JavaFX), UI controllers for user input and feedback.
-
-model/ – Data models for microscope state, affine/image transforms, and events.
+modality/ – Pluggable modality handlers (e.g., PPM) and rotation utilities.
 
 preferences/ – User settings and persistent configuration.
 
 service/ – Abstractions for CLI/Python process integration.
+
+ui/ – User dialogs (JavaFX), UI controllers for user input and feedback.
 
 utilities/ – Helpers for file IO, YAML/JSON, tiling, stitching, etc.
 
@@ -184,7 +187,7 @@ Workflows are in controller/. GUI dialogs are in ui/.
 
 Unit tests use JUnit and Mockito. See src/test/ for examples.
 
-Extending: Add new dialogs or Python commands by following the MVC structure.
+Extending: Add new dialogs, Python commands, or custom modalities by implementing a `ModalityHandler` and registering it via `ModalityRegistry.registerHandler`.
 
 ## Troubleshooting
 No hardware connection? Check CLI path and microscope YAML.

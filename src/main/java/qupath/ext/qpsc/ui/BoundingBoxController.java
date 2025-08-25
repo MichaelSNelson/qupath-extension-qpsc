@@ -3,18 +3,19 @@ package qupath.ext.qpsc.ui;
 import javafx.application.Platform;
 import javafx.beans.value.ChangeListener;
 import javafx.geometry.Insets;
+import javafx.geometry.Pos;
+import javafx.scene.Node;
 import javafx.scene.control.*;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
-import javafx.geometry.Pos;
 import javafx.stage.Modality;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qupath.ext.qpsc.controller.MicroscopeController;
+import qupath.ext.qpsc.modality.ModalityHandler;
+import qupath.ext.qpsc.modality.ModalityRegistry;
 import qupath.ext.qpsc.preferences.PersistentPreferences;
-import qupath.ext.qpsc.preferences.QPPreferenceDialog;
-import qupath.ext.qpsc.utilities.MicroscopeConfigManager;
 
 import java.util.Map;
 import java.util.MissingResourceException;
@@ -54,7 +55,8 @@ public class BoundingBoxController {
                     ? SampleSetupController.getLastSampleSetup().modality()
                     : PersistentPreferences.getLastModality();
 
-            boolean isPPMModality = lastModality != null && lastModality.startsWith("ppm_");
+            ModalityHandler handler = ModalityRegistry.getHandler(lastModality);
+            Optional<ModalityHandler.BoundingBoxUI> modalityUI = handler.createBoundingBoxUI();
 
             // 1) Create and configure the dialog window
             Dialog<BoundingBoxResult> dlg = new Dialog<>();
@@ -65,8 +67,8 @@ public class BoundingBoxController {
                     "or specify a starting point with width and height." +
                     "\n\nNote: All coordinates are in microscope stage units (microns).";
 
-            if (isPPMModality) {
-                headerText += "\n\nPPM mode detected - you can adjust polarization angles below.";
+            if (modalityUI.isPresent()) {
+                headerText += "\n\nAdditional modality options are available below.";
             }
 
             dlg.setHeaderText(headerText);
@@ -268,71 +270,8 @@ public class BoundingBoxController {
             CheckBox inFocusCheckbox = new CheckBox(inFocusLabel);
             inFocusCheckbox.setSelected(PersistentPreferences.getBoundingBoxInFocus());
 
-            // 5) PPM angle configuration (only shown for PPM modalities)
-            VBox ppmConfig = new VBox(5);
-            ppmConfig.setVisible(isPPMModality);
-            ppmConfig.setManaged(isPPMModality);
-
-            if (isPPMModality) {
-                // Get default angles from config
-                MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(
-                        QPPreferenceDialog.getMicroscopeConfigFileProperty());
-                Map<String, Object> ppmConfigMap = mgr.getPPMConfig();
-
-                double defaultPlus = 5.0;
-                double defaultMinus = -5.0;
-
-                Map<String, Object> ppmPlus = (Map<String, Object>) ppmConfigMap.get("ppm_plus");
-                Map<String, Object> ppmMinus = (Map<String, Object>) ppmConfigMap.get("ppm_minus");
-
-                if (ppmPlus != null && ppmPlus.containsKey("ticks")) {
-                    defaultPlus = ((Number) ppmPlus.get("ticks")).doubleValue();
-                }
-                if (ppmMinus != null && ppmMinus.containsKey("ticks")) {
-                    defaultMinus = ((Number) ppmMinus.get("ticks")).doubleValue();
-                }
-
-                Label ppmLabel = new Label("PPM Polarization Angles:");
-                ppmLabel.setStyle("-fx-font-weight: bold;");
-
-                CheckBox overrideAngles = new CheckBox("Override default angles for this acquisition");
-
-                GridPane angleGrid = new GridPane();
-                angleGrid.setHgap(10);
-                angleGrid.setVgap(5);
-                angleGrid.setDisable(true);
-
-                Label plusLabel = new Label("Plus angle (ticks):");
-                Spinner<Double> plusSpinner = new Spinner<>(-180.0, 180.0, defaultPlus, 0.5);
-                plusSpinner.setEditable(true);
-                plusSpinner.setPrefWidth(100);
-
-                Label minusLabel = new Label("Minus angle (ticks):");
-                Spinner<Double> minusSpinner = new Spinner<>(-180.0, 180.0, defaultMinus, 0.5);
-                minusSpinner.setEditable(true);
-                minusSpinner.setPrefWidth(100);
-
-                angleGrid.add(plusLabel, 0, 0);
-                angleGrid.add(plusSpinner, 1, 0);
-                angleGrid.add(minusLabel, 0, 1);
-                angleGrid.add(minusSpinner, 1, 1);
-
-                overrideAngles.selectedProperty().addListener((obs, old, selected) -> {
-                    angleGrid.setDisable(!selected);
-                });
-
-                ppmConfig.getChildren().addAll(
-                        new Separator(),
-                        ppmLabel,
-                        overrideAngles,
-                        angleGrid
-                );
-
-                // Store angle values in node properties for retrieval
-                ppmConfig.getProperties().put("overrideAngles", overrideAngles);
-                ppmConfig.getProperties().put("plusSpinner", plusSpinner);
-                ppmConfig.getProperties().put("minusSpinner", minusSpinner);
-            }
+            // 5) Modality-specific configuration pane (if provided)
+            Node modalityNode = modalityUI.map(ModalityHandler.BoundingBoxUI::getNode).orElse(null);
 
             // 6) Error label for validation
             Label errorLabel = new Label();
@@ -486,7 +425,12 @@ public class BoundingBoxController {
             validateFields.run();
 
             // 9) Assemble content
-            VBox content = new VBox(10, tabs, inFocusCheckbox, ppmConfig, errorLabel);
+            VBox content;
+            if (modalityNode != null) {
+                content = new VBox(10, tabs, inFocusCheckbox, modalityNode, errorLabel);
+            } else {
+                content = new VBox(10, tabs, inFocusCheckbox, errorLabel);
+            }
             content.setPadding(new Insets(20));
             dlg.getDialogPane().setContent(content);
 
@@ -507,27 +451,14 @@ public class BoundingBoxController {
                     PersistentPreferences.setBoundingBoxString(csvField.getText());
                     PersistentPreferences.setBoundingBoxInFocus(inFocusCheckbox.isSelected());
 
-                    // Handle PPM angle override if present
-                    if (isPPMModality && ppmConfig.getProperties().containsKey("overrideAngles")) {
-                        CheckBox override = (CheckBox) ppmConfig.getProperties().get("overrideAngles");
-                        if (override.isSelected()) {
-                            Spinner<Double> plusSpin = (Spinner<Double>) ppmConfig.getProperties().get("plusSpinner");
-                            Spinner<Double> minusSpin = (Spinner<Double>) ppmConfig.getProperties().get("minusSpinner");
-
-                            // Store overridden angles in the result
-                            Map<String, Double> angleOverrides = Map.of(
-                                    "plus", plusSpin.getValue(),
-                                    "minus", minusSpin.getValue()
-                            );
-
-                            logger.info("User overrode PPM angles: plus={}, minus={}",
-                                    plusSpin.getValue(), minusSpin.getValue());
-
-                            return new BoundingBoxResult(x1, y1, x2, y2, inFocusCheckbox.isSelected(), angleOverrides);
-                        }
+                    Map<String, Double> angleOverrides = modalityUI
+                            .map(ModalityHandler.BoundingBoxUI::getAngleOverrides)
+                            .orElse(null);
+                    if (angleOverrides != null) {
+                        logger.info("User overrode angles: {}", angleOverrides);
                     }
 
-                    return new BoundingBoxResult(x1, y1, x2, y2, inFocusCheckbox.isSelected());
+                    return new BoundingBoxResult(x1, y1, x2, y2, inFocusCheckbox.isSelected(), angleOverrides);
                 } catch (Exception e) {
                     logger.error("Error creating bounding box result", e);
                     return null;

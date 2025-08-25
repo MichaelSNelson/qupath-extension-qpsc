@@ -5,6 +5,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qupath.ext.basicstitching.config.StitchingConfig;
 import qupath.ext.basicstitching.workflow.StitchingWorkflow;
+import qupath.ext.qpsc.modality.ModalityHandler;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.ui.UIFunctions;
 import qupath.lib.gui.QuPathGUI;
@@ -114,7 +115,8 @@ public class UtilityFunctions {
             Project<BufferedImage> project,
             String compression,
             double pixelSizeMicrons,
-            int downsample) throws IOException {
+            int downsample,
+            ModalityHandler modalityHandler) throws IOException {
 
         logger.info("=== Starting stitching workflow ===");
         logger.info("Sample: {}, Mode: {}, Annotation: {}, Matching: '{}'",
@@ -202,9 +204,18 @@ public class UtilityFunctions {
                 String angleOrSubdir = originalName.replace(".ome.tif", "");
                 logger.debug("Processing file: {} (angle/subdir: {})", originalName, angleOrSubdir);
 
+                String angleSuffix = angleOrSubdir;
+                if (modalityHandler != null) {
+                    try {
+                        angleSuffix = modalityHandler.getAngleSuffix(Double.parseDouble(angleOrSubdir));
+                    } catch (NumberFormatException ignored) {
+                        // Keep original angle string if parsing fails
+                    }
+                }
+
                 // Create the full name with sample, mode, annotation, and angle
                 String baseName = sampleLabel + "_" + imagingModeWithIndex + "_" +
-                        annotationName + "_" + angleOrSubdir + ".ome.tif";
+                        annotationName + "_" + angleSuffix + ".ome.tif";
                 File renamed = new File(stitchedFile.getParent(), baseName);
 
                 logger.info("Renaming {} → {}", originalName, baseName);
@@ -279,10 +290,17 @@ public class UtilityFunctions {
 
             // Check if this is angle-based stitching (matching string is different from annotation)
             if (!matchingString.equals(annotationName)) {
+                String angleSuffix = matchingString;
+                if (modalityHandler != null) {
+                    try {
+                        angleSuffix = modalityHandler.getAngleSuffix(Double.parseDouble(matchingString));
+                    } catch (NumberFormatException ignored) {
+                    }
+                }
                 // This is angle-based stitching - include both annotation AND angle
                 // Format: sampleLabel_modality_annotation_angle.ome.tif
                 baseName = sampleLabel + "_" + imagingModeWithIndex + "_" +
-                        annotationName + "_" + matchingString + ".ome.tif";
+                        annotationName + "_" + angleSuffix + ".ome.tif";
                 logger.info("Angle-based stitching detected - including annotation and angle in filename");
             } else {
                 // Standard stitching - just annotation (or nothing for "bounds")
@@ -379,7 +397,8 @@ public class UtilityFunctions {
             Project<BufferedImage> project,
             String compression,
             double pixelSizeMicrons,
-            int downsample) throws IOException {
+            int downsample,
+            ModalityHandler modalityHandler) throws IOException {
 
         logger.debug("Using convenience method - annotation name as matching string");
 
@@ -394,7 +413,8 @@ public class UtilityFunctions {
                 project,
                 compression,
                 pixelSizeMicrons,
-                downsample
+                downsample,
+                modalityHandler
         );
     }
 

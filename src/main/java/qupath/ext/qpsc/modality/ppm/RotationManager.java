@@ -1,8 +1,9 @@
-package qupath.ext.qpsc.model;
+package qupath.ext.qpsc.modality.ppm;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import qupath.ext.qpsc.preferences.PersistentPreferences;
+import qupath.ext.qpsc.modality.AngleExposure;
+import qupath.ext.qpsc.modality.ppm.PPMPreferences;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.utilities.MicroscopeConfigManager;
 
@@ -19,24 +20,6 @@ public class RotationManager {
     private static final Logger logger = LoggerFactory.getLogger(RotationManager.class);
 
     private final List<RotationStrategy> strategies = new ArrayList<>();
-
-    /**
-     * Container for angle and exposure time data
-     */
-    public static class TickExposure {
-        public final double ticks;
-        public final int exposureMs;
-
-        public TickExposure(double ticks, int exposureMs) {
-            this.ticks = ticks;
-            this.exposureMs = exposureMs;
-        }
-
-        @Override
-        public String toString() {
-            return ticks + "," + exposureMs;
-        }
-    }
 
     /**
      * Creates a RotationManager configured for the given modality.
@@ -56,7 +39,7 @@ public class RotationManager {
 
         if (isPPMModality) {
             // Get PPM config from global section
-            Map<String, Object> ppmConfig = mgr.getPPMConfig();
+            Map<String, Object> ppmConfig = mgr.getModalityConfig("PPM");
 
             Double plusTick = null;
             Double minusTick = null;
@@ -97,41 +80,21 @@ public class RotationManager {
                 zeroTick = 0.0;
             }
 
-            // Get exposure times from PersistentPreferences
-            int plusExposure = PersistentPreferences.getPPMPlusExposureMs();
-            int minusExposure = PersistentPreferences.getPPMMinusExposureMs();
-            int zeroExposure = PersistentPreferences.getPPMZeroExposureMs();
+            // Get exposure times from PPMPreferences
+            int plusExposure = PPMPreferences.getPlusExposureMs();
+            int minusExposure = PPMPreferences.getMinusExposureMs();
+            int zeroExposure = PPMPreferences.getZeroExposureMs();
 
             strategies.add(new PPMRotationStrategy(
-                    new TickExposure(plusTick, plusExposure),
-                    new TickExposure(minusTick, minusExposure),
-                    new TickExposure(zeroTick, zeroExposure)
+                    new AngleExposure(plusTick, plusExposure),
+                    new AngleExposure(minusTick, minusExposure),
+                    new AngleExposure(zeroTick, zeroExposure)
             ));
 
             logger.info("PPM ticks configured");
         }
 
-        // Check if this is a BF modality
-        boolean isBFModality = modality != null && modality.startsWith("BF_");
-
-        if (isBFModality) {
-            // Get brightfield tick and exposure from PPM config
-            Map<String, Object> ppmConfig = mgr.getPPMConfig();
-            Map<String, Object> bfConfig = (Map<String, Object>) ppmConfig.get("brightfield");
-            //TODO these should be set in the controller dialog
-            Double bfTick = 90.0; // default
-
-            if (bfConfig != null && bfConfig.containsKey("tick")) {
-                bfTick = ((Number) bfConfig.get("tick")).doubleValue();
-            }
-
-            // Get exposure from PersistentPreferences
-            int bfExposure = PersistentPreferences.getPPMBrightfieldExposureMs();
-
-            strategies.add(new BrightfieldRotationStrategy(new TickExposure(bfTick, bfExposure)));
-            logger.info("Brightfield tick configured: {} degrees with {} ms exposure from preferences", bfTick, bfExposure);
-        }
-        // Always add NoRotationStrategy as fallback
+        // Always add NoRotationStrategy as fallback for non-PPM modalities
         strategies.add(new NoRotationStrategy());
 
         logger.info("Initialized rotation strategies for modality: {}", modality);
@@ -172,7 +135,7 @@ public class RotationManager {
      * @param modalityName The modality name
      * @return CompletableFuture with list of AngleExposure objects
      */
-    public CompletableFuture<List<TickExposure>> getRotationTicksWithExposure(String modalityName) {
+    public CompletableFuture<List<AngleExposure>> getRotationTicksWithExposure(String modalityName) {
         logger.info("Getting rotation angles with exposure for modality: {}", modalityName);
 
         for (RotationStrategy strategy : strategies) {

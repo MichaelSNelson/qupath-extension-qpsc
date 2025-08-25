@@ -1,8 +1,7 @@
-package qupath.ext.qpsc.model;
+package qupath.ext.qpsc.modality.ppm;
 
-import qupath.ext.qpsc.model.RotationManager.TickExposure;
-import qupath.ext.qpsc.ui.PPMAngleSelectionController;
-import qupath.ext.qpsc.preferences.PersistentPreferences;
+import qupath.ext.qpsc.modality.AngleExposure;
+import qupath.ext.qpsc.modality.ppm.ui.PPMAngleSelectionController;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -10,10 +9,8 @@ import java.util.concurrent.CompletableFuture;
 
 /**
  * Strategy interface for handling stage rotation based on imaging modality.
- * Different modalities require different rotation approaches:
- * - BF modes: fixed 90° rotation
- * - PPM modes: multiple angles for polarization
- * - Other modes: no rotation needed
+ * PPM modalities may require multiple angles while other modalities
+ * typically perform no rotation.
  */
 public interface RotationStrategy {
 
@@ -33,9 +30,9 @@ public interface RotationStrategy {
 
     /**
      * Gets the rotation angles with exposure times for this modality.
-     * @return CompletableFuture with list of TickExposure objects
+     * @return CompletableFuture with list of AngleExposure objects
      */
-    CompletableFuture<List<TickExposure>> getRotationTicksWithExposure();
+    CompletableFuture<List<AngleExposure>> getRotationTicksWithExposure();
 
     /**
      * Gets a suffix to append to file/folder names for each angle.
@@ -47,53 +44,17 @@ public interface RotationStrategy {
 
 
 /**
- * Implementation for Brightfield modalities - rotates to configured angle (default 90°)
- */
-class BrightfieldRotationStrategy implements RotationStrategy {
-    private final TickExposure tickExposure;
-
-    public BrightfieldRotationStrategy() {
-        this(new TickExposure(90.0, 10)); // default
-    }
-
-    public BrightfieldRotationStrategy(TickExposure tickExposure) {
-        this.tickExposure = tickExposure;
-    }
-
-    @Override
-    public boolean appliesTo(String modalityName) {
-        return modalityName != null && modalityName.startsWith("BF_");
-    }
-
-    @Override
-    public CompletableFuture<List<Double>> getRotationTicks() {
-        // BF always uses the configured angle
-        return CompletableFuture.completedFuture(List.of(tickExposure.ticks));
-    }
-
-    @Override
-    public CompletableFuture<List<TickExposure>> getRotationTicksWithExposure() {
-        return CompletableFuture.completedFuture(List.of(tickExposure));
-    }
-
-    @Override
-    public String getAngleSuffix(double angle) {
-        return ""; // No suffix needed for BF
-    }
-}
-
-/**
  * Implementation for PPM (Polarized Light Microscopy) modalities
  */
 class PPMRotationStrategy implements RotationStrategy {
 
-    private final TickExposure plusAngleExposure;
-    private final TickExposure minusAngleExposure;
-    private final TickExposure zeroAngleExposure;
+    private final AngleExposure plusAngleExposure;
+    private final AngleExposure minusAngleExposure;
+    private final AngleExposure zeroAngleExposure;
 
-    public PPMRotationStrategy(TickExposure plusAngleExposure,
-                               TickExposure minusAngleExposure,
-                               TickExposure zeroAngleExposure) {
+    public PPMRotationStrategy(AngleExposure plusAngleExposure,
+                               AngleExposure minusAngleExposure,
+                               AngleExposure zeroAngleExposure) {
         this.plusAngleExposure = plusAngleExposure;
         this.minusAngleExposure = minusAngleExposure;
         this.zeroAngleExposure = zeroAngleExposure;
@@ -107,7 +68,7 @@ class PPMRotationStrategy implements RotationStrategy {
     @Override
     public CompletableFuture<List<Double>> getRotationTicks() {
         // Show dialog for angle selection with exposure times
-        return PPMAngleSelectionController.showDialog(plusAngleExposure.ticks, minusAngleExposure.ticks)
+        return PPMAngleSelectionController.showDialog(plusAngleExposure.ticks(), minusAngleExposure.ticks())
                 .thenApply(result -> {
                     if (result == null) {
                         return new ArrayList<>();
@@ -117,17 +78,17 @@ class PPMRotationStrategy implements RotationStrategy {
     }
 
     @Override
-    public CompletableFuture<List<TickExposure>> getRotationTicksWithExposure() {
+    public CompletableFuture<List<AngleExposure>> getRotationTicksWithExposure() {
         // Show dialog for angle selection with exposure times
-        return PPMAngleSelectionController.showDialog(plusAngleExposure.ticks, minusAngleExposure.ticks)
+        return PPMAngleSelectionController.showDialog(plusAngleExposure.ticks(), minusAngleExposure.ticks())
                 .thenApply(result -> {
                     if (result == null) {
                         return new ArrayList<>();
                     }
 
-                    List<TickExposure> tickExposures = new ArrayList<>();
+                    List<AngleExposure> tickExposures = new ArrayList<>();
                     for (PPMAngleSelectionController.AngleExposure ae : result.angleExposures) {
-                        tickExposures.add(new TickExposure(ae.angle, ae.exposureMs));
+                        tickExposures.add(new AngleExposure(ae.angle, ae.exposureMs));
                     }
                     return tickExposures;
                 });
@@ -135,10 +96,6 @@ class PPMRotationStrategy implements RotationStrategy {
 
     @Override
     public String getAngleSuffix(double angle) {
-//        if (angle == 0) return "_0deg";
-//        if (angle == 90) return "_90deg"; // For brightfield
-//        if (angle > 0) return "_p" + (int)angle;
-//        return "_m" + (int)Math.abs(angle);
         return "";
     }
 }
@@ -159,7 +116,7 @@ class NoRotationStrategy implements RotationStrategy {
     }
 
     @Override
-    public CompletableFuture<List<TickExposure>> getRotationTicksWithExposure() {
+    public CompletableFuture<List<AngleExposure>> getRotationTicksWithExposure() {
         return CompletableFuture.completedFuture(List.of());
     }
 
