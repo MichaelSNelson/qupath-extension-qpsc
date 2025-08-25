@@ -2,7 +2,7 @@ package qupath.ext.qpsc.service;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import qupath.ext.qpsc.model.RotationManager;
+import qupath.ext.qpsc.modality.AngleExposure;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -24,8 +24,8 @@ public class AcquisitionCommandBuilder {
     private String scanType;
     private String regionName;
 
-    // Optional parameters for rotation/PPM
-    private List<RotationManager.TickExposure> angleExposures;
+    // Optional parameters for repeated acquisitions (e.g., rotation angles)
+    private List<AngleExposure> angleExposures;
 
     // Optional parameters for laser scanning
     private Double laserPower;
@@ -80,7 +80,7 @@ public class AcquisitionCommandBuilder {
 
     // Optional parameter setters
 
-    public AcquisitionCommandBuilder angleExposures(List<RotationManager.TickExposure> angleExposures) {
+    public AcquisitionCommandBuilder angleExposures(List<AngleExposure> angleExposures) {
         this.angleExposures = angleExposures;
         return this;
     }
@@ -152,14 +152,14 @@ public class AcquisitionCommandBuilder {
         if (angleExposures != null && !angleExposures.isEmpty()) {
             // Format angles as parenthesized comma-separated list: (-5.0,0.0,5.0,90.0)
             String anglesStr = angleExposures.stream()
-                    .map(ae -> String.valueOf(ae.ticks))
+                    .map(ae -> String.valueOf(ae.ticks()))
                     .collect(Collectors.joining(",", "(", ")"));
             args.add("--angles");
             args.add(anglesStr);
 
             // Format exposures as parenthesized comma-separated list: (500,800,500,10)
             String exposuresStr = angleExposures.stream()
-                    .map(ae -> String.valueOf(ae.exposureMs))
+                    .map(ae -> String.valueOf(ae.exposureMs()))
                     .collect(Collectors.joining(",", "(", ")"));
             args.add("--exposures");
             args.add(exposuresStr);
@@ -207,38 +207,6 @@ public class AcquisitionCommandBuilder {
 
         logger.info("Built socket message: {}", message);
         return message;
-    }
-
-    /**
-     * Creates a builder pre-configured for brightfield acquisition
-     */
-    public static AcquisitionCommandBuilder brightfieldBuilder(
-            String yamlPath, String projectsFolder,
-            String sampleLabel, String scanType, String regionName) {
-
-        return builder()
-                .yamlPath(yamlPath)
-                .projectsFolder(projectsFolder)
-                .sampleLabel(sampleLabel)
-                .scanType(scanType)
-                .regionName(regionName);
-    }
-
-    /**
-     * Creates a builder pre-configured for PPM acquisition
-     */
-    public static AcquisitionCommandBuilder ppmBuilder(
-            String yamlPath, String projectsFolder,
-            String sampleLabel, String scanType, String regionName,
-            List<RotationManager.TickExposure> angleExposures) {
-
-        return builder()
-                .yamlPath(yamlPath)
-                .projectsFolder(projectsFolder)
-                .sampleLabel(sampleLabel)
-                .scanType(scanType)
-                .regionName(regionName)
-                .angleExposures(angleExposures);
     }
 
     /**

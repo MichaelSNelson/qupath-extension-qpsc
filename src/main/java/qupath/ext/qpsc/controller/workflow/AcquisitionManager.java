@@ -6,7 +6,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qupath.ext.qpsc.controller.ExistingImageWorkflow.WorkflowState;
 import qupath.ext.qpsc.controller.MicroscopeController;
-import qupath.ext.qpsc.model.RotationManager;
+import qupath.ext.qpsc.modality.AngleExposure;
+import qupath.ext.qpsc.modality.ModalityHandler;
+import qupath.ext.qpsc.modality.ModalityRegistry;
 import qupath.ext.qpsc.preferences.PersistentPreferences;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.service.AcquisitionCommandBuilder;
@@ -163,11 +165,11 @@ public class AcquisitionManager {
      *
      * @return CompletableFuture containing list of rotation angles with exposure settings
      */
-    private CompletableFuture<List<RotationManager.TickExposure>> getRotationAngles() {
-        RotationManager rotationManager = new RotationManager(state.sample.modality());
+    private CompletableFuture<List<AngleExposure>> getRotationAngles() {
+        ModalityHandler handler = ModalityRegistry.getHandler(state.sample.modality());
         logger.info("Getting rotation angles for modality: {}", state.sample.modality());
 
-        return rotationManager.getRotationTicksWithExposure(state.sample.modality());
+        return handler.getRotationAngles(state.sample.modality());
     }
 
     /**
@@ -184,8 +186,8 @@ public class AcquisitionManager {
      * @param angleExposures List of rotation angles, or null for single acquisition
      * @return CompletableFuture with angle exposures for next phase
      */
-    private CompletableFuture<List<RotationManager.TickExposure>> prepareForAcquisition(
-            List<RotationManager.TickExposure> angleExposures) {
+    private CompletableFuture<List<AngleExposure>> prepareForAcquisition(
+            List<AngleExposure> angleExposures) {
 
         return CompletableFuture.supplyAsync(() -> {
             logger.info("Preparing for acquisition with {} angles",
@@ -249,7 +251,7 @@ public class AcquisitionManager {
      * @return CompletableFuture with true if all successful, false if any failed/cancelled
      */
     private CompletableFuture<Boolean> processAnnotations(
-            List<RotationManager.TickExposure> angleExposures) {
+            List<AngleExposure> angleExposures) {
 
         if (state.annotations.isEmpty()) {
             logger.warn("No annotations to process");
@@ -307,7 +309,7 @@ public class AcquisitionManager {
      */
     private CompletableFuture<Boolean> performSingleAnnotationAcquisition(
             PathObject annotation,
-            List<RotationManager.TickExposure> angleExposures) {
+            List<AngleExposure> angleExposures) {
 
         return CompletableFuture.supplyAsync(() -> {
             try {
@@ -354,7 +356,7 @@ public class AcquisitionManager {
      * @throws IOException if communication with microscope fails
      */
     private boolean monitorAcquisition(PathObject annotation,
-                                       List<RotationManager.TickExposure> angleExposures) throws IOException {
+                                       List<AngleExposure> angleExposures) throws IOException {
 
         MicroscopeSocketClient socketClient = MicroscopeController.getInstance().getSocketClient();
 
@@ -452,12 +454,7 @@ public class AcquisitionManager {
      * @param angleExposures Rotation angles used in acquisition
      */
     private void launchStitching(PathObject annotation,
-                                 List<RotationManager.TickExposure> angleExposures) {
-
-        // Extract rotation angles from tick/exposure data
-        List<Double> rotationAngles = angleExposures.stream()
-                .map(ae -> ae.ticks)
-                .collect(Collectors.toList());
+                                 List<AngleExposure> angleExposures) {
 
         // Get required parameters for stitching
         String configFile = QPPreferenceDialog.getMicroscopeConfigFileProperty();
@@ -466,16 +463,19 @@ public class AcquisitionManager {
 
         Project<BufferedImage> project = (Project<BufferedImage>) state.projectInfo.getCurrentProject();
 
+        ModalityHandler handler = ModalityRegistry.getHandler(state.sample.modality());
+
         // Create stitching future
         CompletableFuture<Void> stitchFuture = StitchingHelper.performAnnotationStitching(
                 annotation,
                 state.sample,
                 state.projectInfo.getImagingModeWithIndex(),
-                rotationAngles,
+                angleExposures,
                 pixelSize,
                 gui,
                 project,
-                STITCH_EXECUTOR
+                STITCH_EXECUTOR,
+                handler
         );
 
         state.stitchingFutures.add(stitchFuture);
@@ -487,7 +487,7 @@ public class AcquisitionManager {
     /**
      * Shows initial notification about acquisition start.
      */
-    private void showAcquisitionStartNotification(List<RotationManager.TickExposure> angleExposures) {
+    private void showAcquisitionStartNotification(List<AngleExposure> angleExposures) {
         Platform.runLater(() -> {
             Alert alert = new Alert(Alert.AlertType.INFORMATION);
             alert.setTitle("Acquisition Progress");
@@ -496,7 +496,7 @@ public class AcquisitionManager {
                     "Processing %d annotations with %d rotation angles each.\n" +
                             "This may take several minutes per annotation.",
                     state.annotations.size(),
-                    angleExposures != null ? angleExposures.size() : 1
+                    angleExposures == null || angleExposures.isEmpty() ? 1 : angleExposures.size()
             ));
             alert.show();
 

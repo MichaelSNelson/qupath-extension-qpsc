@@ -3,6 +3,8 @@ package qupath.ext.qpsc.controller.workflow;
 import javafx.application.Platform;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import qupath.ext.qpsc.modality.AngleExposure;
+import qupath.ext.qpsc.modality.ModalityHandler;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.ui.SampleSetupController;
 import qupath.ext.qpsc.ui.UIFunctions;
@@ -50,26 +52,28 @@ public class StitchingHelper {
      * @param annotation The annotation that was acquired
      * @param sample Sample setup information
      * @param modeWithIndex Imaging mode with index suffix
-     * @param rotationAngles List of rotation angles (null or empty for single acquisition)
+     * @param angleExposures Rotation angles with exposure settings (empty for single acquisition)
      * @param pixelSize Pixel size in micrometers
      * @param gui QuPath GUI instance
      * @param project QuPath project to update
      * @param executor Executor service for async execution
+     * @param handler Modality handler for file naming
      * @return CompletableFuture that completes when all stitching is done
      */
     public static CompletableFuture<Void> performAnnotationStitching(
             PathObject annotation,
             SampleSetupController.SampleSetupResult sample,
             String modeWithIndex,
-            List<Double> rotationAngles,
+            List<AngleExposure> angleExposures,
             double pixelSize,
             QuPathGUI gui,
             Project<BufferedImage> project,
-            ExecutorService executor) {
+            ExecutorService executor,
+            ModalityHandler handler) {
 
-        if (rotationAngles != null && !rotationAngles.isEmpty()) {
+        if (angleExposures != null && angleExposures.size() > 1) {
             logger.info("Stitching {} angles for annotation: {}",
-                    rotationAngles.size(), annotation.getName());
+                    angleExposures.size(), annotation.getName());
 
             // For multi-angle acquisitions, do ONE batch stitch with "." as matching string
             return CompletableFuture.runAsync(() -> {
@@ -77,7 +81,7 @@ public class StitchingHelper {
                     String annotationName = annotation.getName();
 
                     logger.info("Performing batch stitching for {} with {} angles",
-                            annotationName, rotationAngles.size());
+                            annotationName, angleExposures.size());
 
                     // Get compression type from preferences
                     String compression = String.valueOf(
@@ -94,7 +98,8 @@ public class StitchingHelper {
                             project,
                             compression,
                             pixelSize,
-                            1  // downsample factor
+                            1,  // downsample factor
+                            handler
                     );
 
                     logger.info("Batch stitching completed for {}, output: {}",
@@ -133,7 +138,8 @@ public class StitchingHelper {
                             project,
                             compression,
                             pixelSize,
-                            1
+                            1,
+                            handler
                     );
 
                     logger.info("Stitching completed for {}, output: {}",

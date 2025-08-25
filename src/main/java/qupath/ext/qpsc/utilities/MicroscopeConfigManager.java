@@ -289,13 +289,14 @@ public class MicroscopeConfigManager {
         }
     }
     /**
-     * Gets the global PPM configuration section.
-     * @return Map containing PPM settings, or empty map if not found
+     * Gets a modality-specific configuration section.
+     * @param key Top-level modality key (e.g., "PPM")
+     * @return Map containing settings, or empty map if not found
      */
-    public Map<String, Object> getPPMConfig() {
-        Object ppmSection = configData.get("PPM");
-        if (ppmSection instanceof Map) {
-            return (Map<String, Object>) ppmSection;
+    public Map<String, Object> getModalityConfig(String key) {
+        Object section = configData.get(key);
+        if (section instanceof Map) {
+            return (Map<String, Object>) section;
         }
         return new HashMap<>();
     }
