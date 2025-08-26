@@ -35,17 +35,18 @@ public class PPMBoundingBoxUI implements ModalityHandler.BoundingBoxUI {
         double defaultPlus = 5.0;
         double defaultMinus = -5.0;
 
-        @SuppressWarnings("unchecked")
-        java.util.List<java.util.Map<String, Object>> angles =
-                (java.util.List<java.util.Map<String, Object>>) mgr.getList("exposures", "ppm_angles");
+        java.util.List<?> angles = mgr.getList("exposures", "ppm_angles");
         if (angles != null) {
-            for (java.util.Map<String, Object> angle : angles) {
-                Object name = angle.get("name");
-                Object tickObj = angle.get("tick");
-                if (name != null && tickObj instanceof Number) {
-                    double tick = ((Number) tickObj).doubleValue();
-                    if ("positive".equals(name.toString())) defaultPlus = tick;
-                    else if ("negative".equals(name.toString())) defaultMinus = tick;
+            for (Object angleObj : angles) {
+                if (angleObj instanceof java.util.Map<?, ?> angle) {
+                    Object name = angle.get("name");
+                    Object tickObj = angle.get("tick");
+                    if (name != null && tickObj instanceof Number) {
+                        double tick = ((Number) tickObj).doubleValue();
+                        if ("positive".equals(name.toString())) defaultPlus = tick;
+                        else if ("negative".equals(name.toString())) defaultMinus = tick;
+                    }
+
                 }
             }
         }

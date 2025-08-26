@@ -39,23 +39,26 @@ public class RotationManager {
 
         if (isPPMModality) {
             // Read rotation angles from modality configuration
-            @SuppressWarnings("unchecked")
-            List<Map<String, Object>> angles = (List<Map<String, Object>>) mgr.getList("modalities", modality, "rotation_angles");
+            List<?> anglesList = mgr.getList("modalities", modality, "rotation_angles");
+
 
             double plusTick = 5.0;
             double minusTick = -5.0;
             double zeroTick = 0.0;
 
-            if (angles != null) {
-                for (Map<String, Object> angle : angles) {
-                    Object name = angle.get("name");
-                    Object tickObj = angle.get("tick");
-                    if (name != null && tickObj instanceof Number) {
-                        double tick = ((Number) tickObj).doubleValue();
-                        switch (name.toString()) {
-                            case "positive" -> plusTick = tick;
-                            case "negative" -> minusTick = tick;
-                            case "crossed" -> zeroTick = tick;
+
+            if (anglesList != null) {
+                for (Object angleObj : anglesList) {
+                    if (angleObj instanceof Map<?, ?> angle) {
+                        Object name = angle.get("name");
+                        Object tickObj = angle.get("tick");
+                        if (name != null && tickObj instanceof Number) {
+                            double tick = ((Number) tickObj).doubleValue();
+                            switch (name.toString()) {
+                                case "positive" -> plusTick = tick;
+                                case "negative" -> minusTick = tick;
+                                case "crossed" -> zeroTick = tick;
+                            }
                         }
                     }
                 }
