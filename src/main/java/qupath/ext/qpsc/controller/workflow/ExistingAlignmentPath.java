@@ -498,26 +498,6 @@ public class ExistingAlignmentPath {
         );
     }
 
-//    /**
-//     * Validates transform against stage boundaries.
-//     */
-//    private boolean validateTransform(AffineTransform transform) {
-//        MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(
-//                QPPreferenceDialog.getMicroscopeConfigFileProperty());
-//
-//        double stageXMin = mgr.getDouble("stage", "x_limit", "low");
-//        double stageXMax = mgr.getDouble("stage", "x_limit", "high");
-//        double stageYMin = mgr.getDouble("stage", "y_limit", "low");
-//        double stageYMax = mgr.getDouble("stage", "y_limit", "high");
-//
-//        int width = gui.getImageData().getServer().getWidth();
-//        int height = gui.getImageData().getServer().getHeight();
-//
-//        return TransformationFunctions.validateTransform(
-//                transform, width, height,
-//                stageXMin, stageXMax, stageYMin, stageYMax
-//        );
-//    }
     /**
      * Validates transform against stage boundaries with detailed logging.
      */

@@ -41,11 +41,9 @@ public class RotationManager {
             // Read rotation angles from modality configuration
             List<?> anglesList = mgr.getList("modalities", modality, "rotation_angles");
 
-
             double plusTick = 5.0;
             double minusTick = -5.0;
             double zeroTick = 0.0;
-
 
             if (anglesList != null) {
                 for (Object angleObj : anglesList) {
