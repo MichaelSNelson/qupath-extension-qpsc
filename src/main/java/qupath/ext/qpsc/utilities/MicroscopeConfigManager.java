@@ -168,7 +168,7 @@ public class MicroscopeConfigManager {
      * <p>
      * All warning/error messages use strings from the resource bundle for localization.
      *
-     * @param keys Sequence of keys (e.g., "imaging_mode", "bf_10x", "detector", "width_px").
+     * @param keys Sequence of keys (e.g., "modalities", "bf_10x", "objective", "id").
      * @return The value at the end of the key path, or null if not found.
      */
     @SuppressWarnings("unchecked")
