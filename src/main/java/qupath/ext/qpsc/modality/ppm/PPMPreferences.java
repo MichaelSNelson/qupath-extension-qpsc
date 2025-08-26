@@ -1,12 +1,21 @@
 package qupath.ext.qpsc.modality.ppm;
 
 import javafx.beans.property.StringProperty;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import qupath.ext.qpsc.preferences.QPPreferenceDialog;
+import qupath.ext.qpsc.utilities.MicroscopeConfigManager;
 import qupath.lib.gui.prefs.PathPrefs;
+
+import java.util.List;
+import java.util.Map;
 
 /**
  * Stores user preferences for PPM modality such as selected angles and exposure times.
  */
 public class PPMPreferences {
+
+    private static final Logger logger = LoggerFactory.getLogger(PPMPreferences.class);
 
     // Angle selection flags
     private static final StringProperty minusSelected =
@@ -23,6 +32,32 @@ public class PPMPreferences {
             PathPrefs.createPersistentPreference("PPMZeroExposureMs", "800");
     private static final StringProperty plusExposure =
             PathPrefs.createPersistentPreference("PPMPlusExposureMs", "500");
+
+    static {
+        try {
+            MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(
+                    QPPreferenceDialog.getMicroscopeConfigFileProperty());
+            List<?> angles = mgr.getList("exposures", "ppm_angles");
+            if (angles != null) {
+                for (Object obj : angles) {
+                    if (obj instanceof Map<?, ?> angle) {
+                        Object name = angle.get("name");
+                        Object exposure = angle.get("exposure_ms");
+                        if (name != null && exposure instanceof Number) {
+                            int ms = ((Number) exposure).intValue();
+                            switch (name.toString()) {
+                                case "positive" -> plusExposure.set(String.valueOf(ms));
+                                case "negative" -> minusExposure.set(String.valueOf(ms));
+                                case "crossed" -> zeroExposure.set(String.valueOf(ms));
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("Could not load default PPM exposures from configuration", e);
+        }
+    }
 
     private PPMPreferences() {}
 

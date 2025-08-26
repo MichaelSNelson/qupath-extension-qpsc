@@ -339,10 +339,10 @@ public class MicroscopeController {
         MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(configPath);
 
         // Try to get limits using getDouble with proper path
-        Double xLow = mgr.getDouble("stage", "x_limit", "low");
-        Double xHigh = mgr.getDouble("stage", "x_limit", "high");
-        Double yLow = mgr.getDouble("stage", "y_limit", "low");
-        Double yHigh = mgr.getDouble("stage", "y_limit", "high");
+        Double xLow = mgr.getDouble("stage", "limits", "x", "low");
+        Double xHigh = mgr.getDouble("stage", "limits", "x", "high");
+        Double yLow = mgr.getDouble("stage", "limits", "y", "low");
+        Double yHigh = mgr.getDouble("stage", "limits", "y", "high");
 
         if (xLow == null || xHigh == null || yLow == null || yHigh == null) {
             logger.error("Stage limits missing from config - xLow: {}, xHigh: {}, yLow: {}, yHigh: {}",
@@ -374,8 +374,8 @@ public class MicroscopeController {
         MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(configPath);
 
         // Try to get limits using getDouble with proper path
-        Double zLow = mgr.getDouble("stage", "z_limit", "low");
-        Double zHigh = mgr.getDouble("stage", "z_limit", "high");
+        Double zLow = mgr.getDouble("stage", "limits", "z", "low");
+        Double zHigh = mgr.getDouble("stage", "limits", "z", "high");
 
         if (zLow == null || zHigh == null) {
             logger.error("Stage Z limits missing from config - zLow: {}, zHigh: {}", zLow, zHigh);
@@ -408,32 +408,23 @@ public class MicroscopeController {
         String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
         MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(configPath);
 
-        // Get pixel size for the modality
-        Double pixelSize = mgr.getDouble("imaging_mode", modality, "pixel_size_um");
+        // Determine which camera we're using
+        String detectorName = mgr.getString("microscope", "default_camera");
+        if (detectorName == null) {
+            throw new IOException("No default camera defined in microscope configuration");
+        }
+
+        // Get pixel size for the modality and camera
+        Double pixelSize = mgr.getDouble("modalities", modality, "cameras", detectorName);
         if (pixelSize == null) {
-            throw new IOException("No pixel size found for modality: " + modality);
-        }
-
-        // Try to get detector/camera from the modality first
-        String detectorName = mgr.getString("imaging_mode", modality, "detector");
-
-        // If not found at modality level, check for camera at microscope level
-        if (detectorName == null) {
-            logger.debug("No detector at modality level, checking microscope level camera");
-            detectorName = mgr.getString("microscope", "camera");
-        }
-
-        if (detectorName == null) {
-            throw new IOException("No detector/camera specified for modality: " + modality +
-                    " (checked both modality and microscope levels)");
+            throw new IOException("No pixel size found for modality '" + modality + "' and camera '" + detectorName + "'");
         }
 
         logger.debug("Using detector/camera: {} for modality: {}", detectorName, modality);
 
-
-        // Try to get dimensions through the config manager's traversal
-        Integer width = mgr.getInteger("imaging_mode", modality, "detector", "width_px");
-        Integer height = mgr.getInteger("imaging_mode", modality, "detector", "height_px");
+        // Try to get detector dimensions from resources
+        Integer width = null;
+        Integer height = null;
 
         if (width == null || height == null) {
             // If that didn't work, try direct resource lookup
