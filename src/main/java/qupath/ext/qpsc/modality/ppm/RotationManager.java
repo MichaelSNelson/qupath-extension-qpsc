@@ -38,46 +38,29 @@ public class RotationManager {
         boolean isPPMModality = modality != null && modality.startsWith("ppm_");
 
         if (isPPMModality) {
-            // Get PPM config from global section
-            Map<String, Object> ppmConfig = mgr.getModalityConfig("PPM");
+            // Read rotation angles from modality configuration
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> angles = (List<Map<String, Object>>) mgr.getList("modalities", modality, "rotation_angles");
 
-            Double plusTick = null;
-            Double minusTick = null;
-            Double zeroTick = null;
+            double plusTick = 5.0;
+            double minusTick = -5.0;
+            double zeroTick = 0.0;
 
-            // Read from global PPM section
-            Map<String, Object> ppmPlus = (Map<String, Object>) ppmConfig.get("ppm_plus");
-            Map<String, Object> ppmMinus = (Map<String, Object>) ppmConfig.get("ppm_minus");
-            Map<String, Object> ppmZero = (Map<String, Object>) ppmConfig.get("ppm_zero");
-
-            if (ppmPlus != null) {
-                if (ppmPlus.containsKey("tick")) {
-                    plusTick = ((Number) ppmPlus.get("tick")).doubleValue();
+            if (angles != null) {
+                for (Map<String, Object> angle : angles) {
+                    Object name = angle.get("name");
+                    Object tickObj = angle.get("tick");
+                    if (name != null && tickObj instanceof Number) {
+                        double tick = ((Number) tickObj).doubleValue();
+                        switch (name.toString()) {
+                            case "positive" -> plusTick = tick;
+                            case "negative" -> minusTick = tick;
+                            case "crossed" -> zeroTick = tick;
+                        }
+                    }
                 }
-            }
-
-            if (ppmMinus != null) {
-                if (ppmMinus.containsKey("tick")) {
-                    minusTick = ((Number) ppmMinus.get("tick")).doubleValue();
-                }
-
-            }
-
-            if (ppmZero != null) {
-                if (ppmZero.containsKey("tick")) {
-                    zeroTick = ((Number) ppmZero.get("tick")).doubleValue();
-                }
-
-            }
-
-            // Use defaults if not configured
-            if (plusTick == null || minusTick == null) {
-                logger.warn("PPM ticks not configured in YAML. Using defaults (+5, -5).");
-                plusTick = 5.0;
-                minusTick = -5.0;
-            }
-            if (zeroTick == null) {
-                zeroTick = 0.0;
+            } else {
+                logger.warn("No rotation angles found for modality {} - using defaults", modality);
             }
 
             // Get exposure times from PPMPreferences

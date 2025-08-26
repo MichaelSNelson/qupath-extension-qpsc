@@ -525,10 +525,10 @@ public class ExistingAlignmentPath {
         MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(
                 QPPreferenceDialog.getMicroscopeConfigFileProperty());
 
-        double stageXMin = mgr.getDouble("stage", "x_limit", "low");
-        double stageXMax = mgr.getDouble("stage", "x_limit", "high");
-        double stageYMin = mgr.getDouble("stage", "y_limit", "low");
-        double stageYMax = mgr.getDouble("stage", "y_limit", "high");
+        double stageXMin = mgr.getDouble("stage", "limits", "x", "low");
+        double stageXMax = mgr.getDouble("stage", "limits", "x", "high");
+        double stageYMin = mgr.getDouble("stage", "limits", "y", "low");
+        double stageYMax = mgr.getDouble("stage", "limits", "y", "high");
 
         logger.info("Stage boundaries from config:");
         logger.info("  X: {} to {} µm", stageXMin, stageXMax);

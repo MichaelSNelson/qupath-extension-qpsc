@@ -31,17 +31,23 @@ public class PPMBoundingBoxUI implements ModalityHandler.BoundingBoxUI {
 
         MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(
                 QPPreferenceDialog.getMicroscopeConfigFileProperty());
-        Map<String, Object> ppmConfig = mgr.getModalityConfig("PPM");
 
         double defaultPlus = 5.0;
         double defaultMinus = -5.0;
-        Map<String, Object> plusMap = (Map<String, Object>) ppmConfig.get("ppm_plus");
-        Map<String, Object> minusMap = (Map<String, Object>) ppmConfig.get("ppm_minus");
-        if (plusMap != null && plusMap.containsKey("ticks")) {
-            defaultPlus = ((Number) plusMap.get("ticks")).doubleValue();
-        }
-        if (minusMap != null && minusMap.containsKey("ticks")) {
-            defaultMinus = ((Number) minusMap.get("ticks")).doubleValue();
+
+        @SuppressWarnings("unchecked")
+        java.util.List<java.util.Map<String, Object>> angles =
+                (java.util.List<java.util.Map<String, Object>>) mgr.getList("exposures", "ppm_angles");
+        if (angles != null) {
+            for (java.util.Map<String, Object> angle : angles) {
+                Object name = angle.get("name");
+                Object tickObj = angle.get("tick");
+                if (name != null && tickObj instanceof Number) {
+                    double tick = ((Number) tickObj).doubleValue();
+                    if ("positive".equals(name.toString())) defaultPlus = tick;
+                    else if ("negative".equals(name.toString())) defaultMinus = tick;
+                }
+            }
         }
 
         Label label = new Label("PPM Polarization Angles:");
