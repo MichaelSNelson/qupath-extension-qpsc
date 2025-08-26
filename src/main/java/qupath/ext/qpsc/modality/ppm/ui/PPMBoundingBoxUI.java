@@ -46,6 +46,7 @@ public class PPMBoundingBoxUI implements ModalityHandler.BoundingBoxUI {
                         if ("positive".equals(name.toString())) defaultPlus = tick;
                         else if ("negative".equals(name.toString())) defaultMinus = tick;
                     }
+
                 }
             }
         }
