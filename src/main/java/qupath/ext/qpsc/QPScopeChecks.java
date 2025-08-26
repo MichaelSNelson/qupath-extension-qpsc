@@ -66,15 +66,15 @@ public class QPScopeChecks {
                 new String[]{"microscope", "type"},
 
                 // Stage configuration - used for bounds checking
-                new String[]{"stage", "x_limit", "low"},
-                new String[]{"stage", "x_limit", "high"},
-                new String[]{"stage", "y_limit", "low"},
-                new String[]{"stage", "y_limit", "high"},
-                new String[]{"stage", "z_limit", "low"},
-                new String[]{"stage", "z_limit", "high"},
+                new String[]{"stage", "limits", "x", "low"},
+                new String[]{"stage", "limits", "x", "high"},
+                new String[]{"stage", "limits", "y", "low"},
+                new String[]{"stage", "limits", "y", "high"},
+                new String[]{"stage", "limits", "z", "low"},
+                new String[]{"stage", "limits", "z", "high"},
 
-                // At least one imaging mode should be present
-                new String[]{"imaging_mode"}
+                // At least one modality should be present
+                new String[]{"modalities"}
         );
 
         String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
@@ -88,34 +88,33 @@ public class QPScopeChecks {
             return false;
         }
 
-        // Additional validation: Check that at least one imaging mode has required fields
-        Map<String, Object> imagingModes = mgr.getSection("imaging_mode");
+        // Additional validation: Check that at least one modality has required fields
+        Map<String, Object> imagingModes = mgr.getSection("modalities");
         if (imagingModes == null || imagingModes.isEmpty()) {
-            logger.error("No imaging modes defined in configuration");
+            logger.error("No modalities defined in configuration");
             Dialogs.showWarningNotification("Configuration Error",
-                    "No imaging modes defined in configuration");
+                    "No modalities defined in configuration");
             return false;
         }
 
         // Check that each imaging mode has the required fields
         boolean hasValidMode = false;
+        String camera = mgr.getString("microscope", "default_camera");
         for (Map.Entry<String, Object> entry : imagingModes.entrySet()) {
             String modeName = entry.getKey();
             if (entry.getValue() instanceof Map) {
-                // Each imaging mode needs pixel_size_um and objective_lens
-                Double pixelSize = mgr.getDouble("imaging_mode", modeName, "pixel_size_um");
-                String objective = mgr.getString("imaging_mode", modeName, "objective_lens");
+                // Each modality needs a pixel size for the camera and an objective id
+                Double pixelSize = mgr.getDouble("modalities", modeName, "cameras", camera);
+                String objective = mgr.getString("modalities", modeName, "objective", "id");
 
-                logger.debug("Checking imaging mode '{}': pixel_size_um={}, objective_lens={}",
+                logger.debug("Checking modality '{}': pixelSize={}, objective={}",
                         modeName, pixelSize, objective);
 
                 if (pixelSize != null && pixelSize > 0 && objective != null) {
                     hasValidMode = true;
 
-                    // Camera is directly in microscope config
-                    String camera = mgr.getString("microscope", "camera");
                     if (camera != null) {
-                        logger.debug("Checking camera '{}' for mode '{}'", camera, modeName);
+                        logger.debug("Checking camera '{}' for modality '{}'", camera, modeName);
 
                         // Get the detector section from resources directly using the existing method
                         Map<String, Object> detectorSection = mgr.getResourceSection("id_detector");
@@ -143,31 +142,32 @@ public class QPScopeChecks {
                             return false;
                         }
                     }
+
+                    // Validate autofocus settings if provided for this modality
+                    Map<String, Object> af = mgr.getSection("modalities", modeName, "objective", "autofocus");
+                    if (af != null) {
+                        Integer nSteps = mgr.getInteger("modalities", modeName, "objective", "autofocus", "n_steps");
+                        Double searchRange = mgr.getDouble("modalities", modeName, "objective", "autofocus", "search_range");
+                        if (nSteps == null || nSteps <= 0 || searchRange == null || searchRange <= 0) {
+                            logger.warn("Autofocus configuration incomplete for modality {}: n_steps={}, search_range={}",
+                                    modeName, nSteps, searchRange);
+                            Dialogs.showWarningNotification("Configuration Warning",
+                                    "Autofocus configuration incomplete for modality " + modeName +
+                                            ". Default values will be used.");
+                        }
+                    }
                 } else {
-                    logger.warn("Imaging mode '{}' is invalid: pixel_size_um={}, objective_lens={}",
+                    logger.warn("Modality '{}' is invalid: pixelSize={}, objective={}",
                             modeName, pixelSize, objective);
                 }
             }
         }
 
         if (!hasValidMode) {
-            logger.error("No valid imaging modes found in configuration");
+            logger.error("No valid modalities found in configuration");
             Dialogs.showWarningNotification("Configuration Error",
-                    "No valid imaging modes found. Each mode requires pixel_size_um and objective_lens");
+                    "No valid modalities found. Each modality requires a pixel size and objective id");
             return false;
-        }
-
-        // Validate autofocus settings if present (used in workflows)
-        if (mgr.getSection("autofocus") != null) {
-            Integer nSteps = mgr.getInteger("autofocus", "n_steps");
-            Double searchRange = mgr.getDouble("autofocus", "search_range");
-
-            if (nSteps == null || nSteps <= 0 || searchRange == null || searchRange <= 0) {
-                logger.warn("Autofocus configuration incomplete: n_steps={}, search_range={}",
-                        nSteps, searchRange);
-                Dialogs.showWarningNotification("Configuration Warning",
-                        "Autofocus configuration incomplete. Default values will be used.");
-            }
         }
 
         logger.info("Microscope configuration validation passed");

@@ -134,7 +134,8 @@ public class BoundingBoxWorkflow {
 // Get pixel size for stitching metadata (still needed)
                     MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(
                             QPPreferenceDialog.getMicroscopeConfigFileProperty());
-                    double pixelSize = mgr.getDouble("imaging_mode", sample.modality(), "pixel_size_um");
+                    String camera = mgr.getString("microscope", "default_camera");
+                    double pixelSize = mgr.getDouble("modalities", sample.modality(), "cameras", camera);
 
 // 6) Create tile configuration using new API
                     TilingRequest request = new TilingRequest.Builder()
