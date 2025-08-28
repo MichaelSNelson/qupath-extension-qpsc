@@ -99,7 +99,7 @@ public class AlignmentSelectionController {
 
                 // Get current microscope name from config
                 MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(configPath);
-                String microscopeName = mgr.getString("microscope", "name");
+                String microscopeName = mgr.getMicroscopeName();
 
                 logger.info("Loading transforms for microscope: '{}' from directory: '{}'",
                         microscopeName, new File(configPath).getParent());

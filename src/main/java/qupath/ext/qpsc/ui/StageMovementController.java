@@ -6,6 +6,8 @@ import javafx.scene.control.*;
 import javafx.scene.layout.GridPane;
 import javafx.stage.Modality;
 import qupath.ext.qpsc.controller.MicroscopeController;
+import qupath.ext.qpsc.preferences.QPPreferenceDialog;
+import qupath.ext.qpsc.utilities.MicroscopeConfigManager;
 
 import java.util.ResourceBundle;
 
@@ -50,6 +52,10 @@ public class StageMovementController {
                 rField.setText(String.format("%.2f", r));
             } catch (Exception ignored) {}
 
+            // Get config manager for bounds checking
+            String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
+            MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(configPath);
+
             // --- Buttons ---
             Button moveXYBtn = new Button(res.getString("stageMovement.button.moveXY"));
             Button moveZBtn  = new Button(res.getString("stageMovement.button.moveZ"));
@@ -60,8 +66,8 @@ public class StageMovementController {
                 try {
                     double x = Double.parseDouble(xField.getText());
                     double y = Double.parseDouble(yField.getText());
-                    // *** BOUNDS CHECK ***
-                    if (!MicroscopeController.getInstance().isWithinBoundsXY(x, y)) {
+                    // *** BOUNDS CHECK using ConfigManager directly ***
+                    if (!mgr.isWithinStageBounds(x, y)) {
                         UIFunctions.notifyUserOfError(
                                 res.getString("stageMovement.error.outOfBoundsXY"),
                                 res.getString("stageMovement.title"));
@@ -80,8 +86,8 @@ public class StageMovementController {
             moveZBtn.setOnAction(e -> {
                 try {
                     double z = Double.parseDouble(zField.getText());
-                    // *** BOUNDS CHECK ***
-                    if (!MicroscopeController.getInstance().isWithinBoundsZ(z)) {
+                    // *** BOUNDS CHECK using ConfigManager directly ***
+                    if (!mgr.isWithinStageBounds(z)) {
                         UIFunctions.notifyUserOfError(
                                 res.getString("stageMovement.error.outOfBoundsZ"),
                                 res.getString("stageMovement.title"));
@@ -143,4 +149,3 @@ public class StageMovementController {
         });
     }
 }
-

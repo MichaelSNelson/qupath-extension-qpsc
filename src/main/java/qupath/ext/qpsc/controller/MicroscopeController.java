@@ -165,6 +165,9 @@ public class MicroscopeController {
         }
     }
 
+// Remove the isWithinBoundsXY and isWithinBoundsZ methods entirely
+// Update the moveStageXY method:
+
     /**
      * Moves the stage in X,Y only. Z position is not affected.
      *
@@ -172,8 +175,11 @@ public class MicroscopeController {
      * @param y Target Y coordinate in microns
      */
     public void moveStageXY(double x, double y) {
-        // Validate bounds
-        if (!isWithinBoundsXY(x, y)) {
+        // Validate bounds using ConfigManager directly
+        String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
+        MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(configPath);
+
+        if (!mgr.isWithinStageBounds(x, y)) {
             UIFunctions.notifyUserOfError(
                     String.format("Target position (%.2f, %.2f) is outside stage limits", x, y),
                     "Stage Limits Exceeded"
@@ -199,8 +205,11 @@ public class MicroscopeController {
      * @param z Target Z coordinate in microns
      */
     public void moveStageZ(double z) {
-        // Validate bounds
-        if (!isWithinBoundsZ(z)) {
+        // Validate bounds using ConfigManager directly
+        String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
+        MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(configPath);
+
+        if (!mgr.isWithinStageBounds(z)) {
             UIFunctions.notifyUserOfError(
                     String.format("Target Z position %.2f is outside stage limits", z),
                     "Stage Limits Exceeded"
@@ -327,71 +336,7 @@ public class MicroscopeController {
             throw new IOException("Failed to get camera FOV via socket", e);
         }
     }
-    /**
-     * Checks if the given XY coordinates are within stage bounds.
-     *
-     * @param x X coordinate in microns
-     * @param y Y coordinate in microns
-     * @return true if within bounds, false otherwise
-     */
-    public boolean isWithinBoundsXY(double x, double y) {
-        String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
-        MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(configPath);
 
-        // Try to get limits using getDouble with proper path
-        Double xLow = mgr.getDouble("stage", "limits", "x", "low");
-        Double xHigh = mgr.getDouble("stage", "limits", "x", "high");
-        Double yLow = mgr.getDouble("stage", "limits", "y", "low");
-        Double yHigh = mgr.getDouble("stage", "limits", "y", "high");
-
-        if (xLow == null || xHigh == null || yLow == null || yHigh == null) {
-            logger.error("Stage limits missing from config - xLow: {}, xHigh: {}, yLow: {}, yHigh: {}",
-                    xLow, xHigh, yLow, yHigh);
-            // Default to allowing movement if limits not configured
-            logger.warn("Stage limits not configured, allowing movement");
-            return true;
-        }
-
-        boolean withinX = (x >= Math.min(xLow, xHigh) && x <= Math.max(xLow, xHigh));
-        boolean withinY = (y >= Math.min(yLow, yHigh) && y <= Math.max(yLow, yHigh));
-
-        if (!withinX || !withinY) {
-            logger.warn("Position ({}, {}) outside stage bounds: X[{}, {}], Y[{}, {}]",
-                    x, y, xLow, xHigh, yLow, yHigh);
-        }
-
-        return withinX && withinY;
-    }
-
-    /**
-     * Checks if the given Z coordinate is within stage bounds.
-     *
-     * @param z Z coordinate in microns
-     * @return true if within bounds, false otherwise
-     */
-    public boolean isWithinBoundsZ(double z) {
-        String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
-        MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(configPath);
-
-        // Try to get limits using getDouble with proper path
-        Double zLow = mgr.getDouble("stage", "limits", "z", "low");
-        Double zHigh = mgr.getDouble("stage", "limits", "z", "high");
-
-        if (zLow == null || zHigh == null) {
-            logger.error("Stage Z limits missing from config - zLow: {}, zHigh: {}", zLow, zHigh);
-            // Default to allowing movement if limits not configured
-            logger.warn("Stage Z limits not configured, allowing movement");
-            return true;
-        }
-
-        boolean withinZ = (z >= Math.min(zLow, zHigh) && z <= Math.max(zLow, zHigh));
-
-        if (!withinZ) {
-            logger.warn("Z position {} outside stage bounds: [{}, {}]", z, zLow, zHigh);
-        }
-
-        return withinZ;
-    }
 
     /**
      * Calculates camera field of view for a specific modality from configuration files.
@@ -408,57 +353,116 @@ public class MicroscopeController {
         String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
         MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(configPath);
 
-        // Determine which camera we're using
-        String detectorName = mgr.getString("microscope", "default_camera");
-        if (detectorName == null) {
-            throw new IOException("No default camera defined in microscope configuration");
+        // Find the acquisition profile for this modality to get objective and detector
+        List<Object> profiles = mgr.getList("acq_profiles_new", "profiles");
+        if (profiles == null || profiles.isEmpty()) {
+            throw new IOException("No acquisition profiles defined in configuration");
         }
 
-        // Get pixel size for the modality and camera
-        Double pixelSize = mgr.getDouble("modalities", modality, "cameras", detectorName);
-        if (pixelSize == null) {
-            throw new IOException("No pixel size found for modality '" + modality + "' and camera '" + detectorName + "'");
+        String objectiveId = null;
+        String detectorId = null;
+        String matchedModalityName = null;
+
+        // Handle indexed modality names (e.g., "bf_10x_1" -> "bf_10x")
+        String baseModality = modality;
+        if (baseModality.matches(".*_\\d+$")) {
+            baseModality = baseModality.substring(0, baseModality.lastIndexOf('_'));
         }
 
-        logger.debug("Using detector/camera: {} for modality: {}", detectorName, modality);
+        // Search for a matching profile
+        for (Object profileObj : profiles) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> profile = (Map<String, Object>) profileObj;
 
-        // Try to get detector dimensions from resources
-        Integer width = null;
-        Integer height = null;
+            String profileModality = (String) profile.get("modality");
 
-        if (width == null || height == null) {
-            // If that didn't work, try direct resource lookup
-            logger.debug("Attempting direct resource lookup for detector: {}", detectorName);
-            Map<String, Object> detectorSection = mgr.getResourceSection("id_detector");
-            if (detectorSection != null && detectorSection.containsKey(detectorName)) {
+            // Check various matching patterns
+            if (profileModality != null &&
+                    (profileModality.equals(baseModality) ||
+                            profileModality.equals(modality) ||
+                            modality.startsWith(profileModality))) {
+
+                objectiveId = (String) profile.get("objective");
+                detectorId = (String) profile.get("detector");
+                matchedModalityName = profileModality;
+
+                // If we found both, we can break
+                if (objectiveId != null && detectorId != null) {
+                    logger.debug("Found profile match: modality={}, objective={}, detector={}",
+                            profileModality, objectiveId, detectorId);
+                    break;
+                }
+            }
+        }
+
+        // If we couldn't find a complete profile, try to infer from modality name
+        if (objectiveId == null || detectorId == null) {
+            // As a fallback, try to find any profile with this modality type
+            String modalityType = baseModality.split("_")[0]; // e.g., "bf" or "ppm"
+
+            for (Object profileObj : profiles) {
                 @SuppressWarnings("unchecked")
-                Map<String, Object> detectorInfo = (Map<String, Object>) detectorSection.get(detectorName);
-                if (detectorInfo != null) {
-                    Object widthObj = detectorInfo.get("width_px");
-                    Object heightObj = detectorInfo.get("height_px");
-                    if (widthObj instanceof Number && heightObj instanceof Number) {
-                        width = ((Number) widthObj).intValue();
-                        height = ((Number) heightObj).intValue();
+                Map<String, Object> profile = (Map<String, Object>) profileObj;
+
+                String profileModality = (String) profile.get("modality");
+                if (profileModality != null && profileModality.startsWith(modalityType)) {
+                    if (detectorId == null) {
+                        detectorId = (String) profile.get("detector");
+                    }
+                    // Try to match objective by magnification in modality name
+                    if (objectiveId == null && baseModality.contains("10x")) {
+                        String tempObjective = (String) profile.get("objective");
+                        if (tempObjective != null && tempObjective.contains("10X")) {
+                            objectiveId = tempObjective;
+                            matchedModalityName = profileModality;
+                        }
+                    } else if (objectiveId == null && baseModality.contains("20x")) {
+                        String tempObjective = (String) profile.get("objective");
+                        if (tempObjective != null && tempObjective.contains("20X")) {
+                            objectiveId = tempObjective;
+                            matchedModalityName = profileModality;
+                        }
+                    } else if (objectiveId == null && baseModality.contains("40x")) {
+                        String tempObjective = (String) profile.get("objective");
+                        if (tempObjective != null && tempObjective.contains("40X")) {
+                            objectiveId = tempObjective;
+                            matchedModalityName = profileModality;
+                        }
                     }
                 }
             }
         }
 
-        if (width == null || height == null) {
+        if (objectiveId == null || detectorId == null || matchedModalityName == null) {
             throw new IOException(String.format(
-                    "No detector dimensions found for modality '%s' with detector '%s'",
-                    modality, detectorName));
+                    "Could not find acquisition profile for modality '%s'. Please check configuration.",
+                    modality));
         }
 
-        double fovWidth = width * pixelSize;
-        double fovHeight = height * pixelSize;
+        // Get pixel size using the three-parameter method
+        double pixelSize = mgr.getModalityPixelSize(matchedModalityName, objectiveId, detectorId);
+        if (pixelSize <= 0) {
+            throw new IOException(String.format(
+                    "Invalid pixel size (%.4f) for modality '%s' with objective '%s' and detector '%s'",
+                    pixelSize, matchedModalityName, objectiveId, detectorId));
+        }
+
+        // Get detector dimensions
+        int[] dimensions = mgr.getDetectorDimensions(detectorId);
+        if (dimensions == null) {
+            throw new IOException(String.format(
+                    "No detector dimensions found for detector '%s'",
+                    detectorId));
+        }
+
+        double fovWidth = dimensions[0] * pixelSize;
+        double fovHeight = dimensions[1] * pixelSize;
 
         logger.info("Camera FOV for {}: {:.1f} x {:.1f} µm ({}x{} pixels @ {} µm/pixel)",
-                modality, fovWidth, fovHeight, width, height, pixelSize);
+                modality, fovWidth, fovHeight, dimensions[0], dimensions[1], pixelSize);
 
         return new double[]{fovWidth, fovHeight};
     }
-
     /**
      * Checks if the socket client is connected.
      *

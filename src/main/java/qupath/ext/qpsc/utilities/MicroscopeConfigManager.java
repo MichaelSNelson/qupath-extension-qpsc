@@ -19,8 +19,8 @@ import java.util.stream.Collectors;
  *   - Parses nested YAML into a Map<String,Object>.
  *   - Offers type safe getters (getDouble, getSection, getList, etc.).
  *   - Validates required keys and reports missing paths.
+ *   - Supports new acquisition profile format with defaults and specific profiles
  */
-
 public class MicroscopeConfigManager {
     private static final Logger logger = LoggerFactory.getLogger(MicroscopeConfigManager.class);
 
@@ -33,15 +33,15 @@ public class MicroscopeConfigManager {
     // Shared LOCI resource data loaded from resources_LOCI.yml
     private final Map<String, Object> resourceData;
     private final Map<String, String> lociSectionMap;
+    private final String configPath;
 
     /**
      * Private constructor: loads both the microscope-specific YAML and the shared LOCI resources.
      *
      * @param configPath Filesystem path to the microscope YAML configuration file.
      */
-
-
     private MicroscopeConfigManager(String configPath) {
+        this.configPath = configPath;
         this.configData = loadConfig(configPath);
         String resPath = computeResourcePath(configPath);
         this.resourceData = loadConfig(resPath);
@@ -59,6 +59,7 @@ public class MicroscopeConfigManager {
         if (lociSectionMap.isEmpty())
             logger.warn("No LOCI sections found in shared resources!");
     }
+
     /**
      * Initializes and returns the singleton instance. Must be called first with the path to the microscope YAML.
      *
@@ -71,6 +72,7 @@ public class MicroscopeConfigManager {
         }
         return instance;
     }
+
     /**
      * Retrieves an unmodifiable view of the entire configuration map currently loaded
      * from the microscope-specific YAML file.
@@ -83,6 +85,7 @@ public class MicroscopeConfigManager {
     public Map<String, Object> getAllConfig() {
         return Collections.unmodifiableMap(configData);
     }
+
     /**
      * Reloads both the microscope YAML and shared LOCI resources.
      *
@@ -95,6 +98,7 @@ public class MicroscopeConfigManager {
         resourceData.clear();
         resourceData.putAll(loadConfig(resPath));
     }
+
     /**
      * Retrieves a section from the resources file directly.
      * This bypasses the normal config lookup and goes straight to resources.
@@ -132,7 +136,6 @@ public class MicroscopeConfigManager {
         return resourcePath.toString();
     }
 
-
     /**
      * Loads a YAML file into a Map.
      *
@@ -157,7 +160,6 @@ public class MicroscopeConfigManager {
         return new LinkedHashMap<>();
     }
 
-
     /**
      * Retrieve a deeply nested value from the microscope configuration,
      * following references to resources_LOCI.yml dynamically if needed.
@@ -165,8 +167,6 @@ public class MicroscopeConfigManager {
      * If a String value matching "LOCI-..." is encountered during traversal,
      * this method will search all top-level sections of resources_LOCI.yml to find
      * the corresponding entry and continue the lookup there.
-     * <p>
-     * All warning/error messages use strings from the resource bundle for localization.
      *
      * @param keys Sequence of keys (e.g., "modalities", "bf_10x", "objective", "id").
      * @return The value at the end of the key path, or null if not found.
@@ -212,7 +212,7 @@ public class MicroscopeConfigManager {
                 current = map2.get(key);
                 continue;
             }
-            // Not found – log full context
+            // Not found – log full context
             logger.warn(res.getString("configManager.keyNotFound"),
                     key, i, current, Arrays.toString(keys));
             return null;
@@ -225,7 +225,6 @@ public class MicroscopeConfigManager {
     /**
      * Helper to guess the correct resource section for a given parent field (e.g., "detector").
      * Dynamically searches all top-level keys in resources_LOCI.yml.
-     * Logs and returns null if not found.
      *
      * @param parentField   The key referring to a hardware part ("detector", "objectiveLens", etc.)
      * @param resourceData  The parsed LOCI resource map
@@ -242,7 +241,6 @@ public class MicroscopeConfigManager {
         // Fallback: just use first section, but warn!
         return resourceData.keySet().stream().findFirst().orElse(null);
     }
-
 
     /**
      * Retrieves a String value from the config or resources.
@@ -288,18 +286,7 @@ public class MicroscopeConfigManager {
             return null;
         }
     }
-    /**
-     * Gets a modality-specific configuration section.
-     * @param key Top-level modality key (e.g., "PPM")
-     * @return Map containing settings, or empty map if not found
-     */
-    public Map<String, Object> getModalityConfig(String key) {
-        Object section = configData.get(key);
-        if (section instanceof Map) {
-            return (Map<String, Object>) section;
-        }
-        return new HashMap<>();
-    }
+
     /**
      * Retrieves a Boolean value from the config or resources.
      *
@@ -337,6 +324,428 @@ public class MicroscopeConfigManager {
     }
 
     /**
+     * Gets a modality-specific configuration section.
+     * @param key Top-level modality key (e.g., "PPM")
+     * @return Map containing settings, or empty map if not found
+     */
+    public Map<String, Object> getModalityConfig(String key) {
+        Object section = configData.get(key);
+        if (section instanceof Map) {
+            return (Map<String, Object>) section;
+        }
+        return new HashMap<>();
+    }
+
+    // ========== NEW ACQUISITION PROFILE METHODS ==========
+
+    /**
+     * Get a specific acquisition profile by modality, objective, and detector.
+     *
+     * @param modality The modality name (e.g., "ppm", "brightfield")
+     * @param objective The objective ID (e.g., "LOCI_OBJECTIVE_OLYMPUS_10X_001")
+     * @param detector The detector ID (e.g., "LOCI_DETECTOR_JAI_001")
+     * @return Map containing the profile, or null if not found
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getAcquisitionProfile(String modality, String objective, String detector) {
+        List<Object> profiles = getList("acq_profiles_new", "profiles");
+        if (profiles == null) {
+            logger.warn("No acquisition profiles found in configuration");
+            return null;
+        }
+
+        for (Object profile : profiles) {
+            if (profile instanceof Map<?, ?>) {
+                Map<String, Object> p = (Map<String, Object>) profile;
+                if (modality.equals(p.get("modality")) &&
+                        objective.equals(p.get("objective")) &&
+                        detector.equals(p.get("detector"))) {
+                    logger.debug("Found profile for {}/{}/{}", modality, objective, detector);
+                    return p;
+                }
+            }
+        }
+
+        logger.warn("No profile found for modality: {}, objective: {}, detector: {}",
+                modality, objective, detector);
+        return null;
+    }
+
+    /**
+     * Get a setting from acquisition profile with defaults fallback.
+     * First checks specific profile, then falls back to defaults.
+     *
+     * @param modality The modality name
+     * @param objective The objective ID
+     * @param detector The detector ID
+     * @param settingPath Path to the setting within the profile
+     * @return The setting value, or null if not found
+     */
+    @SuppressWarnings("unchecked")
+    public Object getProfileSetting(String modality, String objective, String detector, String... settingPath) {
+        // First check specific profile
+        Map<String, Object> profile = getAcquisitionProfile(modality, objective, detector);
+        if (profile != null && profile.containsKey("settings")) {
+            Object value = getNestedValue((Map<String, Object>) profile.get("settings"), settingPath);
+            if (value != null) {
+                logger.debug("Found setting in specific profile: {}", Arrays.toString(settingPath));
+                return value;
+            }
+        }
+
+        // Fall back to defaults
+        List<Object> defaults = getList("acq_profiles_new", "defaults");
+        if (defaults != null) {
+            for (Object def : defaults) {
+                if (def instanceof Map<?, ?>) {
+                    Map<String, Object> d = (Map<String, Object>) def;
+                    if (objective.equals(d.get("objective")) && d.containsKey("settings")) {
+                        Object value = getNestedValue((Map<String, Object>) d.get("settings"), settingPath);
+                        if (value != null) {
+                            logger.debug("Found setting in defaults: {}", Arrays.toString(settingPath));
+                            return value;
+                        }
+                    }
+                }
+            }
+        }
+
+        logger.warn("Setting not found: {} for {}/{}/{}",
+                Arrays.toString(settingPath), modality, objective, detector);
+        return null;
+    }
+
+    /**
+     * Helper method to get nested value from a map using a path.
+     *
+     * @param map The map to search in
+     * @param path The path to the value
+     * @return The value at the path, or null if not found
+     */
+    @SuppressWarnings("unchecked")
+    private Object getNestedValue(Map<String, Object> map, String... path) {
+        Object current = map;
+        for (String key : path) {
+            if (current instanceof Map<?, ?>) {
+                current = ((Map<?, ?>) current).get(key);
+                if (current == null) return null;
+            } else {
+                return null;
+            }
+        }
+        return current;
+    }
+
+    /**
+     * Get exposure settings for a specific modality/objective/detector combination.
+     *
+     * @param modality The modality name
+     * @param objective The objective ID
+     * @param detector The detector ID
+     * @return Map of exposure settings, or null if not found
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getModalityExposures(String modality, String objective, String detector) {
+        Object exposures = getProfileSetting(modality, objective, detector, "exposures_ms");
+        return (exposures instanceof Map<?, ?>) ? (Map<String, Object>) exposures : null;
+    }
+
+    /**
+     * Get gain settings for a specific modality/objective/detector combination.
+     *
+     * @param modality The modality name
+     * @param objective The objective ID
+     * @param detector The detector ID
+     * @return Map of gain settings, single gain value, or null if not found
+     */
+    public Object getModalityGains(String modality, String objective, String detector) {
+        return getProfileSetting(modality, objective, detector, "gains");
+    }
+
+    /**
+     * Get pixel size for a specific modality/objective/detector combination.
+     *
+     * @param modality The modality name
+     * @param objective The objective ID
+     * @param detector The detector ID
+     * @return Pixel size in microns
+     * @throws IllegalArgumentException if pixel size cannot be determined
+     */
+    public double getModalityPixelSize(String modality, String objective, String detector) {
+        Object pixelSize = getProfileSetting(modality, objective, detector, "pixel_size_xy_um", detector);
+
+        if (pixelSize instanceof Number) {
+            double size = ((Number) pixelSize).doubleValue();
+            if (size > 0) {
+                logger.debug("Pixel size for {}/{}/{}: {} µm", modality, objective, detector, size);
+                return size;
+            }
+        }
+
+        logger.error("No valid pixel size found for {}/{}/{}", modality, objective, detector);
+        throw new IllegalArgumentException(
+                String.format("Cannot determine pixel size for modality '%s', objective '%s', detector '%s'. " +
+                        "Please check acquisition profile configuration.", modality, objective, detector));
+    }
+
+    /**
+     * Get pixel size for a modality by searching through acquisition profiles.
+     * This is a convenience method for when you only have the modality name.
+     *
+     * @param modalityName The modality name (e.g., "bf_10x", "ppm_20x", "bf_10x_1")
+     * @return Pixel size in microns
+     * @throws IllegalArgumentException if no matching profile found or pixel size cannot be determined
+     */
+    public double getPixelSizeForModality(String modalityName) {
+        logger.debug("Finding pixel size for modality: {}", modalityName);
+
+        List<Object> profiles = getList("acq_profiles_new", "profiles");
+        if (profiles == null || profiles.isEmpty()) {
+            throw new IllegalArgumentException("No acquisition profiles defined in configuration");
+        }
+
+        // Handle indexed modality names (e.g., "bf_10x_1" -> "bf_10x")
+        String baseModality = modalityName;
+        if (baseModality.matches(".*_\\d+$")) {
+            baseModality = baseModality.substring(0, baseModality.lastIndexOf('_'));
+        }
+
+        // Search for exact match first
+        for (Object profileObj : profiles) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> profile = (Map<String, Object>) profileObj;
+
+            String profileModality = (String) profile.get("modality");
+            String objective = (String) profile.get("objective");
+            String detector = (String) profile.get("detector");
+
+            if (profileModality != null &&
+                    (profileModality.equals(baseModality) ||
+                            profileModality.equals(modalityName) ||
+                            modalityName.startsWith(profileModality))) {
+
+                if (objective != null && detector != null) {
+                    try {
+                        return getModalityPixelSize(profileModality, objective, detector);
+                    } catch (IllegalArgumentException e) {
+                        // Continue searching if this profile doesn't have pixel size
+                        logger.debug("Profile found but no pixel size: {}", e.getMessage());
+                    }
+                }
+            }
+        }
+
+        throw new IllegalArgumentException(
+                String.format("Cannot determine pixel size for modality '%s'. " +
+                        "No matching acquisition profile found.", modalityName));
+    }
+
+    /**
+     * Get autofocus parameters for a specific objective.
+     * Uses the new profile system with defaults.
+     *
+     * @param objective The objective ID
+     * @return Map of autofocus parameters, or null if not found
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getAutofocusParams(String objective) {
+        logger.debug("Getting autofocus parameters for objective: {}", objective);
+
+        // Check defaults section for this objective
+        List<Object> defaults = getList("acq_profiles_new", "defaults");
+        if (defaults != null) {
+            for (Object def : defaults) {
+                if (def instanceof Map<?, ?>) {
+                    Map<String, Object> d = (Map<String, Object>) def;
+                    if (objective.equals(d.get("objective")) && d.containsKey("settings")) {
+                        Map<String, Object> settings = (Map<String, Object>) d.get("settings");
+                        if (settings.containsKey("autofocus")) {
+                            logger.debug("Found autofocus params for {}", objective);
+                            return (Map<String, Object>) settings.get("autofocus");
+                        }
+                    }
+                }
+            }
+        }
+
+        logger.error("No autofocus parameters found for objective: {}", objective);
+        return null;
+    }
+
+    /**
+     * Get a specific autofocus parameter as integer.
+     *
+     * @param objective The objective ID
+     * @param parameter The parameter name
+     * @return The parameter value as Integer, or null if not found
+     */
+    public Integer getAutofocusIntParam(String objective, String parameter) {
+        Map<String, Object> params = getAutofocusParams(objective);
+        if (params == null) {
+            return null;
+        }
+
+        Object value = params.get(parameter);
+        if (value instanceof Number) {
+            return ((Number) value).intValue();
+        }
+
+        logger.error("Autofocus parameter {} not found for objective {}", parameter, objective);
+        return null;
+    }
+
+    // ========== UPDATED METHODS FOR NEW NAMING ==========
+
+    /**
+     * Get default detector for the microscope.
+     *
+     * @return Default detector ID, or empty string if not found
+     */
+    public String getDefaultDetector() {
+        String detector = getString("microscope", "default_detector");
+        if (detector == null) {
+            logger.error("No default detector configured");
+            return "";
+        }
+        return detector;
+    }
+
+    /**
+     * Get detector dimensions (width or height) from resources.
+     *
+     * @param detector Detector ID
+     * @param dimension "width_px" or "height_px"
+     * @return Dimension in pixels, or -1 if not found
+     */
+    @SuppressWarnings("unchecked")
+    public int getDetectorDimension(String detector, String dimension) {
+        Map<String, Object> detectorSection = getResourceSection("id_detector");
+        if (detectorSection != null && detectorSection.containsKey(detector)) {
+            Map<String, Object> detectorData = (Map<String, Object>) detectorSection.get(detector);
+            if (detectorData != null && detectorData.get(dimension) instanceof Number) {
+                return ((Number) detectorData.get(dimension)).intValue();
+            }
+        }
+        logger.warn("Detector {} {} not found", detector, dimension);
+        return -1;
+    }
+
+    /**
+     * Get detector dimensions from resources.
+     *
+     * @param detector Detector ID
+     * @return Array of [width, height] in pixels, or null if not found
+     */
+    @SuppressWarnings("unchecked")
+    public int[] getDetectorDimensions(String detector) {
+        logger.debug("Getting dimensions for detector: {}", detector);
+
+        Map<String, Object> detectorSection = getResourceSection("id_detector");
+        if (detectorSection != null && detectorSection.containsKey(detector)) {
+            Map<String, Object> detectorData = (Map<String, Object>) detectorSection.get(detector);
+
+            if (detectorData != null) {
+                Integer width = null;
+                Integer height = null;
+
+                if (detectorData.get("width_px") instanceof Number) {
+                    width = ((Number) detectorData.get("width_px")).intValue();
+                }
+                if (detectorData.get("height_px") instanceof Number) {
+                    height = ((Number) detectorData.get("height_px")).intValue();
+                }
+
+                if (width != null && height != null && width > 0 && height > 0) {
+                    logger.debug("Detector {} dimensions: {}x{}", detector, width, height);
+                    return new int[]{width, height};
+                }
+            }
+        }
+
+        logger.error("Detector dimensions not found for: {}", detector);
+        return null;
+    }
+
+    /**
+     * Calculate field of view for a modality/objective/detector combination.
+     *
+     * @param modality The modality name
+     * @param objective The objective ID
+     * @param detector The detector ID
+     * @return Array of [width, height] in microns, or null if cannot calculate
+     */
+    public double[] getModalityFOV(String modality, String objective, String detector) {
+        logger.debug("Calculating FOV for modality: {}, objective: {}, detector: {}",
+                modality, objective, detector);
+
+        if (detector == null) {
+            detector = getDefaultDetector();
+            if (detector.isEmpty()) {
+                logger.error("No detector specified and no default detector configured");
+                return null;
+            }
+        }
+
+        double pixelSize = getModalityPixelSize(modality, objective, detector);
+        if (pixelSize <= 0) {
+            logger.error("Invalid pixel size for {}/{}/{}", modality, objective, detector);
+            return null;
+        }
+
+        int[] dimensions = getDetectorDimensions(detector);
+        if (dimensions == null) {
+            logger.error("Cannot calculate FOV - detector dimensions not found");
+            return null;
+        }
+
+        double width = dimensions[0] * pixelSize;
+        double height = dimensions[1] * pixelSize;
+        logger.info("FOV for {}/{}/{}: {:.1f} x {:.1f} µm", modality, objective, detector, width, height);
+        return new double[]{width, height};
+    }
+
+    // ========== COMPATIBILITY METHODS ==========
+
+    /**
+     * Get rotation angles configuration for PPM modalities.
+     * Returns empty list if none found.
+     */
+    @SuppressWarnings("unchecked")
+    public List<Map<String, Object>> getRotationAngles(String modality) {
+        logger.debug("Getting rotation angles for modality: {}", modality);
+
+        // Check modality-specific angles
+        List<Object> angles = getList("modalities", modality, "rotation_angles");
+
+        if (angles != null && !angles.isEmpty()) {
+            List<Map<String, Object>> result = new ArrayList<>();
+            for (Object angle : angles) {
+                if (angle instanceof Map) {
+                    result.add((Map<String, Object>) angle);
+                }
+            }
+            logger.debug("Found {} rotation angles for {}", result.size(), modality);
+            return result;
+        }
+
+        logger.debug("No rotation angles found for {}", modality);
+        return new ArrayList<>();
+    }
+
+    /**
+     * Check if a modality uses PPM (polarized light) rotation.
+     */
+    public boolean isPPMModality(String modality) {
+        if (modality != null && modality.toLowerCase().startsWith("ppm")) {
+            return true;
+        }
+        List<Map<String, Object>> angles = getRotationAngles(modality);
+        return !angles.isEmpty();
+    }
+
+    // ========== EXISTING METHODS THAT REMAIN UNCHANGED ==========
+
+    /**
      * Validates that each of the provided key paths exists in the config or resources.
      *
      * @param requiredPaths Set of String[] representing nested key paths.
@@ -356,44 +765,6 @@ public class MicroscopeConfigManager {
         }
         return missing;
     }
-
-    /**
-     * Writes the provided metadata map out as pretty-printed JSON for debugging or record-keeping.
-     *
-     * @param metadata   Map of properties to serialize.
-     * @param outputPath Target JSON file path.
-     * @throws IOException On write error.
-     */
-    public void writeMetadataAsJson(Map<String, Object> metadata, Path outputPath) throws IOException {
-        try (Writer w = new FileWriter(outputPath.toFile())) {
-            new GsonBuilder().setPrettyPrinting().create().toJson(metadata, w);
-        }
-    }
-    // Add these methods to the existing MicroscopeConfigManager class:
-
-    /**
-     * Get list of available scanners from configuration
-     */
-    public List<String> getAvailableScanners() {
-        List<String> scanners = new ArrayList<>();
-        try {
-            Map<String, Object> scannersMap = (Map<String, Object>) configData.get("scanners");
-            if (scannersMap != null) {
-                scanners.addAll(scannersMap.keySet());
-            }
-        } catch (Exception e) {
-            logger.warn("No scanners section found in configuration");
-        }
-        return scanners;
-    }
-
-    /**
-     * Check if a scanner is configured
-     */
-    public boolean isScannerConfigured(String scannerName) {
-        return getAvailableScanners().contains(scannerName);
-    }
-
 
     /**
      * Container for slide boundary information
@@ -422,4 +793,385 @@ public class MicroscopeConfigManager {
         }
     }
 
+    /**
+     * Writes the provided metadata map out as pretty-printed JSON for debugging or record-keeping.
+     *
+     * @param metadata   Map of properties to serialize.
+     * @param outputPath Target JSON file path.
+     * @throws IOException On write error.
+     */
+    public void writeMetadataAsJson(Map<String, Object> metadata, Path outputPath) throws IOException {
+        try (Writer w = new FileWriter(outputPath.toFile())) {
+            new GsonBuilder().setPrettyPrinting().create().toJson(metadata, w);
+        }
+    }
+
+    /**
+     * Get list of available scanners from configuration
+     */
+    public List<String> getAvailableScanners() {
+        List<String> scanners = new ArrayList<>();
+        try {
+            Map<String, Object> scannersMap = (Map<String, Object>) configData.get("scanners");
+            if (scannersMap != null) {
+                scanners.addAll(scannersMap.keySet());
+            }
+        } catch (Exception e) {
+            logger.warn("No scanners section found in configuration");
+        }
+        return scanners;
+    }
+
+    /**
+     * Check if Z coordinate is within stage bounds.
+     *
+     * @param z Z coordinate in microns
+     * @return true if Z is within bounds
+     */
+    public boolean isWithinStageBounds(double z) {
+        Double zLow = getDouble("stage", "limits", "z_um", "low");
+        Double zHigh = getDouble("stage", "limits", "z_um", "high");
+
+        if (zLow == null || zHigh == null) {
+            logger.warn("Stage Z limits not configured properly");
+            return true; // Allow movement if not configured
+        }
+
+        boolean valid = z >= zLow && z <= zHigh;
+        if (!valid) {
+            logger.warn("Z position {} outside stage bounds [{}, {}]", z, zLow, zHigh);
+        }
+        return valid;
+    }
+
+    /**
+     * Check if XY coordinates are within stage bounds.
+     *
+     * @param x X coordinate in microns
+     * @param y Y coordinate in microns
+     * @return true if both X and Y are within bounds
+     */
+    public boolean isWithinStageBounds(double x, double y) {
+        Double xLow = getDouble("stage", "limits", "x_um", "low");
+        Double xHigh = getDouble("stage", "limits", "x_um", "high");
+        Double yLow = getDouble("stage", "limits", "y_um", "low");
+        Double yHigh = getDouble("stage", "limits", "y_um", "high");
+
+        if (xLow == null || xHigh == null || yLow == null || yHigh == null) {
+            logger.warn("Stage XY limits not configured properly");
+            return true; // Allow movement if not configured
+        }
+
+        boolean valid = x >= xLow && x <= xHigh && y >= yLow && y <= yHigh;
+        if (!valid) {
+            logger.warn("Position ({}, {}) outside stage bounds: X[{}, {}], Y[{}, {}]",
+                    x, y, xLow, xHigh, yLow, yHigh);
+        }
+        return valid;
+    }
+
+    /**
+     * Check if XYZ coordinates are within stage bounds.
+     *
+     * @param x X coordinate in microns
+     * @param y Y coordinate in microns
+     * @param z Z coordinate in microns
+     * @return true if all coordinates are within bounds
+     */
+    public boolean isWithinStageBounds(double x, double y, double z) {
+        // Check XY bounds
+        boolean xyValid = isWithinStageBounds(x, y);
+
+        // Check Z bounds
+        boolean zValid = isWithinStageBounds(z);
+
+        return xyValid && zValid;
+    }
+
+    /**
+     * Get specific stage limit for more complex checks.
+     *
+     * @param axis Stage axis ('x', 'y', or 'z')
+     * @param limitType Limit type ('low' or 'high')
+     * @return Stage limit value in microns
+     */
+    public double getStageLimit(String axis, String limitType) {
+        Double limit = getDouble("stage", "limits", axis + "_um", limitType);
+
+        if (limit == null) {
+            logger.error("Stage {} {} limit not found in configuration", axis, limitType);
+            // Return safe defaults
+            if ("low".equals(limitType)) {
+                return axis.equals("z") ? -1000.0 : -20000.0;
+            } else {
+                return axis.equals("z") ? 1000.0 : 20000.0;
+            }
+        }
+
+        return limit;
+    }
+
+    /**
+     * Check if a scanner is configured
+     */
+    public boolean isScannerConfigured(String scannerName) {
+        return getAvailableScanners().contains(scannerName);
+    }
+
+    /**
+     * Get microscope name.
+     *
+     * @return Microscope name, or "Unknown" if not configured
+     */
+    public String getMicroscopeName() {
+        String name = getString("microscope", "name");
+        return name != null ? name : "Unknown";
+    }
+
+    /**
+     * Get microscope type.
+     *
+     * @return Microscope type, or "Unknown" if not configured
+     */
+    public String getMicroscopeType() {
+        String type = getString("microscope", "type");
+        return type != null ? type : "Unknown";
+    }
+
+    /**
+     * Get stage component IDs.
+     *
+     * @return Map with keys "xy", "z", "r" containing stage component IDs
+     */
+    public Map<String, String> getStageComponents() {
+        Map<String, String> components = new HashMap<>();
+
+        String stageId = getString("stage", "stage_id");
+        components.put("xy", stageId);
+        components.put("z", stageId); // Same stage handles Z for Prior
+
+        // Get rotation stage from modality if available
+        String rotationStage = getString("modalities", "ppm", "rotation_stage", "device");
+        components.put("r", rotationStage);
+
+        return components;
+    }
+
+    /**
+     * Get slide dimensions.
+     *
+     * @param dimension "x" or "y"
+     * @return Slide size in microns
+     */
+    public int getSlideDimension(String dimension) {
+        Integer size = getInteger("slide_size_um", dimension);
+        if (size == null) {
+            logger.warn("Slide {} dimension not configured, using default", dimension);
+            return dimension.equals("x") ? 40000 : 20000;
+        }
+        return size;
+    }
+
+    /**
+     * Get background correction folder for a specific modality.
+     * Returns null if not found.
+     */
+    public String getBackgroundCorrectionFolder(String modality) {
+        logger.debug("Getting background correction folder for modality: {}", modality);
+
+        // Check modality-specific setting
+        Map<String, Object> bgCorrection = getSection("modalities", modality, "background_correction");
+        if (bgCorrection != null && bgCorrection.containsKey("base_folder")) {
+            return bgCorrection.get("base_folder").toString();
+        }
+
+        logger.warn("No background correction folder found for {}", modality);
+        return null;
+    }
+
+    /**
+     * Check if background correction is enabled for a modality.
+     */
+    public boolean isBackgroundCorrectionEnabled(String modality) {
+        Boolean enabled = getBoolean("modalities", modality, "background_correction", "enabled");
+        return enabled != null && enabled;
+    }
+
+    /**
+     * Get background correction method for a modality.
+     * Returns null if not configured.
+     */
+    public String getBackgroundCorrectionMethod(String modality) {
+        return getString("modalities", modality, "background_correction", "method");
+    }
+
+    /**
+     * Get all available modality names.
+     */
+    public Set<String> getAvailableModalities() {
+        Map<String, Object> modalities = getSection("modalities");
+        if (modalities != null) {
+            logger.debug("Found {} modalities: {}", modalities.size(), modalities.keySet());
+            return modalities.keySet();
+        }
+
+        logger.warn("No modalities section found in configuration");
+        return new HashSet<>();
+    }
+
+    /**
+     * Check if a modality exists and is valid.
+     */
+    public boolean isValidModality(String modality) {
+        if (modality == null || modality.isEmpty()) {
+            return false;
+        }
+
+        Map<String, Object> modalityConfig = getSection("modalities", modality);
+        return modalityConfig != null && modalityConfig.containsKey("type");
+    }
+
+    /**
+     * Get slide dimensions.
+     * Returns null array if not configured.
+     */
+    public int[] getSlideSize() {
+        Integer width = getInteger("slide_size_um", "x");
+        Integer height = getInteger("slide_size_um", "y");
+
+        if (width == null || height == null) {
+            logger.error("Slide size not configured");
+            return null;
+        }
+
+        return new int[]{width, height};
+    }
+
+    /**
+     * Load scanner-specific configuration.
+     * This loads a separate YAML file for scanner configurations.
+     */
+    public Map<String, Object> loadScannerConfig(String scannerName) {
+        logger.debug("Loading scanner config for: {}", scannerName);
+
+        if (this.configPath == null) {
+            logger.error("Cannot determine scanner config path - configPath not set");
+            return new HashMap<>();
+        }
+
+        java.io.File configDir = new java.io.File(this.configPath).getParentFile();
+        java.io.File scannerFile = new java.io.File(configDir, "config_" + scannerName + ".yml");
+
+        if (!scannerFile.exists()) {
+            logger.error("Scanner config not found: {}", scannerFile.getAbsolutePath());
+            return new HashMap<>();
+        }
+
+        return MinorFunctions.loadYamlFile(scannerFile.getAbsolutePath());
+    }
+
+    /**
+     * Get macro pixel size for a scanner.
+     * Returns -1 if not found.
+     */
+    public double getScannerMacroPixelSize(String scannerName) {
+        Map<String, Object> scannerConfig = loadScannerConfig(scannerName);
+        Double pixelSize = MinorFunctions.getYamlDouble(scannerConfig, "macro", "pixel_size_um");
+
+        if (pixelSize == null || pixelSize <= 0) {
+            logger.error("No valid macro pixel size for scanner: {}", scannerName);
+            return -1;
+        }
+
+        return pixelSize;
+    }
+
+    /**
+     * Get scanner crop bounds if cropping is required.
+     * Returns null if no cropping needed or bounds incomplete.
+     */
+    public Map<String, Integer> getScannerCropBounds(String scannerName) {
+        Map<String, Object> scannerConfig = loadScannerConfig(scannerName);
+
+        Boolean requiresCropping = MinorFunctions.getYamlBoolean(scannerConfig, "macro", "requires_cropping");
+        if (requiresCropping == null || !requiresCropping) {
+            return null;
+        }
+
+        Map<String, Integer> bounds = new HashMap<>();
+        bounds.put("x_min", MinorFunctions.getYamlInteger(scannerConfig, "macro", "slide_bounds", "x_min_px"));
+        bounds.put("x_max", MinorFunctions.getYamlInteger(scannerConfig, "macro", "slide_bounds", "x_max_px"));
+        bounds.put("y_min", MinorFunctions.getYamlInteger(scannerConfig, "macro", "slide_bounds", "y_min_px"));
+        bounds.put("y_max", MinorFunctions.getYamlInteger(scannerConfig, "macro", "slide_bounds", "y_max_px"));
+
+        if (bounds.values().stream().anyMatch(Objects::isNull)) {
+            logger.error("Incomplete crop bounds for scanner: {} - some values are null", scannerName);
+            return null;
+        }
+
+        return bounds;
+    }
+
+    /**
+     * Get all stage limits as a convenient structure.
+     */
+    public Map<String, Double> getAllStageLimits() {
+        Map<String, Double> limits = new HashMap<>();
+
+        for (String axis : Arrays.asList("x", "y", "z")) {
+            for (String type : Arrays.asList("low", "high")) {
+                String key = axis + "_" + type;
+                Double limit = getDouble("stage", "limits", axis + "_um", type);
+                if (limit == null) {
+                    logger.error("Stage limit {} not found", key);
+                    return null;
+                }
+                limits.put(key, limit);
+            }
+        }
+
+        logger.debug("Retrieved all stage limits: {}", limits);
+        return limits;
+    }
+
+    /**
+     * Validate that all required configuration sections exist.
+     * Returns list of missing sections.
+     */
+    public List<String> validateConfiguration() {
+        List<String> missing = new ArrayList<>();
+
+        // Check required top-level sections
+        String[] required = {"microscope", "stage", "modalities", "acq_profiles_new"};
+        for (String section : required) {
+            if (getSection(section) == null) {
+                missing.add(section);
+            }
+        }
+
+        // Check stage limits
+        if (getSection("stage", "limits") == null) {
+            missing.add("stage.limits");
+        }
+
+        // Check at least one modality
+        Set<String> modalities = getAvailableModalities();
+        if (modalities.isEmpty()) {
+            missing.add("modalities (at least one required)");
+        }
+
+        // Check acquisition profiles
+        List<Object> profiles = getList("acq_profiles_new", "profiles");
+        if (profiles == null || profiles.isEmpty()) {
+            missing.add("acq_profiles_new.profiles (at least one required)");
+        }
+
+        if (!missing.isEmpty()) {
+            logger.error("Configuration validation failed. Missing: {}", missing);
+        } else {
+            logger.info("Configuration validation passed");
+        }
+
+        return missing;
+    }
 }

@@ -1,0 +1,109 @@
+# ========== TEST MICROSCOPE CONFIGURATION ==========
+# Minimal configuration for unit testing
+
+microscope:
+  name: 'TestMicroscope'
+  type: 'TestSystem'
+  detector_in_use: null
+  objective_in_use: null
+  modality: null
+
+# ========== MODALITIES ==========
+modalities:
+  test_brightfield:
+    type: 'brightfield'
+    background_correction:
+      enabled: true
+      method: 'subtract'
+      base_folder: "/test/backgrounds"
+      
+  test_ppm:
+    type: 'polarized'
+    rotation_stage:
+      device: 'LOCI_STAGE_TEST_ROT_001'
+      type: 'polarizer'
+    rotation_angles:
+      - name: 'crossed'
+        tick: 0   # 1 tick = 2 degrees
+      - name: 'uncrossed'
+        tick: 45  # 1 tick = 2 degrees
+    background_correction:
+      enabled: false
+      method: 'divide'
+      base_folder: "/test/backgrounds"
+
+# ========== ACQUISITION PROFILES ==========
+acq_profiles_new:
+  defaults:
+    - objective: 'LOCI_OBJECTIVE_TEST_10X_001'
+      settings:
+        autofocus:
+          n_steps: 5
+          search_range_um: 20
+          n_tiles: 3
+        pixel_size_xy_um:
+          LOCI_DETECTOR_TEST_001: 1.0
+          LOCI_DETECTOR_TEST_002: 0.5
+          
+    - objective: 'LOCI_OBJECTIVE_TEST_20X_001'
+      settings:
+        autofocus:
+          n_steps: 7
+          search_range_um: 10
+          n_tiles: 5
+        pixel_size_xy_um:
+          LOCI_DETECTOR_TEST_001: 0.5
+          LOCI_DETECTOR_TEST_002: 0.25
+
+  profiles:
+    # Brightfield profiles
+    - modality: 'test_brightfield'
+      objective: 'LOCI_OBJECTIVE_TEST_10X_001'
+      detector: 'LOCI_DETECTOR_TEST_001'
+      settings:
+        exposures_ms:
+          single: 100
+        gains:
+          single: 1.0
+          
+    - modality: 'test_brightfield'
+      objective: 'LOCI_OBJECTIVE_TEST_20X_001'
+      detector: 'LOCI_DETECTOR_TEST_001'
+      settings:
+        exposures_ms:
+          single: 200
+        gains:
+          r: 1.1
+          g: 1.0
+          b: 1.2
+          
+    # PPM profiles
+    - modality: 'test_ppm'
+      objective: 'LOCI_OBJECTIVE_TEST_10X_001'
+      detector: 'LOCI_DETECTOR_TEST_002'
+      settings:
+        exposures_ms:
+          crossed: 500
+          uncrossed: 100
+        gains:
+          crossed: {r: 1.0, g: 1.0, b: 1.0}
+          uncrossed: {r: 1.1, g: 1.0, b: 1.05}
+
+# ========== STAGE CONFIGURATION ==========
+stage:
+  stage_id: 'LOCI_STAGE_TEST_XYZ_001'
+  limits:
+    x_um:
+      low: -10000
+      high: 10000
+    y_um:
+      low: -5000
+      high: 5000
+    z_um:
+      low: -1000
+      high: 1000
+
+# ========== GENERAL SETTINGS ==========
+slide_size_um:
+  x: 25000
+  y: 15000

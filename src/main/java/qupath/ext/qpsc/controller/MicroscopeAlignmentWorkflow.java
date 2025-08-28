@@ -114,7 +114,7 @@ public class MicroscopeAlignmentWorkflow {
 
                     // Get current microscope from config
                     MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(configPath);
-                    String currentMicroscope = mgr.getString("microscope", "name");
+                    String currentMicroscope = mgr.getMicroscopeName();
 
                     // Continue with sample setup dialog...
                     SampleSetupController.showDialog()

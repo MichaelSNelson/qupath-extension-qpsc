@@ -45,7 +45,7 @@ public class MicroscopeSelectionDialog {
                 // Get current microscope config
                 String currentConfigPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
                 MicroscopeConfigManager currentMgr = MicroscopeConfigManager.getInstance(currentConfigPath);
-                String currentMicroscope = currentMgr.getString("microscope", "name");
+                String currentMicroscope = currentMgr.getMicroscopeName();
 
                 if (currentMicroscope == null) {
                     logger.error("Current microscope has no name in config");

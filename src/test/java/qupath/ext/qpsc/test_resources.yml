@@ -1,0 +1,61 @@
+# ========== TEST RESOURCES FOR UNIT TESTING ==========
+
+id_stage:
+    LOCI_STAGE_TEST_XYZ_001:
+        name: 'Test XYZ Stage'
+        vendor: 'TestVendor'
+        serial: 'TEST123'
+        type: 'xyz'
+        devices:
+            x: 'TestXStage'
+            y: 'TestYStage'
+            z: 'TestZStage'
+            f: null
+            
+    LOCI_STAGE_TEST_ROT_001:
+        name: 'Test Rotation Stage'
+        vendor: 'TestVendor'
+        model: 'TestRotator'
+        serial: 'ROT123'
+        type: 'rotational motor'
+        device: 'TestRotationStage'
+        units: 'ticks'  # 1 tick = 2 degrees
+        resolution: 0.5  # degrees per tick
+
+id_detector:
+    LOCI_DETECTOR_TEST_001:
+        name: 'Test Camera 1'
+        manufacturer: 'TestCam'
+        width_px: 1024
+        height_px: 768
+        sensor_pixel_width_um: 5.0
+        sensor_pixel_height_um: 5.0
+        description: 'Basic test camera'
+        
+    LOCI_DETECTOR_TEST_002:
+        name: 'Test Camera 2'
+        manufacturer: 'TestCam'
+        width_px: 2048
+        height_px: 1536
+        sensor_pixel_width_um: 3.5
+        sensor_pixel_height_um: 3.5
+        description: 'High-res test camera'
+
+id_objective_lens:
+    LOCI_OBJECTIVE_TEST_10X_001:
+        name: 'Test 10x Objective'
+        magnification: 10.0
+        na: 0.3
+        wd_um: 5000
+        description: 'Test 10x objective for unit testing'
+        manufacturer_id: 'TEST10X'
+        on_scope: 'TestMicroscope'
+        
+    LOCI_OBJECTIVE_TEST_20X_001:
+        name: 'Test 20x Objective'
+        magnification: 20.0
+        na: 0.5
+        wd_um: 2000
+        description: 'Test 20x objective for unit testing'
+        manufacturer_id: 'TEST20X'
+        on_scope: 'TestMicroscope'

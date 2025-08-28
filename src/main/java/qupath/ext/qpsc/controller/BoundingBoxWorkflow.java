@@ -113,7 +113,7 @@ public class BoundingBoxWorkflow {
                     @SuppressWarnings("unchecked")
                     Project<BufferedImage> project = (Project<BufferedImage>) pd.get("currentQuPathProject");
 
-                    // 5) Get camera FOV from server
+// 5) Get camera FOV from server
                     logger.info("Getting camera FOV for modality: {}", sample.modality());
 
                     double frameWidthMicrons, frameHeightMicrons;
@@ -131,13 +131,56 @@ public class BoundingBoxWorkflow {
                         return; // Exit the workflow
                     }
 
-// Get pixel size for stitching metadata (still needed)
+                    // Get pixel size for stitching metadata (still needed)
                     MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(
                             QPPreferenceDialog.getMicroscopeConfigFileProperty());
-                    String camera = mgr.getString("microscope", "default_camera");
-                    double pixelSize = mgr.getDouble("modalities", sample.modality(), "cameras", camera);
 
-// 6) Create tile configuration using new API
+                    // Parse modality to extract objective for new API
+                    // Assumes modality format like "bf_10x", "ppm_20x", etc.
+                    String objectiveId = null;
+                    double pixelSize = 1.0; // default
+
+                    // First, try to find a matching acquisition profile to get the objective
+                    List<Object> profiles = mgr.getList("acq_profiles_new", "profiles");
+                    if (profiles != null) {
+                        for (Object profileObj : profiles) {
+                            @SuppressWarnings("unchecked")
+                            Map<String, Object> profile = (Map<String, Object>) profileObj;
+
+                            // Check if this profile matches our modality
+                            String profileModality = (String) profile.get("modality");
+
+                            // Handle indexed modality names (e.g., "bf_10x_1" -> "bf_10x")
+                            String baseModality = sample.modality();
+                            if (baseModality.matches(".*_\\d+$")) {
+                                baseModality = baseModality.substring(0, baseModality.lastIndexOf('_'));
+                            }
+
+                            // Also check if the profile modality contains our base modality
+                            if (profileModality != null &&
+                                    (profileModality.equals(baseModality) ||
+                                            profileModality.equals(sample.modality()) ||
+                                            sample.modality().startsWith(profileModality))) {
+                                objectiveId = (String) profile.get("objective");
+                                String detectorId = (String) profile.get("detector");
+
+                                if (objectiveId != null && detectorId != null) {
+                                    pixelSize = mgr.getModalityPixelSize(profileModality, objectiveId, detectorId);
+                                    logger.info("Found pixel size {} for modality {} using objective {} and detector {}",
+                                            pixelSize, sample.modality(), objectiveId, detectorId);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    // If we couldn't find pixel size from profiles, log a warning but continue with default
+                    if (objectiveId == null) {
+                        logger.warn("Could not determine objective for modality {}, using default pixel size {}",
+                                sample.modality(), pixelSize);
+                    }
+
+                    // 6) Create tile configuration using new API
                     TilingRequest request = new TilingRequest.Builder()
                             .outputFolder(tempTileDir)
                             .modalityName(modeWithIndex)
@@ -162,6 +205,7 @@ public class BoundingBoxWorkflow {
                     logger.info("Checking rotation requirements for modality: {}", sample.modality());
                     ModalityHandler modalityHandler = ModalityRegistry.getHandler(sample.modality());
 
+                    double finalPixelSize = pixelSize;
                     modalityHandler.getRotationAngles(sample.modality())
                             .thenApply(angleExposures -> {
                                 if (bb.angleOverrides() != null && !bb.angleOverrides().isEmpty()) {
@@ -328,7 +372,7 @@ public class BoundingBoxWorkflow {
                                                         qupathGUI,
                                                         project,
                                                         String.valueOf(QPPreferenceDialog.getCompressionTypeProperty()),
-                                                        pixelSize,
+                                                        finalPixelSize,
                                                         1,
                                                         modalityHandler
                                                 );

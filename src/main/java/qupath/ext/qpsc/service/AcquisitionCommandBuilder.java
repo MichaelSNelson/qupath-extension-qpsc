@@ -140,6 +140,8 @@ public class AcquisitionCommandBuilder {
         List<String> args = new ArrayList<>();
 
         // Add required parameters with flags
+        //TODO: scan-type to modality
+        //Add values for objective and detector, in case python needs to access yaml
         args.addAll(Arrays.asList(
                 "--yaml", yamlPath,
                 "--projects", projectsFolder,
@@ -149,6 +151,7 @@ public class AcquisitionCommandBuilder {
         ));
 
         // Add optional parameters
+        //TODO expand optional parameters for gain, color balance, etc. (exposure without angle)
         if (angleExposures != null && !angleExposures.isEmpty()) {
             // Format angles as parenthesized comma-separated list: (-5.0,0.0,5.0,90.0)
             String anglesStr = angleExposures.stream()

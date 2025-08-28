@@ -459,8 +459,23 @@ public class AcquisitionManager {
         // Get required parameters for stitching
         String configFile = QPPreferenceDialog.getMicroscopeConfigFileProperty();
         MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(configFile);
-        String camera = mgr.getString("microscope", "default_camera");
-        double pixelSize = mgr.getDouble("modalities", state.sample.modality(), "cameras", camera);
+
+        double pixelSize;
+        try {
+            pixelSize = mgr.getPixelSizeForModality(state.sample.modality());
+
+            // Continue with stitching using the determined pixel size...
+        } catch (IllegalArgumentException e) {
+            logger.error("Failed to determine pixel size for stitching: {}", e.getMessage());
+            Platform.runLater(() ->
+                    UIFunctions.notifyUserOfError(
+                            "Cannot determine pixel size for modality: " + state.sample.modality() +
+                                    "\n\nPlease check acquisition profile configuration.",
+                            "Configuration Error"
+                    )
+            );
+            return;
+        }
 
         Project<BufferedImage> project = (Project<BufferedImage>) state.projectInfo.getCurrentProject();
 
