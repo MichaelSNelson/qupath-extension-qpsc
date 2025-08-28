@@ -8,11 +8,14 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 /**
- * Centralized builder for acquisition commands for socket-based communication only.
+ * Centralized builder for acquisition commands for socket-based communication.
  *
  * This builder creates properly formatted messages for the microscope server,
- * supporting different imaging modalities (brightfield, PPM, laser scanning, etc.)
- * without requiring changes to workflow code.
+ * supporting different imaging modalities without requiring Python to read
+ * configuration files.
+ *
+ * @author Mike Nelson
+ * @version 2.0
  */
 public class AcquisitionCommandBuilder {
     private static final Logger logger = LoggerFactory.getLogger(AcquisitionCommandBuilder.class);
@@ -26,6 +29,25 @@ public class AcquisitionCommandBuilder {
 
     // Optional parameters for repeated acquisitions (e.g., rotation angles)
     private List<AngleExposure> angleExposures;
+
+    // Background correction parameters
+    private boolean backgroundCorrectionEnabled = false;
+    private String backgroundCorrectionMethod;
+    private String backgroundCorrectionFolder;
+
+    // Autofocus parameters
+    private Integer autofocusNTiles;
+    private Integer autofocusNSteps;
+    private Double autofocusSearchRange;
+
+    // Hardware parameters
+    private String objective;
+    private String detector;
+    private Double pixelSize;
+
+    // Image processing pipeline
+    private List<String> processingSteps = new ArrayList<>();
+    private boolean debayerEnabled = false;
 
     // Optional parameters for laser scanning
     private Double laserPower;
@@ -85,6 +107,68 @@ public class AcquisitionCommandBuilder {
         return this;
     }
 
+    /**
+     * Configure background correction
+     * @param enabled Whether background correction is enabled
+     * @param method Correction method ("divide" or "subtract")
+     * @param folder Path to background images folder
+     */
+    public AcquisitionCommandBuilder backgroundCorrection(boolean enabled, String method, String folder) {
+        this.backgroundCorrectionEnabled = enabled;
+        this.backgroundCorrectionMethod = method;
+        this.backgroundCorrectionFolder = folder;
+        if (enabled) {
+            processingSteps.add("background_correction");
+        }
+        return this;
+    }
+
+    /**
+     * Configure autofocus parameters
+     * @param nTiles Number of tiles for autofocus grid
+     * @param nSteps Number of Z steps for focus search
+     * @param searchRange Search range in microns
+     */
+    public AcquisitionCommandBuilder autofocus(int nTiles, int nSteps, double searchRange) {
+        this.autofocusNTiles = nTiles;
+        this.autofocusNSteps = nSteps;
+        this.autofocusSearchRange = searchRange;
+        return this;
+    }
+
+    /**
+     * Configure hardware parameters
+     * @param objective Objective identifier (e.g., "LOCI_OBJECTIVE_OLYMPUS_20X_POL_001")
+     * @param detector Detector identifier (e.g., "LOCI_DETECTOR_JAI_001")
+     * @param pixelSize Pixel size in microns
+     */
+    public AcquisitionCommandBuilder hardware(String objective, String detector, double pixelSize) {
+        this.objective = objective;
+        this.detector = detector;
+        this.pixelSize = pixelSize;
+        return this;
+    }
+
+    /**
+     * Enable debayering in the processing pipeline
+     */
+    public AcquisitionCommandBuilder enableDebayer(boolean enable) {
+        this.debayerEnabled = enable;
+        if (enable && !processingSteps.contains("debayer")) {
+            processingSteps.add(0, "debayer"); // Debayer should be first
+        }
+        return this;
+    }
+
+    /**
+     * Set custom processing pipeline order
+     * @param steps List of processing steps in order (e.g., ["debayer", "background_correction"])
+     */
+    public AcquisitionCommandBuilder processingPipeline(List<String> steps) {
+        this.processingSteps = new ArrayList<>(steps);
+        return this;
+    }
+
     public AcquisitionCommandBuilder laserPower(double laserPower) {
         this.laserPower = laserPower;
         return this;
@@ -140,8 +224,6 @@ public class AcquisitionCommandBuilder {
         List<String> args = new ArrayList<>();
 
         // Add required parameters with flags
-        //TODO: scan-type to modality
-        //Add values for objective and detector, in case python needs to access yaml
         args.addAll(Arrays.asList(
                 "--yaml", yamlPath,
                 "--projects", projectsFolder,
@@ -150,17 +232,25 @@ public class AcquisitionCommandBuilder {
                 "--region", regionName
         ));
 
-        // Add optional parameters
-        //TODO expand optional parameters for gain, color balance, etc. (exposure without angle)
+        // Add hardware parameters (should be before optional params)
+        if (objective != null && detector != null && pixelSize != null) {
+            args.addAll(Arrays.asList(
+                    "--objective", objective,
+                    "--detector", detector,
+                    "--pixel-size", String.valueOf(pixelSize)
+            ));
+        }
+
+        // Add angle/exposure parameters
         if (angleExposures != null && !angleExposures.isEmpty()) {
-            // Format angles as parenthesized comma-separated list: (-5.0,0.0,5.0,90.0)
+            // Format angles as parenthesized comma-separated list
             String anglesStr = angleExposures.stream()
                     .map(ae -> String.valueOf(ae.ticks()))
                     .collect(Collectors.joining(",", "(", ")"));
             args.add("--angles");
             args.add(anglesStr);
 
-            // Format exposures as parenthesized comma-separated list: (500,800,500,10)
+            // Format exposures as parenthesized comma-separated list
             String exposuresStr = angleExposures.stream()
                     .map(ae -> String.valueOf(ae.exposureMs()))
                     .collect(Collectors.joining(",", "(", ")"));
@@ -168,6 +258,34 @@ public class AcquisitionCommandBuilder {
             args.add(exposuresStr);
         }
 
+        // Add background correction parameters
+        if (backgroundCorrectionEnabled) {
+            args.addAll(Arrays.asList("--bg-correction", "true"));
+            if (backgroundCorrectionMethod != null) {
+                args.addAll(Arrays.asList("--bg-method", backgroundCorrectionMethod));
+            }
+            if (backgroundCorrectionFolder != null) {
+                args.addAll(Arrays.asList("--bg-folder", backgroundCorrectionFolder));
+            }
+        }
+
+        // Add autofocus parameters
+        if (autofocusNTiles != null && autofocusNSteps != null && autofocusSearchRange != null) {
+            args.addAll(Arrays.asList(
+                    "--af-tiles", String.valueOf(autofocusNTiles),
+                    "--af-steps", String.valueOf(autofocusNSteps),
+                    "--af-range", String.valueOf(autofocusSearchRange)
+            ));
+        }
+
+        // Add processing pipeline
+        if (!processingSteps.isEmpty()) {
+            String pipelineStr = processingSteps.stream()
+                    .collect(Collectors.joining(",", "(", ")"));
+            args.addAll(Arrays.asList("--processing", pipelineStr));
+        }
+
+        // Add laser scanning parameters
         if (laserPower != null) {
             args.addAll(Arrays.asList("--laser-power", String.valueOf(laserPower)));
         }
@@ -184,6 +302,7 @@ public class AcquisitionCommandBuilder {
             args.addAll(Arrays.asList("--averaging", String.valueOf(averaging)));
         }
 
+        // Add Z-stack parameters
         if (zStackEnabled) {
             args.add("--z-stack");
             args.addAll(Arrays.asList("--z-start", String.valueOf(zStart)));
@@ -191,11 +310,10 @@ public class AcquisitionCommandBuilder {
             args.addAll(Arrays.asList("--z-step", String.valueOf(zStep)));
         }
 
-        // Join with spaces, properly quoting arguments that contain spaces or special characters
+        // Join with spaces, properly quoting arguments
         String message = args.stream()
                 .map(arg -> {
                     // For Windows paths, replace backslashes with forward slashes
-                    // Python handles both equally well
                     if (arg.contains("\\")) {
                         arg = arg.replace("\\", "/");
                     }
@@ -213,21 +331,28 @@ public class AcquisitionCommandBuilder {
     }
 
     /**
+     * Creates a builder pre-configured for PPM (polarized) acquisition
+     */
+    public static AcquisitionCommandBuilder ppmBuilder() {
+        return builder()
+                .enableDebayer(true) // PPM typically needs debayering
+                .processingPipeline(Arrays.asList("debayer", "background_correction"));
+    }
+
+    /**
+     * Creates a builder pre-configured for brightfield acquisition
+     */
+    public static AcquisitionCommandBuilder brightfieldBuilder() {
+        return builder()
+                .enableDebayer(true)
+                .processingPipeline(Arrays.asList("debayer", "background_correction"));
+    }
+
+    /**
      * Creates a builder pre-configured for laser scanning acquisition
      */
-    public static AcquisitionCommandBuilder laserScanningBuilder(
-            String yamlPath, String projectsFolder,
-            String sampleLabel, String scanType, String regionName,
-            double laserPower, int wavelength, double dwellTime) {
-
+    public static AcquisitionCommandBuilder laserScanningBuilder() {
         return builder()
-                .yamlPath(yamlPath)
-                .projectsFolder(projectsFolder)
-                .sampleLabel(sampleLabel)
-                .scanType(scanType)
-                .regionName(regionName)
-                .laserPower(laserPower)
-                .laserWavelength(wavelength)
-                .dwellTime(dwellTime);
+                .enableDebayer(false); // Laser scanning typically doesn't need debayering
     }
 }

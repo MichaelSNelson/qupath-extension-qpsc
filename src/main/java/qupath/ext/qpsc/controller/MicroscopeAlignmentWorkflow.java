@@ -240,6 +240,7 @@ public class MicroscopeAlignmentWorkflow {
         MacroImageUtility.CroppedMacroResult croppedResult;
 
         // Check if this scanner has macro configuration
+        @SuppressWarnings("unchecked")
         Map<String, Object> macroConfig = (Map<String, Object>) scannerConfig.get("macro");
         if (macroConfig != null) {
             Boolean cropRequired = MinorFunctions.getYamlBoolean(scannerConfig, "macro", "requires_cropping");

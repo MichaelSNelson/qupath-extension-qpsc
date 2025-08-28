@@ -227,24 +227,98 @@ public class BoundingBoxWorkflow {
                                 // ========== SOCKET-BASED ACQUISITION ==========
                                 logger.info("Starting socket-based acquisition");
 
+
                                 CompletableFuture<Void> acquisitionFuture = CompletableFuture.runAsync(() -> {
                                     try {
                                         logger.info("Building acquisition command for socket communication");
 
-                                        // Build acquisition command with all necessary parameters
+                                        // Get configuration manager
+                                        MicroscopeConfigManager configManager = MicroscopeConfigManager.getInstance(configFileLocation);
+
+                                        // Extract hardware and settings for this modality
+                                        String objective = null;
+                                        String detector = null;
+                                        double pixelSizeForAcq = 1.0;
+
+                                        // Get the modality base (without index)
+                                        String baseModality = modeWithIndex;
+                                        if (baseModality.matches(".*_\\d+$")) {
+                                            baseModality = baseModality.substring(0, baseModality.lastIndexOf('_'));
+                                        }
+
+                                        if (profiles != null) {
+                                            for (Object profileObj : profiles) {
+                                                @SuppressWarnings("unchecked")
+                                                Map<String, Object> profile = (Map<String, Object>) profileObj;
+                                                String profileModality = (String) profile.get("modality");
+
+                                                if (profileModality != null &&
+                                                        (profileModality.equals(baseModality) ||
+                                                                modeWithIndex.startsWith(profileModality))) {
+                                                    objective = (String) profile.get("objective");
+                                                    detector = (String) profile.get("detector");
+
+                                                    if (objective != null && detector != null) {
+                                                        pixelSizeForAcq = configManager.getModalityPixelSize(profileModality, objective, detector);
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        if (objective == null || detector == null) {
+                                            logger.error("Could not determine hardware configuration for modality: {}", modeWithIndex);
+                                            throw new RuntimeException("Hardware configuration not found for modality: " + modeWithIndex);
+                                        }
+
+                                        // Get background correction settings
+                                        boolean bgEnabled = configManager.getBoolean("modalities", baseModality, "background_correction", "enabled");
+                                        String bgMethod = configManager.getString("modalities", baseModality, "background_correction", "method");
+                                        String bgFolder = configManager.getString("modalities", baseModality, "background_correction", "base_folder");
+
+                                        // Get autofocus parameters
+                                        Map<String, Object> afParams = configManager.getAutofocusParams(objective);
+                                        int afTiles = 5;    // defaults
+                                        int afSteps = 11;
+                                        double afRange = 50.0;
+
+                                        if (afParams != null) {
+                                            if (afParams.get("n_tiles") instanceof Number) {
+                                                afTiles = ((Number) afParams.get("n_tiles")).intValue();
+                                            }
+                                            if (afParams.get("n_steps") instanceof Number) {
+                                                afSteps = ((Number) afParams.get("n_steps")).intValue();
+                                            }
+                                            if (afParams.get("search_range_um") instanceof Number) {
+                                                afRange = ((Number) afParams.get("search_range_um")).doubleValue();
+                                            }
+                                        }
+
+                                        // Determine processing pipeline based on detector properties
+                                        List<String> processingSteps = new ArrayList<>();
+                                        if (configManager.detectorRequiresDebayering(detector)) {
+                                            processingSteps.add("debayer");
+                                        }
+                                        if (bgEnabled && bgFolder != null) {
+                                            processingSteps.add("background_correction");
+                                        }
+
+                                        // Build enhanced acquisition command
                                         AcquisitionCommandBuilder acquisitionBuilder = AcquisitionCommandBuilder.builder()
                                                 .yamlPath(configFileLocation)
                                                 .projectsFolder(projectsFolder)
                                                 .sampleLabel(sample.sampleName())
                                                 .scanType(modeWithIndex)
                                                 .regionName(boundsMode)
-                                                .angleExposures(angleExposures);
+                                                .angleExposures(angleExposures)
+                                                .hardware(objective, detector, pixelSizeForAcq)
+                                                .autofocus(afTiles, afSteps, afRange)
+                                                .processingPipeline(processingSteps);
 
-                                        // Add any additional modality-specific parameters here in the future
-                                        // For example:
-                                        // if (sample.modality().startsWith("LaserScan")) {
-                                        //     acquisitionBuilder.laserPower(25.0).laserWavelength(488);
-                                        // }
+                                        // Only add background correction if enabled and configured
+                                        if (bgEnabled && bgMethod != null && bgFolder != null) {
+                                            acquisitionBuilder.backgroundCorrection(true, bgMethod, bgFolder);
+                                        }
 
                                         logger.info("Starting acquisition with parameters:");
                                         logger.info("  Config: {}", configFileLocation);
@@ -252,6 +326,9 @@ public class BoundingBoxWorkflow {
                                         logger.info("  Sample: {}", sample.sampleName());
                                         logger.info("  Mode: {}", modeWithIndex);
                                         logger.info("  Region: {}", boundsMode);
+                                        logger.info("  Hardware: obj={}, det={}, px={}µm", objective, detector, pixelSizeForAcq);
+                                        logger.info("  Autofocus: {} tiles, {} steps, {}µm range", afTiles, afSteps, afRange);
+                                        logger.info("  Processing: {}", processingSteps);
                                         logger.info("  Angle-Exposure pairs: {}", angleExposures);
 
                                         // Start acquisition via socket

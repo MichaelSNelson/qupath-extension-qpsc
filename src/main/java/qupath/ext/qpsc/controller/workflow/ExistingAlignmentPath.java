@@ -361,6 +361,7 @@ public class ExistingAlignmentPath {
      * specific slide.
      */
     private void saveSlideAlignment(GreenBoxContext context) {
+        @SuppressWarnings("unchecked")
         Project<BufferedImage> project = (Project<BufferedImage>) state.projectInfo.getCurrentProject();
 
         // Get the processed macro image from the state

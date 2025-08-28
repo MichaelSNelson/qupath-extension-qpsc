@@ -812,6 +812,7 @@ public class MicroscopeConfigManager {
     public List<String> getAvailableScanners() {
         List<String> scanners = new ArrayList<>();
         try {
+            @SuppressWarnings("unchecked")
             Map<String, Object> scannersMap = (Map<String, Object>) configData.get("scanners");
             if (scannersMap != null) {
                 scanners.addAll(scannersMap.keySet());
@@ -1173,5 +1174,36 @@ public class MicroscopeConfigManager {
         }
 
         return missing;
+    }
+
+    /**
+     * Determines if a detector requires debayering based on configuration or detector properties.
+     *
+     * @param detectorId The detector identifier (e.g., "LOCI_DETECTOR_JAI_001")
+     * @return true if debayering is required, false otherwise
+     */
+    public boolean detectorRequiresDebayering(String detectorId) {
+        logger.debug("Checking debayering requirement for detector: {}", detectorId);
+
+        Map<String, Object> detectorSection = getResourceSection("id_detector");
+        if (detectorSection == null || !detectorSection.containsKey(detectorId)) {
+            logger.warn("Detector {} not found in resources, defaulting to requires debayering", detectorId);
+            return true;
+        }
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> detectorData = (Map<String, Object>) detectorSection.get(detectorId);
+
+        // First check for explicit configuration
+        Object debayerFlag = detectorData.get("requires_debayering");
+        if (debayerFlag instanceof Boolean) {
+            boolean requires = (Boolean) debayerFlag;
+            logger.debug("Detector {} has explicit debayering flag: {}", detectorId, requires);
+            return requires;
+        }
+
+        // Default to requiring debayering for standard Bayer pattern sensors
+        logger.debug("Detector {} defaulting to no deBayering as there is no indication for this in the config file", detectorId);
+        return false;
     }
 }

@@ -28,7 +28,9 @@ import qupath.lib.scripting.QP;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -315,15 +317,115 @@ public class AcquisitionManager {
             try {
                 logger.info("Starting acquisition for annotation: {}", annotation.getName());
 
-                // Build acquisition command
+                // Get configuration file path
                 String configFile = QPPreferenceDialog.getMicroscopeConfigFileProperty();
+                MicroscopeConfigManager configManager = MicroscopeConfigManager.getInstance(configFile);
+
+                // Extract modality base name
+                String modalityWithIndex = state.projectInfo.getImagingModeWithIndex();
+                String baseModality = modalityWithIndex;
+                if (baseModality.matches(".*_\\d+$")) {
+                    baseModality = baseModality.substring(0, baseModality.lastIndexOf('_'));
+                }
+
+                // Find hardware configuration
+                String objective = null;
+                String detector = null;
+                double pixelSize = 1.0;
+
+                List<Object> profiles = configManager.getList("acq_profiles_new", "profiles");
+                if (profiles != null) {
+                    for (Object profileObj : profiles) {
+                        @SuppressWarnings("unchecked")
+                        Map<String, Object> profile = (Map<String, Object>) profileObj;
+                        String profileModality = (String) profile.get("modality");
+
+                        if (profileModality != null &&
+                                (profileModality.equals(baseModality) ||
+                                        modalityWithIndex.startsWith(profileModality))) {
+                            objective = (String) profile.get("objective");
+                            detector = (String) profile.get("detector");
+
+                            if (objective != null && detector != null) {
+                                pixelSize = configManager.getModalityPixelSize(profileModality, objective, detector);
+                                logger.debug("Found hardware config: obj={}, det={}, px={}",
+                                        objective, detector, pixelSize);
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if (objective == null || detector == null) {
+                    throw new RuntimeException("Hardware configuration not found for modality: " + modalityWithIndex);
+                }
+
+                // Get background correction settings
+                boolean bgEnabled = configManager.getBoolean("modalities", baseModality,
+                        "background_correction", "enabled");
+                String bgMethod = configManager.getString("modalities", baseModality,
+                        "background_correction", "method");
+                String bgFolder = configManager.getString("modalities", baseModality,
+                        "background_correction", "base_folder");
+
+                // Get autofocus parameters for this objective
+                Map<String, Object> afParams = configManager.getAutofocusParams(objective);
+                int afTiles = 5;    // defaults
+                int afSteps = 11;
+                double afRange = 50.0;
+
+                if (afParams != null) {
+                    if (afParams.get("n_tiles") instanceof Number) {
+                        afTiles = ((Number) afParams.get("n_tiles")).intValue();
+                    }
+                    if (afParams.get("n_steps") instanceof Number) {
+                        afSteps = ((Number) afParams.get("n_steps")).intValue();
+                    }
+                    if (afParams.get("search_range_um") instanceof Number) {
+                        afRange = ((Number) afParams.get("search_range_um")).doubleValue();
+                    }
+                }
+
+                // Determine processing pipeline dynamically
+                List<String> processingSteps = new ArrayList<>();
+
+                if (configManager.detectorRequiresDebayering(detector)) {
+                    processingSteps.add("debayer");
+                }
+
+                if (bgEnabled && bgFolder != null) {
+                    processingSteps.add("background_correction");
+                }
+
+                // Build enhanced acquisition command
                 AcquisitionCommandBuilder builder = AcquisitionCommandBuilder.builder()
                         .yamlPath(configFile)
                         .projectsFolder(state.sample.projectsFolder().getAbsolutePath())
                         .sampleLabel(state.sample.sampleName())
-                        .scanType(state.projectInfo.getImagingModeWithIndex())
+                        .scanType(modalityWithIndex)
                         .regionName(annotation.getName())
-                        .angleExposures(angleExposures);
+                        .angleExposures(angleExposures)
+                        .hardware(objective, detector, pixelSize)
+                        .autofocus(afTiles, afSteps, afRange)
+                        .processingPipeline(processingSteps);
+
+                // Only add background correction if enabled and configured
+                if (bgEnabled && bgMethod != null && bgFolder != null) {
+                    builder.backgroundCorrection(true, bgMethod, bgFolder);
+                }
+
+                logger.info("Acquisition parameters for {}:", annotation.getName());
+                logger.info("  Config: {}", configFile);
+                logger.info("  Sample: {}", state.sample.sampleName());
+                logger.info("  Hardware: {} / {} @ {} µm/px", objective, detector, pixelSize);
+                logger.info("  Autofocus: {} tiles, {} steps, {} µm range", afTiles, afSteps, afRange);
+                logger.info("  Processing: {}", processingSteps);
+                if (bgEnabled) {
+                    logger.info("  Background correction: {} method from {}", bgMethod, bgFolder);
+                }
+                if (angleExposures != null && !angleExposures.isEmpty()) {
+                    logger.info("  Angles: {}", angleExposures);
+                }
 
                 // Start acquisition
                 MicroscopeController.getInstance().startAcquisition(builder);
@@ -338,7 +440,6 @@ public class AcquisitionManager {
             }
         });
     }
-
     /**
      * Monitors acquisition progress with cancellation support.
      *
@@ -476,7 +577,7 @@ public class AcquisitionManager {
             );
             return;
         }
-
+        @SuppressWarnings("unchecked")
         Project<BufferedImage> project = (Project<BufferedImage>) state.projectInfo.getCurrentProject();
 
         ModalityHandler handler = ModalityRegistry.getHandler(state.sample.modality());

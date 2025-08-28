@@ -176,6 +176,7 @@ public class ManualAlignmentPath {
             MicroscopeController.getInstance().setCurrentTransform(transform);
 
             // Save slide-specific transform
+            @SuppressWarnings("unchecked")
             Project<BufferedImage> project = (Project<BufferedImage>) state.projectInfo.getCurrentProject();
 
             AffineTransformManager.saveSlideAlignment(
