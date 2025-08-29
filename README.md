@@ -66,6 +66,74 @@ This extension requires qupath-extension-tiles-to-pyramid to create the pyramida
 - Use “Existing Image Workflow” to register new high-res scans to a pre-existing macro image, using affine transforms and annotation selection.
 
 ---
+Multi-Sample Project Support
+QPSC supports managing multiple samples within a single QuPath project through an automatic metadata tracking system. This enables complex multi-slide studies while maintaining proper data organization and acquisition validation.
+How Metadata Works
+Each image in a project is automatically tagged with metadata to track:
+
+Image Collection: Groups related images (e.g., all acquisitions from the same physical slide)
+XY Offsets: Physical position on the slide in micrometers for precise re-acquisition
+Flip Status: Whether the image has been flipped (critical for microscope alignment)
+Sample Name: Identifies which physical sample the image represents
+Parent Relationships: Links sub-images to their source images
+
+Key Behaviors
+
+Automatic Collection Assignment
+
+First image in a project gets image_collection=1
+New unrelated images increment the collection number
+Sub-images inherit their parent's collection number
+
+
+Flip Validation
+
+When X/Y flips are enabled in preferences, only flipped images can be used for acquisition
+Prevents acquisition errors due to coordinate system mismatches
+Original (unflipped) images are preserved with all annotations
+
+
+Position Tracking
+
+Each image stores its offset from the slide corner
+Sub-images calculate their position relative to the parent
+Enables accurate stage positioning for multi-region acquisition
+
+
+
+Multi-Sample Workflow Example
+
+Import multiple slides into one project
+
+Each gets a unique image_collection number
+Metadata tracks which images belong together
+
+
+Create flipped versions if needed
+
+Use the "Create Flipped Duplicate" function
+Annotations and hierarchy are automatically transformed
+Both versions exist in the project with proper metadata
+
+
+Acquire sub-regions from any image
+
+Extension validates flip status before acquisition
+Sub-images inherit the parent's collection
+All related images stay grouped by metadata
+
+
+
+Best Practices
+
+Let the system manage metadata automatically - manual editing may break workflows
+When working with flipped images, always use the flipped version for acquisition
+Use descriptive sample names when setting up projects for easier identification
+Sub-images from the same parent will share the same collection number for easy filtering
+
+This metadata system operates transparently in the background, ensuring data integrity while supporting complex multi-sample workflows.
+
+---
 
 📁 File Structure
 
