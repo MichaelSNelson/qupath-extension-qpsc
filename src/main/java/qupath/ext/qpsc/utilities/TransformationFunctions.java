@@ -718,6 +718,39 @@ public class TransformationFunctions {
     }
 
     /**
+     * Calculates the offset of an annotation from the slide corner in stage coordinates.
+     * This is useful for storing metadata about sub-image positions.
+     *
+     * @param annotation The annotation/ROI to calculate offset for
+     * @param fullResToStage Transform from full-resolution pixels to stage coordinates
+     * @return Array of [xOffset, yOffset] in micrometers from slide corner
+     */
+    public static double[] calculateAnnotationOffsetFromSlideCorner(
+            PathObject annotation,
+            AffineTransform fullResToStage) {
+
+        if (annotation == null || annotation.getROI() == null) {
+            return new double[]{0, 0};
+        }
+
+        ROI roi = annotation.getROI();
+
+        // Get the top-left corner of the annotation in full-res pixels
+        double minX = roi.getBoundsX();
+        double minY = roi.getBoundsY();
+
+        // Transform to stage coordinates
+        double[] stageCoords = transformQuPathFullResToStage(
+                new double[]{minX, minY}, fullResToStage);
+
+        // For now, we consider the offset to be the stage coordinates themselves
+        // In the future, this could subtract the actual slide corner position
+        logger.debug("Annotation {} offset from slide corner: ({}, {}) µm",
+                annotation.getName(), stageCoords[0], stageCoords[1]);
+
+        return stageCoords;
+    }
+    /**
      * Adds translation to a scaling-only AffineTransform based on a single control point.
      */
     public static AffineTransform addTranslationToScaledAffine(

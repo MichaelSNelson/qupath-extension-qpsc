@@ -1,8 +1,6 @@
 package qupath.ext.qpsc.controller;
 
 import javafx.application.Platform;
-import javafx.scene.control.Alert;
-import qupath.ext.qpsc.modality.AngleExposure;
 import qupath.ext.qpsc.modality.ModalityHandler;
 import qupath.ext.qpsc.modality.ModalityRegistry;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
@@ -21,8 +19,6 @@ import org.slf4j.LoggerFactory;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.*;
@@ -330,7 +326,14 @@ public class BoundingBoxWorkflow {
                                         logger.info("  Autofocus: {} tiles, {} steps, {}µm range", afTiles, afSteps, afRange);
                                         logger.info("  Processing: {}", processingSteps);
                                         logger.info("  Angle-Exposure pairs: {}", angleExposures);
-
+                                        String commandString = acquisitionBuilder.buildSocketMessage();
+                                        MinorFunctions.saveAcquisitionCommand(
+                                                commandString,
+                                                projectsFolder,
+                                                sample.sampleName(),
+                                                modeWithIndex,
+                                                boundsMode
+                                        );
                                         // Start acquisition via socket
                                         MicroscopeController.getInstance().startAcquisition(acquisitionBuilder);
 
@@ -440,7 +443,7 @@ public class BoundingBoxWorkflow {
 
                                                 String matchingPattern = angleExposures.size() > 1 ? "." : boundsMode;
 
-                                                String outPath = UtilityFunctions.stitchImagesAndUpdateProject(
+                                                String outPath = TileProcessingUtilities.stitchImagesAndUpdateProject(
                                                         projectsFolder,
                                                         sample.sampleName(),
                                                         modeWithIndex,
@@ -451,7 +454,8 @@ public class BoundingBoxWorkflow {
                                                         String.valueOf(QPPreferenceDialog.getCompressionTypeProperty()),
                                                         finalPixelSize,
                                                         1,
-                                                        modalityHandler
+                                                        modalityHandler,
+                                                        null
                                                 );
 
                                                 logger.info("Stitching completed. Last output path: {}", outPath);
@@ -476,10 +480,10 @@ public class BoundingBoxWorkflow {
                                         stitchFuture.thenRun(() -> {
                                             String handling = QPPreferenceDialog.getTileHandlingMethodProperty();
                                             if ("Delete".equals(handling)) {
-                                                UtilityFunctions.deleteTilesAndFolder(tempTileDir);
+                                                TileProcessingUtilities.deleteTilesAndFolder(tempTileDir);
                                             } else if ("Zip".equals(handling)) {
-                                                UtilityFunctions.zipTilesAndMove(tempTileDir);
-                                                UtilityFunctions.deleteTilesAndFolder(tempTileDir);
+                                                TileProcessingUtilities.zipTilesAndMove(tempTileDir);
+                                                TileProcessingUtilities.deleteTilesAndFolder(tempTileDir);
                                             }
                                         });
 

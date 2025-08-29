@@ -3,6 +3,7 @@ package qupath.ext.qpsc.utilities;
 import org.yaml.snakeyaml.Yaml;
 import java.io.FileInputStream;
 import java.io.InputStream;
+import java.text.SimpleDateFormat;
 import java.util.HashMap;
 import java.util.Map;
 import org.slf4j.Logger;
@@ -404,7 +405,103 @@ public class MinorFunctions {
         logger.info("Found {} unique classifications in hierarchy", classifications.size());
         return classifications;
     }
+    /**
+     * Saves the acquisition command to a text file for debugging and reproducibility.
+     * The file is saved in the acquisition folder with a timestamp.
+     *
+     * @param command The full acquisition command string that will be sent to the server
+     * @param projectsFolder The base projects folder path
+     * @param sampleName The sample name
+     * @param scanType The scan type/modality with index
+     * @param regionName The region/annotation name
+     * @return The path to the saved command file, or null if saving failed
+     */
+    public static String saveAcquisitionCommand(String command, String projectsFolder,
+                                                String sampleName, String scanType,
+                                                String regionName) {
+        try {
+            // Build the acquisition folder path
+            Path acquisitionDir = Paths.get(projectsFolder, sampleName, scanType, regionName);
 
+            // Create directory if it doesn't exist
+            Files.createDirectories(acquisitionDir);
+
+            // Create filename with timestamp
+            String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
+            String filename = String.format("acquisition_command_%s.txt", timestamp);
+            Path commandFile = acquisitionDir.resolve(filename);
+
+            // Format the command for readability (each flag on new line)
+            String formattedCommand = formatAcquisitionCommand(command);
+
+            // Write the command to file
+            try (BufferedWriter writer = Files.newBufferedWriter(commandFile, StandardCharsets.UTF_8)) {
+                writer.write("# QuPath Acquisition Command");
+                writer.newLine();
+                writer.write("# Generated: " + new Date());
+                writer.newLine();
+                writer.write("# Sample: " + sampleName);
+                writer.newLine();
+                writer.write("# Scan Type: " + scanType);
+                writer.newLine();
+                writer.write("# Region: " + regionName);
+                writer.newLine();
+                writer.write("# =================================");
+                writer.newLine();
+                writer.newLine();
+                writer.write(formattedCommand);
+            }
+
+            logger.info("Saved acquisition command to: {}", commandFile);
+            return commandFile.toString();
+
+        } catch (IOException e) {
+            logger.error("Failed to save acquisition command", e);
+            return null;
+        }
+    }
+
+    /**
+     * Formats an acquisition command string for better readability.
+     * Puts each flag and its value on a separate line.
+     *
+     * @param command The raw command string
+     * @return The formatted command string
+     */
+    private static String formatAcquisitionCommand(String command) {
+        // Split by spaces, but respect quoted strings
+        List<String> parts = new ArrayList<>();
+        Pattern pattern = Pattern.compile("([^\"]\\S*|\".+?\")\\s*");
+        Matcher matcher = pattern.matcher(command);
+
+        while (matcher.find()) {
+            parts.add(matcher.group(1));
+        }
+
+        StringBuilder formatted = new StringBuilder();
+        for (int i = 0; i < parts.size(); i++) {
+            String part = parts.get(i);
+
+            // Remove quotes for display
+            if (part.startsWith("\"") && part.endsWith("\"")) {
+                part = part.substring(1, part.length() - 1);
+            }
+
+            // If this is a flag (starts with --), add newline before it (except first)
+            if (part.startsWith("--") && formatted.length() > 0) {
+                formatted.append(" \\\n    ");
+            }
+
+            formatted.append(part);
+
+            // Add space after if not last element and next isn't a flag
+            if (i < parts.size() - 1 && !parts.get(i + 1).startsWith("--")) {
+                formatted.append(" ");
+            }
+        }
+
+        return formatted.toString();
+    }
 }
 
 

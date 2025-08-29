@@ -7,14 +7,13 @@ import qupath.ext.qpsc.preferences.PersistentPreferences;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.ui.UIFunctions;
 import qupath.ext.qpsc.utilities.MinorFunctions;
-import qupath.ext.qpsc.utilities.UtilityFunctions;
+import qupath.ext.qpsc.utilities.TileProcessingUtilities;
 import qupath.fx.dialogs.Dialogs;
 import qupath.lib.gui.QuPathGUI;
 import qupath.lib.objects.PathObject;
 import qupath.lib.scripting.QP;
 
 import java.io.File;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -91,7 +90,7 @@ public class AnnotationHelper {
 
                 // Calculate script paths and modify script with parameters
                 Map<String, String> scriptPaths = MinorFunctions.calculateScriptPaths(tissueScript);
-                String modifiedScript = UtilityFunctions.modifyTissueDetectScript(
+                String modifiedScript = TileProcessingUtilities.modifyTissueDetectScript(
                         tissueScript,
                         String.valueOf(pixelSize),
                         scriptPaths.get("jsonTissueClassfierPathString")

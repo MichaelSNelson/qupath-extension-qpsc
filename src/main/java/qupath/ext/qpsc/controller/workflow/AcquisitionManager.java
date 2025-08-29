@@ -369,6 +369,7 @@ public class AcquisitionManager {
                         "background_correction", "base_folder");
 
                 // Get autofocus parameters for this objective
+                //TODO hardcoded values are bad! need to fix
                 Map<String, Object> afParams = configManager.getAutofocusParams(objective);
                 int afTiles = 5;    // defaults
                 int afSteps = 11;
@@ -398,7 +399,7 @@ public class AcquisitionManager {
                 }
 
                 // Build enhanced acquisition command
-                AcquisitionCommandBuilder builder = AcquisitionCommandBuilder.builder()
+                AcquisitionCommandBuilder acquisitionBuilder = AcquisitionCommandBuilder.builder()
                         .yamlPath(configFile)
                         .projectsFolder(state.sample.projectsFolder().getAbsolutePath())
                         .sampleLabel(state.sample.sampleName())
@@ -411,7 +412,7 @@ public class AcquisitionManager {
 
                 // Only add background correction if enabled and configured
                 if (bgEnabled && bgMethod != null && bgFolder != null) {
-                    builder.backgroundCorrection(true, bgMethod, bgFolder);
+                    acquisitionBuilder.backgroundCorrection(true, bgMethod, bgFolder);
                 }
 
                 logger.info("Acquisition parameters for {}:", annotation.getName());
@@ -426,9 +427,16 @@ public class AcquisitionManager {
                 if (angleExposures != null && !angleExposures.isEmpty()) {
                     logger.info("  Angles: {}", angleExposures);
                 }
-
+                String commandString = acquisitionBuilder.buildSocketMessage();
+                MinorFunctions.saveAcquisitionCommand(
+                        commandString,
+                        state.sample.projectsFolder().getAbsolutePath(),
+                        state.sample.sampleName(),
+                        modalityWithIndex,
+                        annotation.getName()
+                );
                 // Start acquisition
-                MicroscopeController.getInstance().startAcquisition(builder);
+                MicroscopeController.getInstance().startAcquisition(acquisitionBuilder);
 
                 // Monitor progress
                 return monitorAcquisition(annotation, angleExposures);
@@ -582,6 +590,12 @@ public class AcquisitionManager {
 
         ModalityHandler handler = ModalityRegistry.getHandler(state.sample.modality());
 
+        // Calculate offset for this annotation (for metadata)
+        double[] offset = TransformationFunctions.calculateAnnotationOffsetFromSlideCorner(
+                annotation, state.transform);
+        logger.info("Annotation {} offset from slide corner: ({}, {}) µm",
+                annotation.getName(), offset[0], offset[1]);
+
         // Create stitching future
         CompletableFuture<Void> stitchFuture = StitchingHelper.performAnnotationStitching(
                 annotation,
@@ -598,7 +612,6 @@ public class AcquisitionManager {
         state.stitchingFutures.add(stitchFuture);
         logger.info("Launched stitching for annotation: {}", annotation.getName());
     }
-
     // UI notification methods
 
     /**

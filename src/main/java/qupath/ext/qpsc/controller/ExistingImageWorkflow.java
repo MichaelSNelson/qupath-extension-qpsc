@@ -9,8 +9,11 @@ import qupath.ext.qpsc.preferences.PersistentPreferences;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.ui.*;
 import qupath.ext.qpsc.utilities.*;
+import qupath.fx.dialogs.Dialogs;
 import qupath.lib.gui.QuPathGUI;
 import qupath.lib.objects.PathObject;
+import qupath.lib.projects.Project;
+import qupath.lib.projects.ProjectImageEntry;
 
 import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
@@ -28,19 +31,12 @@ import java.util.concurrent.*;
  * </ul>
  *
  * @author Mike Nelson
- * @version 4.0 - Refactored
+ * @version 4.0 - Refactored with metadata support
  * @since 2.0
  */
 public class ExistingImageWorkflow {
     private static final Logger logger = LoggerFactory.getLogger(ExistingImageWorkflow.class);
     private static final ResourceBundle res = ResourceBundle.getBundle("qupath.ext.qpsc.ui.strings");
-
-//    // Single-threaded executor for stitching
-//    private static final ExecutorService STITCH_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
-//        Thread t = new Thread(r, "stitching-queue");
-//        t.setDaemon(true);
-//        return t;
-//    });
 
     /**
      * Main entry point - runs the complete workflow from start to finish.
@@ -120,6 +116,7 @@ public class ExistingImageWorkflow {
                     logger.info("Connecting to microscope server");
                     MicroscopeController.getInstance().connect();
                 }
+
                 return true;
             } catch (IOException e) {
                 logger.error("Failed to connect to microscope server", e);
@@ -129,6 +126,104 @@ public class ExistingImageWorkflow {
                 );
                 return false;
             }
+        }
+
+        /**
+         * Validates image flip status and creates flipped duplicate if needed.
+         * This should be called after the project is created/opened.
+         */
+        private CompletableFuture<Boolean> validateAndPrepareImage() {
+            return CompletableFuture.supplyAsync(() -> {
+                // Get flip requirements from preferences
+                boolean requiresFlipX = QPPreferenceDialog.getFlipMacroXProperty();
+                boolean requiresFlipY = QPPreferenceDialog.getFlipMacroYProperty();
+
+                // If no flipping required, we're good
+                if (!requiresFlipX && !requiresFlipY) {
+                    logger.info("No image flipping required by preferences");
+                    return true;
+                }
+
+                // Check if we're in a project
+                @SuppressWarnings("unchecked")
+                Project<BufferedImage> project = (Project<BufferedImage>) gui.getProject();
+                if (project == null) {
+                    logger.warn("No project available to check flip status");
+                    return true; // Project will handle flipping during import
+                }
+
+                // Check current image's flip status
+                ProjectImageEntry<BufferedImage> currentEntry = project.getEntry(gui.getImageData());
+                if (currentEntry == null) {
+                    logger.info("Current image not in project yet - will be handled during import");
+                    return true;
+                }
+
+                boolean isFlipped = ImageMetadataManager.isFlipped(currentEntry);
+
+                if (isFlipped || (!requiresFlipX && !requiresFlipY)) {
+                    logger.info("Current image flip status matches requirements");
+                    return true;
+                }
+
+                // Image needs to be flipped - create duplicate
+                logger.info("Creating flipped duplicate of image for acquisition");
+
+                // Show notification
+                Platform.runLater(() ->
+                        Dialogs.showInfoNotification(
+                                "Image Preparation",
+                                "Creating flipped image for acquisition..."
+                        )
+                );
+
+                try {
+                    ProjectImageEntry<BufferedImage> flippedEntry = QPProjectFunctions.createFlippedDuplicate(
+                            project,
+                            currentEntry,
+                            requiresFlipX,
+                            requiresFlipY,
+                            state.sample != null ? state.sample.sampleName() : null
+                    );
+
+                    if (flippedEntry != null) {
+                        logger.info("Opening flipped duplicate: {}", flippedEntry.getImageName());
+
+                        // Open on UI thread
+                        CompletableFuture<Boolean> openFuture = new CompletableFuture<>();
+                        Platform.runLater(() -> {
+                            gui.openImageEntry(flippedEntry);
+
+                            // Wait for image to load
+                            QPProjectFunctions.onImageLoadedInViewer(gui,
+                                    flippedEntry.getImageName(),
+                                    () -> openFuture.complete(true)
+                            );
+                        });
+
+                        return openFuture.get(10, TimeUnit.SECONDS);
+                    } else {
+                        logger.error("Failed to create flipped duplicate");
+                        Platform.runLater(() ->
+                                UIFunctions.notifyUserOfError(
+                                        "Failed to create flipped image duplicate",
+                                        "Image Error"
+                                )
+                        );
+                        return false;
+                    }
+
+                } catch (Exception e) {
+                    logger.error("Error creating flipped duplicate", e);
+                    Platform.runLater(() ->
+                            UIFunctions.notifyUserOfError(
+                                    "Error creating flipped image: " + e.getMessage(),
+                                    "Image Error"
+                            )
+                    );
+                    return false;
+                }
+            });
         }
 
         /**
@@ -194,12 +289,21 @@ public class ExistingImageWorkflow {
             MicroscopeController.getInstance().setCurrentTransform(state.transform);
 
             return ProjectHelper.setupProject(gui, state.sample)
-                    .thenApply(projectInfo -> {
+                    .thenCompose(projectInfo -> {
                         if (projectInfo == null) {
                             throw new RuntimeException("Project setup failed");
                         }
 
                         state.projectInfo = projectInfo;
+
+                        // Now validate and prepare image after project is set up
+                        return validateAndPrepareImage();
+                    })
+                    .thenApply(validated -> {
+                        if (!validated) {
+                            throw new RuntimeException("Image validation failed");
+                        }
+
                         state.annotations = AnnotationHelper.ensureAnnotationsExist(gui,
                                 getPixelSizeFromPreferences());
 
@@ -236,13 +340,30 @@ public class ExistingImageWorkflow {
                 return CompletableFuture.completedFuture(null);
             }
 
+            CompletableFuture<WorkflowState> pathResult;
+
             if (state.alignmentChoice.useExistingAlignment()) {
                 // Path A: Use existing general alignment
-                return new ExistingAlignmentPath(gui, state).execute();
+                pathResult = new ExistingAlignmentPath(gui, state).execute();
             } else {
                 // Path B: Create manual alignment
-                return new ManualAlignmentPath(gui, state).execute();
+                pathResult = new ManualAlignmentPath(gui, state).execute();
             }
+
+            // After alignment path completes, validate image
+            return pathResult.thenCompose(alignedState -> {
+                if (alignedState == null) {
+                    return CompletableFuture.completedFuture(null);
+                }
+
+                return validateAndPrepareImage()
+                        .thenApply(validated -> {
+                            if (!validated) {
+                                throw new RuntimeException("Image validation failed after alignment");
+                            }
+                            return alignedState;
+                        });
+            });
         }
 
         /**

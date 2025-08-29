@@ -3,7 +3,7 @@ package qupath.ext.qpsc.controller.workflow;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
-import qupath.ext.qpsc.utilities.UtilityFunctions;
+import qupath.ext.qpsc.utilities.TileProcessingUtilities;
 
 /**
  * Helper for tile cleanup operations after acquisition.
@@ -40,11 +40,11 @@ public class TileCleanupHelper {
         logger.info("Performing tile cleanup - method: {}", handling);
 
         if ("Delete".equals(handling)) {
-            UtilityFunctions.deleteTilesAndFolder(tempTileDir);
+            TileProcessingUtilities.deleteTilesAndFolder(tempTileDir);
             logger.info("Deleted temporary tiles at: {}", tempTileDir);
         } else if ("Zip".equals(handling)) {
-            UtilityFunctions.zipTilesAndMove(tempTileDir);
-            UtilityFunctions.deleteTilesAndFolder(tempTileDir);
+            TileProcessingUtilities.zipTilesAndMove(tempTileDir);
+            TileProcessingUtilities.deleteTilesAndFolder(tempTileDir);
             logger.info("Zipped and archived temporary tiles from: {}", tempTileDir);
         } else {
             logger.info("Keeping temporary tiles at: {}", tempTileDir);

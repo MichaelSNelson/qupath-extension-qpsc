@@ -5,24 +5,15 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qupath.ext.basicstitching.config.StitchingConfig;
 import qupath.ext.basicstitching.workflow.StitchingWorkflow;
+import qupath.ext.qpsc.controller.workflow.StitchingHelper;
 import qupath.ext.qpsc.modality.ModalityHandler;
-import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.ui.UIFunctions;
 import qupath.lib.gui.QuPathGUI;
-import qupath.lib.gui.scripting.QPEx;
-import qupath.lib.objects.PathObject;
-import qupath.lib.objects.PathObjects;
 import qupath.lib.projects.Project;
 import qupath.lib.projects.ProjectImageEntry;
-import qupath.lib.regions.ImagePlane;
-import qupath.lib.roi.ROIs;
-import qupath.lib.roi.RectangleROI;
-import qupath.lib.roi.interfaces.ROI;
-import qupath.lib.scripting.QP;
 
 import java.awt.image.BufferedImage;
 import java.io.*;
-import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.*;
@@ -52,8 +43,8 @@ import java.util.zip.ZipOutputStream;
  * @version 3.0
  * @since 1.0
  */
-public class UtilityFunctions {
-    private static final Logger logger = LoggerFactory.getLogger(UtilityFunctions.class);
+public class TileProcessingUtilities {
+    private static final Logger logger = LoggerFactory.getLogger(TileProcessingUtilities.class);
     private static final ResourceBundle res = ResourceBundle.getBundle("qupath.ext.qpsc.ui.strings");
 
     /**
@@ -96,6 +87,8 @@ public class UtilityFunctions {
      * @param compression         OME pyramid compression type: "DEFAULT", "UNCOMPRESSED", "JPEG", "J2K", "J2K_LOSSY"
      * @param pixelSizeMicrons    Physical pixel size in micrometers for the OME-TIFF metadata
      * @param downsample          Downsample factor for pyramid generation (1 = no downsampling)
+     * @param modalityHandler     Handler for modality-specific file naming (can be null)
+     * @param stitchParams        Additional parameters including metadata for image import (can be null)
      *
      * @return Absolute path to the last stitched OME-TIFF processed, or null if stitching failed
      *
@@ -116,7 +109,8 @@ public class UtilityFunctions {
             String compression,
             double pixelSizeMicrons,
             int downsample,
-            ModalityHandler modalityHandler) throws IOException {
+            ModalityHandler modalityHandler,
+            Map<String, Object> stitchParams) throws IOException {
 
         logger.info("=== Starting stitching workflow ===");
         logger.info("Sample: {}, Mode: {}, Annotation: {}, Matching: '{}'",
@@ -223,19 +217,37 @@ public class UtilityFunctions {
                     lastPath = renamed.getAbsolutePath();
                     logger.info("Successfully renamed to: {}", baseName);
 
+                    // Extract metadata if provided
+                    StitchingHelper.StitchingMetadata metadata = null;
+                    if (stitchParams != null && stitchParams.containsKey("metadata")) {
+                        metadata = (StitchingHelper.StitchingMetadata) stitchParams.get("metadata");
+                    }
+
                     // Import this file to the project
                     final String pathToImport = lastPath;
+                    final StitchingHelper.StitchingMetadata finalMetadata = metadata;
 
                     Platform.runLater(() -> {
                         try {
                             logger.debug("Importing {} to project on FX thread", pathToImport);
 
-                            // Add to project with calculated flip values
-                            QPProjectFunctions.addImageToProject(
-                                    new File(pathToImport),
-                                    project,
-                                    false,
-                                    false);
+                            // Add to project with metadata if available
+                            if (finalMetadata != null) {
+                                QPProjectFunctions.addImageToProjectWithMetadata(
+                                        project,
+                                        new File(pathToImport),
+                                        finalMetadata.parentEntry,
+                                        finalMetadata.xOffset,
+                                        finalMetadata.yOffset,
+                                        finalMetadata.isFlipped,
+                                        finalMetadata.sampleName);
+                            } else {
+                                QPProjectFunctions.addImageToProject(
+                                        new File(pathToImport),
+                                        project,
+                                        false,
+                                        false);
+                            }
 
                             logger.info("Successfully imported {} to project", new File(pathToImport).getName());
 
@@ -321,7 +333,14 @@ public class UtilityFunctions {
                 // Continue with original path if rename fails
             }
 
+            // Extract metadata if provided
+            StitchingHelper.StitchingMetadata metadata = null;
+            if (stitchParams != null && stitchParams.containsKey("metadata")) {
+                metadata = (StitchingHelper.StitchingMetadata) stitchParams.get("metadata");
+            }
+
             lastProcessedPath = outPath;
+            final StitchingHelper.StitchingMetadata finalMetadata = metadata;
 
             // Import & open on the FX thread
             Platform.runLater(() -> {
@@ -329,12 +348,23 @@ public class UtilityFunctions {
                 ResourceBundle res = ResourceBundle.getBundle("qupath.ext.qpsc.ui.strings");
 
                 try {
-                    // Add to project (handles flipping)
-                    QPProjectFunctions.addImageToProject(
-                            new File(lastProcessedPath),
-                            project,
-                            false ,
-                            false);
+                    // Add to project with metadata if available
+                    if (finalMetadata != null) {
+                        QPProjectFunctions.addImageToProjectWithMetadata(
+                                project,
+                                new File(lastProcessedPath),
+                                finalMetadata.parentEntry,
+                                finalMetadata.xOffset,
+                                finalMetadata.yOffset,
+                                finalMetadata.isFlipped,
+                                finalMetadata.sampleName);
+                    } else {
+                        QPProjectFunctions.addImageToProject(
+                                new File(lastProcessedPath),
+                                project,
+                                false,
+                                false);
+                    }
 
                     logger.info("Successfully added image to project");
 
@@ -385,6 +415,7 @@ public class UtilityFunctions {
      * @param compression         Compression type
      * @param pixelSizeMicrons    Pixel size in micrometers
      * @param downsample          Downsample factor
+     * @param modalityHandler     Handler for modality-specific file naming
      * @return Path to stitched file
      * @throws IOException If stitching fails
      */
@@ -402,7 +433,7 @@ public class UtilityFunctions {
 
         logger.debug("Using convenience method - annotation name as matching string");
 
-        // Call the new method with annotationName as the matching string
+        // Call the new method with annotationName as the matching string and null metadata
         return stitchImagesAndUpdateProject(
                 projectsFolderPath,
                 sampleLabel,
@@ -414,7 +445,8 @@ public class UtilityFunctions {
                 compression,
                 pixelSizeMicrons,
                 downsample,
-                modalityHandler
+                modalityHandler,
+                null  // No metadata for backward compatibility
         );
     }
 

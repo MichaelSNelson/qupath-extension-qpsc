@@ -10,10 +10,7 @@ import qupath.ext.qpsc.utilities.*;
 
 import qupath.lib.gui.QuPathGUI;
 import qupath.lib.objects.PathObject;
-import qupath.lib.objects.PathObjects;
 import qupath.lib.projects.Project;
-import qupath.lib.regions.ImagePlane;
-import qupath.lib.roi.ROIs;
 import qupath.lib.roi.interfaces.ROI;
 
 import java.awt.*;
@@ -898,7 +895,7 @@ public class MicroscopeAlignmentWorkflow {
 
             // Prepare the script with proper parameters
             Map<String, String> scriptPaths = MinorFunctions.calculateScriptPaths(tissueScript);
-            String modifiedScript = UtilityFunctions.modifyTissueDetectScript(
+            String modifiedScript = TileProcessingUtilities.modifyTissueDetectScript(
                     tissueScript,
                     String.valueOf(pixelSize),
                     scriptPaths.get("jsonTissueClassfierPathString")
