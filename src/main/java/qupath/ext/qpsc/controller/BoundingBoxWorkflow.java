@@ -113,6 +113,10 @@ public class BoundingBoxWorkflow {
                     logger.info("Getting camera FOV for modality: {}, objective: {}, detector: {}", 
                             sample.modality(), sample.objective(), sample.detector());
 
+                    // Get configuration manager instance
+                    MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(
+                            QPPreferenceDialog.getMicroscopeConfigFileProperty());
+
                     double frameWidthMicrons, frameHeightMicrons;
                     try {
                         double[] fov = mgr.getModalityFOV(sample.modality(), sample.objective(), sample.detector());
