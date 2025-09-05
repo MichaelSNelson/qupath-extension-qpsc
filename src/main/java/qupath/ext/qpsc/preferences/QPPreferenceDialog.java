@@ -82,11 +82,6 @@ public class QPPreferenceDialog {
                     "compressionType",
                     OMEPyramidWriter.CompressionType.DEFAULT,
                     OMEPyramidWriter.CompressionType.class);
-    private static final StringProperty cliFolderProperty =
-            PathPrefs.createPersistentPreference(
-                    "smartpath.cliFolder",
-                    "C:\\Users\\lociuser\\Codes\\smartpath\\smart-wsi-scanner\\.venv\\Scripts"
-            );
 
     /**
      * Register all preferences in QuPath’s PreferencePane. Call once during extension installation.
@@ -125,12 +120,6 @@ public class QPPreferenceDialog {
                 .name("Microscope Config File")
                 .category(CATEGORY)
                 .description("Path to YAML config describing your microscope setup.")
-                .build());
-        items.add(new PropertyItemBuilder<>(cliFolderProperty, String.class)
-                .propertyType(PropertyItemBuilder.PropertyType.DIRECTORY)
-                .name("SmartPath commands folder")
-                .category(CATEGORY)
-                .description("Path to the folder where QuPath can find the SmartPath commands for controlling the microscope.")
                 .build());
 
         items.add(new PropertyItemBuilder<>(projectsFolderProperty, String.class)
@@ -265,9 +254,6 @@ public class QPPreferenceDialog {
     }
     public static OMEPyramidWriter.CompressionType getCompressionTypeProperty() {
         return compressionTypeProperty.get();
-    }
-    public static String getCliFolder() {
-        return cliFolderProperty.getValue();
     }
     //TODO should this be here?
 
