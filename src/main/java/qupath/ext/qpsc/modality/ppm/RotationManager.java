@@ -35,7 +35,7 @@ public class RotationManager {
         );
 
         // Check if this is a PPM modality by name
-        boolean isPPMModality = modality != null && modality.startsWith("ppm_");
+        boolean isPPMModality = modality != null && modality.startsWith("ppm");
 
         if (isPPMModality) {
             // Read rotation angles from modality configuration

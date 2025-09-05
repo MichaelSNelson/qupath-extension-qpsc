@@ -62,7 +62,7 @@ class PPMRotationStrategy implements RotationStrategy {
 
     @Override
     public boolean appliesTo(String modalityName) {
-        return modalityName != null && modalityName.startsWith("ppm_");
+        return modalityName != null && modalityName.startsWith("ppm");
     }
 
     @Override
