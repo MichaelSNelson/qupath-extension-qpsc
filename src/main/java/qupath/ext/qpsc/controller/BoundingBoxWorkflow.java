@@ -109,71 +109,43 @@ public class BoundingBoxWorkflow {
                     @SuppressWarnings("unchecked")
                     Project<BufferedImage> project = (Project<BufferedImage>) pd.get("currentQuPathProject");
 
-// 5) Get camera FOV from server
-                    logger.info("Getting camera FOV for modality: {}", sample.modality());
+// 5) Get camera FOV using explicit hardware selections
+                    logger.info("Getting camera FOV for modality: {}, objective: {}, detector: {}", 
+                            sample.modality(), sample.objective(), sample.detector());
 
                     double frameWidthMicrons, frameHeightMicrons;
                     try {
-                        double[] fov = MicroscopeController.getInstance().getCameraFOVFromConfig(sample.modality());
+                        double[] fov = mgr.getModalityFOV(sample.modality(), sample.objective(), sample.detector());
+                        if (fov == null) {
+                            throw new IOException("Could not calculate FOV for the selected hardware configuration");
+                        }
                         frameWidthMicrons = fov[0];
                         frameHeightMicrons = fov[1];
-                        logger.info("Camera FOV for {}: {} x {} microns", sample.modality(), frameWidthMicrons, frameHeightMicrons);
-                    } catch (IOException e) {
+                        logger.info("Camera FOV for {}/{}/{}: {} x {} microns", 
+                                sample.modality(), sample.objective(), sample.detector(), frameWidthMicrons, frameHeightMicrons);
+                    } catch (Exception e) {
                         UIFunctions.notifyUserOfError(
-                                "Failed to get camera FOV for modality " + sample.modality() + ": " + e.getMessage() +
+                                "Failed to get camera FOV for modality " + sample.modality() + 
+                                ", objective " + sample.objective() + 
+                                ", detector " + sample.detector() + ": " + e.getMessage() +
                                         "\n\nPlease check configuration file.",
                                 "FOV Error"
                         );
                         return; // Exit the workflow
                     }
 
-                    // Get pixel size for stitching metadata (still needed)
-                    MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(
-                            QPPreferenceDialog.getMicroscopeConfigFileProperty());
-
-                    // Parse modality to extract objective for new API
-                    // Assumes modality format like "bf_10x", "ppm_20x", etc.
-                    String objectiveId = null;
-                    double pixelSize = 1.0; // default
-
-                    // First, try to find a matching acquisition profile to get the objective
-                    List<Object> profiles = mgr.getList("acq_profiles_new", "profiles");
-                    if (profiles != null) {
-                        for (Object profileObj : profiles) {
-                            @SuppressWarnings("unchecked")
-                            Map<String, Object> profile = (Map<String, Object>) profileObj;
-
-                            // Check if this profile matches our modality
-                            String profileModality = (String) profile.get("modality");
-
-                            // Handle indexed modality names (e.g., "bf_10x_1" -> "bf_10x")
-                            String baseModality = sample.modality();
-                            if (baseModality.matches(".*_\\d+$")) {
-                                baseModality = baseModality.substring(0, baseModality.lastIndexOf('_'));
-                            }
-
-                            // Also check if the profile modality contains our base modality
-                            if (profileModality != null &&
-                                    (profileModality.equals(baseModality) ||
-                                            profileModality.equals(sample.modality()) ||
-                                            sample.modality().startsWith(profileModality))) {
-                                objectiveId = (String) profile.get("objective");
-                                String detectorId = (String) profile.get("detector");
-
-                                if (objectiveId != null && detectorId != null) {
-                                    pixelSize = mgr.getModalityPixelSize(profileModality, objectiveId, detectorId);
-                                    logger.info("Found pixel size {} for modality {} using objective {} and detector {}",
-                                            pixelSize, sample.modality(), objectiveId, detectorId);
-                                    break;
-                                }
-                            }
-                        }
-                    }
-
-                    // If we couldn't find pixel size from profiles, log a warning but continue with default
-                    if (objectiveId == null) {
-                        logger.warn("Could not determine objective for modality {}, using default pixel size {}",
-                                sample.modality(), pixelSize);
+                    // Get pixel size for stitching metadata using explicit selections
+                    double pixelSize;
+                    try {
+                        pixelSize = mgr.getModalityPixelSize(sample.modality(), sample.objective(), sample.detector());
+                        logger.info("Pixel size for {}/{}/{}: {} µm", 
+                                sample.modality(), sample.objective(), sample.detector(), pixelSize);
+                    } catch (IllegalArgumentException e) {
+                        UIFunctions.notifyUserOfError(
+                                "Failed to get pixel size for the selected hardware configuration: " + e.getMessage(),
+                                "Configuration Error"
+                        );
+                        return; // Exit the workflow
                     }
 
                     // 6) Create tile configuration using new API
@@ -231,41 +203,13 @@ public class BoundingBoxWorkflow {
                                         // Get configuration manager
                                         MicroscopeConfigManager configManager = MicroscopeConfigManager.getInstance(configFileLocation);
 
-                                        // Extract hardware and settings for this modality
-                                        String objective = null;
-                                        String detector = null;
-                                        double pixelSizeForAcq = 1.0;
+                                        // Use explicit hardware selections from sample setup
+                                        String objective = sample.objective();
+                                        String detector = sample.detector();
+                                        double pixelSizeForAcq = finalPixelSize; // Already calculated above
 
                                         // Get the modality base (without index)
-                                        String baseModality = modeWithIndex;
-                                        if (baseModality.matches(".*_\\d+$")) {
-                                            baseModality = baseModality.substring(0, baseModality.lastIndexOf('_'));
-                                        }
-
-                                        if (profiles != null) {
-                                            for (Object profileObj : profiles) {
-                                                @SuppressWarnings("unchecked")
-                                                Map<String, Object> profile = (Map<String, Object>) profileObj;
-                                                String profileModality = (String) profile.get("modality");
-
-                                                if (profileModality != null &&
-                                                        (profileModality.equals(baseModality) ||
-                                                                modeWithIndex.startsWith(profileModality))) {
-                                                    objective = (String) profile.get("objective");
-                                                    detector = (String) profile.get("detector");
-
-                                                    if (objective != null && detector != null) {
-                                                        pixelSizeForAcq = configManager.getModalityPixelSize(profileModality, objective, detector);
-                                                        break;
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        if (objective == null || detector == null) {
-                                            logger.error("Could not determine hardware configuration for modality: {}", modeWithIndex);
-                                            throw new RuntimeException("Hardware configuration not found for modality: " + modeWithIndex);
-                                        }
+                                        String baseModality = sample.modality();
 
                                         // Get background correction settings
                                         boolean bgEnabled = configManager.getBoolean("modalities", baseModality, "background_correction", "enabled");

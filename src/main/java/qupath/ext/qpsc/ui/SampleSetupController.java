@@ -14,10 +14,9 @@ import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.lib.gui.QuPathGUI;
 
 import java.io.File;
-import java.util.Optional;
-import java.util.ResourceBundle;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -132,15 +131,20 @@ public class SampleSetupController {
             HBox folderBox = new HBox(5, folderField, browseBtn);
             HBox.setHgrow(folderField, Priority.ALWAYS);
 
+            // Get config manager instance
+            MicroscopeConfigManager configManager = MicroscopeConfigManager.getInstance(
+                    QPPreferenceDialog.getMicroscopeConfigFileProperty());
+
             // Load modalities from config
-            Set<String> modalities = MicroscopeConfigManager
-                    .getInstance(QPPreferenceDialog.getMicroscopeConfigFileProperty())
-                    .getSection("modalities")
-                    .keySet();
+            Set<String> modalities = configManager.getSection("modalities").keySet();
 
             ComboBox<String> modalityBox = new ComboBox<>(
                     FXCollections.observableArrayList(modalities)
             );
+
+            // Create objective and detector dropdowns (initially empty)
+            ComboBox<String> objectiveBox = new ComboBox<>();
+            ComboBox<String> detectorBox = new ComboBox<>();
 
             // Set last used modality if available
             String lastModality = PersistentPreferences.getLastModality();
@@ -150,6 +154,74 @@ public class SampleSetupController {
             } else if (!modalities.isEmpty()) {
                 // Default to first if no saved preference or saved one not in list
                 modalityBox.setValue(modalities.iterator().next());
+            }
+
+            // Update objectives when modality changes
+            modalityBox.valueProperty().addListener((obs, oldModality, newModality) -> {
+                if (newModality != null) {
+                    logger.debug("Modality changed to: {}", newModality);
+                    
+                    // Get available objectives for this modality
+                    Set<String> objectiveIds = configManager.getAvailableObjectivesForModality(newModality);
+                    Map<String, String> objectiveNames = configManager.getObjectiveFriendlyNames(objectiveIds);
+                    
+                    // Create display strings that combine friendly name with ID for clarity
+                    List<String> objectiveDisplayItems = objectiveIds.stream()
+                            .map(id -> {
+                                String name = objectiveNames.get(id);
+                                return name + " (" + id + ")";
+                            })
+                            .sorted()
+                            .collect(Collectors.toList());
+                    
+                    objectiveBox.getItems().clear();
+                    objectiveBox.getItems().addAll(objectiveDisplayItems);
+                    
+                    // Select first objective if available
+                    if (!objectiveDisplayItems.isEmpty()) {
+                        objectiveBox.setValue(objectiveDisplayItems.get(0));
+                    }
+                    
+                    // Clear detector selection
+                    detectorBox.getItems().clear();
+                    detectorBox.setValue(null);
+                }
+            });
+
+            // Update detectors when objective changes
+            objectiveBox.valueProperty().addListener((obs, oldObjective, newObjective) -> {
+                if (newObjective != null && modalityBox.getValue() != null) {
+                    // Extract objective ID from display string
+                    String objectiveId = extractIdFromDisplayString(newObjective);
+                    logger.debug("Objective changed to: {} ({})", newObjective, objectiveId);
+                    
+                    // Get available detectors for this modality+objective combo
+                    Set<String> detectorIds = configManager.getAvailableDetectorsForModalityObjective(
+                            modalityBox.getValue(), objectiveId);
+                    Map<String, String> detectorNames = configManager.getDetectorFriendlyNames(detectorIds);
+                    
+                    // Create display strings
+                    List<String> detectorDisplayItems = detectorIds.stream()
+                            .map(id -> {
+                                String name = detectorNames.get(id);
+                                return name + " (" + id + ")";
+                            })
+                            .sorted()
+                            .collect(Collectors.toList());
+                    
+                    detectorBox.getItems().clear();
+                    detectorBox.getItems().addAll(detectorDisplayItems);
+                    
+                    // Select first detector if available
+                    if (!detectorDisplayItems.isEmpty()) {
+                        detectorBox.setValue(detectorDisplayItems.get(0));
+                    }
+                }
+            });
+
+            // Trigger initial population of objectives
+            if (modalityBox.getValue() != null) {
+                modalityBox.fireEvent(new javafx.event.ActionEvent());
             }
 
             // --- Error label for validation messages ---
@@ -215,6 +287,14 @@ public class SampleSetupController {
             grid.add(modalityBox, 1, row);
             row++;
 
+            grid.add(new Label("Objective:"), 0, row);
+            grid.add(objectiveBox, 1, row);
+            row++;
+
+            grid.add(new Label("Detector:"), 0, row);
+            grid.add(detectorBox, 1, row);
+            row++;
+
             grid.add(errorLabel, 0, row, 2, 1);
 
             dlg.getDialogPane().setContent(grid);
@@ -244,6 +324,8 @@ public class SampleSetupController {
                 String name = sampleNameField.getText().trim();
                 File folder = new File(folderField.getText().trim());
                 String mod = modalityBox.getValue();
+                String obj = extractIdFromDisplayString(objectiveBox.getValue());
+                String det = extractIdFromDisplayString(detectorBox.getValue());
 
                 // Build validation error message
                 StringBuilder errors = new StringBuilder();
@@ -264,6 +346,14 @@ public class SampleSetupController {
                     errors.append("• Please select a modality\n");
                 }
 
+                if (obj == null || obj.isEmpty()) {
+                    errors.append("• Please select an objective\n");
+                }
+
+                if (det == null || det.isEmpty()) {
+                    errors.append("• Please select a detector\n");
+                }
+
                 if (errors.length() > 0) {
                     // Show error and consume event to prevent dialog closing
                     errorLabel.setText(errors.toString().trim());
@@ -275,8 +365,12 @@ public class SampleSetupController {
                         sampleNameField.requestFocus();
                     } else if (!hasOpenProject && (!folder.exists() || !folder.isDirectory())) {
                         folderField.requestFocus();
-                    } else {
+                    } else if (mod == null || mod.isEmpty()) {
                         modalityBox.requestFocus();
+                    } else if (obj == null || obj.isEmpty()) {
+                        objectiveBox.requestFocus();
+                    } else {
+                        detectorBox.requestFocus();
                     }
                 } else {
                     // Valid input - hide error label and save preferences
@@ -300,6 +394,8 @@ public class SampleSetupController {
                     String name = sampleNameField.getText().trim();
                     File folder = new File(folderField.getText().trim());
                     String mod = modalityBox.getValue();
+                    String obj = extractIdFromDisplayString(objectiveBox.getValue());
+                    String det = extractIdFromDisplayString(detectorBox.getValue());
 
                     // Save to persistent preferences for next time
                     if (!hasOpenProject) {
@@ -308,10 +404,10 @@ public class SampleSetupController {
                     }
                     PersistentPreferences.setLastModality(mod);
 
-                    logger.info("Saved sample setup preferences - name: {}, modality: {}",
-                            name, mod);
+                    logger.info("Saved sample setup preferences - name: {}, modality: {}, objective: {}, detector: {}",
+                            name, mod, obj, det);
 
-                    return new SampleSetupResult(name, folder, mod);
+                    return new SampleSetupResult(name, folder, mod, obj, det);
                 }
                 return null;
             });
@@ -341,6 +437,23 @@ public class SampleSetupController {
         return future;
     }
 
+    /**
+     * Helper method to extract the ID from display strings like "20x Olympus (LOCI_OBJECTIVE_OLYMPUS_20X_POL_001)"
+     * Returns the ID part in parentheses, or the original string if no parentheses found.
+     */
+    private static String extractIdFromDisplayString(String displayString) {
+        if (displayString == null) return null;
+        
+        int openParen = displayString.lastIndexOf('(');
+        int closeParen = displayString.lastIndexOf(')');
+        
+        if (openParen != -1 && closeParen != -1 && closeParen > openParen) {
+            return displayString.substring(openParen + 1, closeParen);
+        }
+        
+        return displayString; // fallback to original string
+    }
+
     /** Holds the user's choices from the "sample setup" dialog. */
-    public record SampleSetupResult(String sampleName, File projectsFolder, String modality) { }
+    public record SampleSetupResult(String sampleName, File projectsFolder, String modality, String objective, String detector) { }
 }

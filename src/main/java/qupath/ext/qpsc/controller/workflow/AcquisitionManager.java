@@ -323,41 +323,21 @@ public class AcquisitionManager {
 
                 // Extract modality base name
                 String modalityWithIndex = state.projectInfo.getImagingModeWithIndex();
-                String baseModality = modalityWithIndex;
-                if (baseModality.matches(".*_\\d+$")) {
-                    baseModality = baseModality.substring(0, baseModality.lastIndexOf('_'));
-                }
+                String baseModality = state.sample.modality();
 
-                // Find hardware configuration
-                String objective = null;
-                String detector = null;
-                double pixelSize = 1.0;
-
-                List<Object> profiles = configManager.getList("acq_profiles_new", "profiles");
-                if (profiles != null) {
-                    for (Object profileObj : profiles) {
-                        @SuppressWarnings("unchecked")
-                        Map<String, Object> profile = (Map<String, Object>) profileObj;
-                        String profileModality = (String) profile.get("modality");
-
-                        if (profileModality != null &&
-                                (profileModality.equals(baseModality) ||
-                                        modalityWithIndex.startsWith(profileModality))) {
-                            objective = (String) profile.get("objective");
-                            detector = (String) profile.get("detector");
-
-                            if (objective != null && detector != null) {
-                                pixelSize = configManager.getModalityPixelSize(profileModality, objective, detector);
-                                logger.debug("Found hardware config: obj={}, det={}, px={}",
-                                        objective, detector, pixelSize);
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                if (objective == null || detector == null) {
-                    throw new RuntimeException("Hardware configuration not found for modality: " + modalityWithIndex);
+                // Use explicit hardware selections from sample setup
+                String objective = state.sample.objective();
+                String detector = state.sample.detector();
+                
+                // Get pixel size using explicit hardware configuration
+                double pixelSize;
+                try {
+                    pixelSize = configManager.getModalityPixelSize(baseModality, objective, detector);
+                    logger.debug("Using explicit hardware config: obj={}, det={}, px={}",
+                            objective, detector, pixelSize);
+                } catch (IllegalArgumentException e) {
+                    throw new RuntimeException("Failed to get pixel size for selected hardware configuration: " + 
+                            baseModality + "/" + objective + "/" + detector + " - " + e.getMessage());
                 }
 
                 // Get background correction settings

@@ -1206,4 +1206,160 @@ public class MicroscopeConfigManager {
         logger.debug("Detector {} defaulting to no deBayering as there is no indication for this in the config file", detectorId);
         return false;
     }
+
+    // ========== NEW METHODS FOR UI DROPDOWNS ==========
+
+    /**
+     * Get available objectives for a given modality.
+     * 
+     * @param modalityName The base modality name (e.g., "ppm", "brightfield")
+     * @return Set of objective IDs that have profiles for this modality
+     */
+    public Set<String> getAvailableObjectivesForModality(String modalityName) {
+        logger.debug("Finding available objectives for modality: {}", modalityName);
+        
+        Set<String> objectives = new HashSet<>();
+        List<Object> profiles = getList("acq_profiles_new", "profiles");
+        
+        if (profiles != null) {
+            for (Object profileObj : profiles) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> profile = (Map<String, Object>) profileObj;
+                
+                String profileModality = (String) profile.get("modality");
+                String objective = (String) profile.get("objective");
+                
+                if (modalityName.equals(profileModality) && objective != null) {
+                    objectives.add(objective);
+                }
+            }
+        }
+        
+        logger.debug("Found {} objectives for modality {}: {}", objectives.size(), modalityName, objectives);
+        return objectives;
+    }
+
+    /**
+     * Get available detectors for a given modality and objective combination.
+     * 
+     * @param modalityName The base modality name (e.g., "ppm", "brightfield")
+     * @param objectiveId The objective ID (e.g., "LOCI_OBJECTIVE_OLYMPUS_20X_POL_001")
+     * @return Set of detector IDs that have profiles for this modality+objective combo
+     */
+    public Set<String> getAvailableDetectorsForModalityObjective(String modalityName, String objectiveId) {
+        logger.debug("Finding available detectors for modality: {}, objective: {}", modalityName, objectiveId);
+        
+        Set<String> detectors = new HashSet<>();
+        List<Object> profiles = getList("acq_profiles_new", "profiles");
+        
+        if (profiles != null) {
+            for (Object profileObj : profiles) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> profile = (Map<String, Object>) profileObj;
+                
+                String profileModality = (String) profile.get("modality");
+                String profileObjective = (String) profile.get("objective");
+                String detector = (String) profile.get("detector");
+                
+                if (modalityName.equals(profileModality) && 
+                    objectiveId.equals(profileObjective) && 
+                    detector != null) {
+                    detectors.add(detector);
+                }
+            }
+        }
+        
+        logger.debug("Found {} detectors for modality {} + objective {}: {}", 
+                     detectors.size(), modalityName, objectiveId, detectors);
+        return detectors;
+    }
+
+    /**
+     * Get friendly names for objectives from the resources file.
+     * 
+     * @param objectiveIds Set of objective IDs to get names for
+     * @return Map of objective ID to friendly name
+     */
+    public Map<String, String> getObjectiveFriendlyNames(Set<String> objectiveIds) {
+        Map<String, String> friendlyNames = new HashMap<>();
+        Map<String, Object> objectiveSection = getResourceSection("id_objective_lens");
+        
+        if (objectiveSection != null) {
+            for (String objectiveId : objectiveIds) {
+                if (objectiveSection.containsKey(objectiveId)) {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> objData = (Map<String, Object>) objectiveSection.get(objectiveId);
+                    String name = (String) objData.get("name");
+                    if (name != null) {
+                        friendlyNames.put(objectiveId, name);
+                    } else {
+                        friendlyNames.put(objectiveId, objectiveId); // fallback
+                    }
+                }
+            }
+        }
+        
+        return friendlyNames;
+    }
+
+    /**
+     * Get friendly names for detectors from the resources file.
+     * 
+     * @param detectorIds Set of detector IDs to get names for
+     * @return Map of detector ID to friendly name
+     */
+    public Map<String, String> getDetectorFriendlyNames(Set<String> detectorIds) {
+        Map<String, String> friendlyNames = new HashMap<>();
+        Map<String, Object> detectorSection = getResourceSection("id_detector");
+        
+        if (detectorSection != null) {
+            for (String detectorId : detectorIds) {
+                if (detectorSection.containsKey(detectorId)) {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> detData = (Map<String, Object>) detectorSection.get(detectorId);
+                    String name = (String) detData.get("name");
+                    if (name != null) {
+                        friendlyNames.put(detectorId, name);
+                    } else {
+                        friendlyNames.put(detectorId, detectorId); // fallback
+                    }
+                }
+            }
+        }
+        
+        return friendlyNames;
+    }
+
+    /**
+     * Get the default detector for a modality+objective combination.
+     * Returns the first available detector if no explicit default is configured.
+     * 
+     * @param modalityName The base modality name
+     * @param objectiveId The objective ID
+     * @return The default detector ID, or null if none available
+     */
+    public String getDefaultDetectorForModalityObjective(String modalityName, String objectiveId) {
+        Set<String> detectors = getAvailableDetectorsForModalityObjective(modalityName, objectiveId);
+        
+        if (detectors.isEmpty()) {
+            return null;
+        }
+        
+        // For now, just return the first one
+        // In the future, could add logic to check for a "default" flag in config
+        return detectors.iterator().next();
+    }
+
+    /**
+     * Validate that a modality+objective+detector combination exists in the configuration.
+     * 
+     * @param modalityName The base modality name
+     * @param objectiveId The objective ID
+     * @param detectorId The detector ID
+     * @return true if this combination has a configured profile
+     */
+    public boolean isValidModalityObjectiveDetectorCombination(String modalityName, String objectiveId, String detectorId) {
+        Map<String, Object> profile = getAcquisitionProfile(modalityName, objectiveId, detectorId);
+        return profile != null;
+    }
 }
