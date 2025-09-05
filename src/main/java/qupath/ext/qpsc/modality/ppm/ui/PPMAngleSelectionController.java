@@ -50,7 +50,7 @@ public class PPMAngleSelectionController {
         }
     }
 
-    public static CompletableFuture<AngleExposureResult> showDialog(double plusAngle, double minusAngle) {
+    public static CompletableFuture<AngleExposureResult> showDialog(double plusAngle, double minusAngle, double uncrossedAngle) {
         CompletableFuture<AngleExposureResult> future = new CompletableFuture<>();
         Platform.runLater(() -> {
             Dialog<AngleExposureResult> dialog = new Dialog<>();
@@ -103,6 +103,15 @@ public class PPMAngleSelectionController {
             grid.add(plusCheck,0,3);
             grid.add(plusExposure,2,3);
 
+            CheckBox uncrossedCheck = new CheckBox(String.format("%.1f 'degrees' (uncrossed)", uncrossedAngle));
+            uncrossedCheck.setSelected(PPMPreferences.getUncrossedSelected());
+            TextField uncrossedExposure = new TextField(String.valueOf(PPMPreferences.getUncrossedExposureMs()));
+            uncrossedExposure.setTextFormatter(new TextFormatter<>(intFilter));
+            uncrossedExposure.setPrefWidth(80);
+            uncrossedExposure.setDisable(!uncrossedCheck.isSelected());
+            grid.add(uncrossedCheck,0,4);
+            grid.add(uncrossedExposure,2,4);
+
             minusCheck.selectedProperty().addListener((obs,o,s)->{
                 minusExposure.setDisable(!s);
                 if(!s) minusExposure.clear();
@@ -121,16 +130,23 @@ public class PPMAngleSelectionController {
                 PPMPreferences.setPlusSelected(s);
                 logger.debug("PPM plus tick selection updated to: {}", s);
             });
+            uncrossedCheck.selectedProperty().addListener((obs,o,s)->{
+                uncrossedExposure.setDisable(!s);
+                if(!s) uncrossedExposure.clear();
+                PPMPreferences.setUncrossedSelected(s);
+                logger.debug("PPM uncrossed tick selection updated to: {}", s);
+            });
 
             minusExposure.textProperty().addListener((obs,o,n)->{ if(!n.isEmpty()) PPMPreferences.setMinusExposureMs(Integer.parseInt(n)); });
             zeroExposure.textProperty().addListener((obs,o,n)->{ if(!n.isEmpty()) PPMPreferences.setZeroExposureMs(Integer.parseInt(n)); });
             plusExposure.textProperty().addListener((obs,o,n)->{ if(!n.isEmpty()) PPMPreferences.setPlusExposureMs(Integer.parseInt(n)); });
+            uncrossedExposure.textProperty().addListener((obs,o,n)->{ if(!n.isEmpty()) PPMPreferences.setUncrossedExposureMs(Integer.parseInt(n)); });
 
             Label info = new Label("Each selected angle will be acquired with the specified exposure time.");
             Button selectAll = new Button("Select All");
             Button selectNone = new Button("Select None");
-            selectAll.setOnAction(e->{minusCheck.setSelected(true);zeroCheck.setSelected(true);plusCheck.setSelected(true);});
-            selectNone.setOnAction(e->{minusCheck.setSelected(false);zeroCheck.setSelected(false);plusCheck.setSelected(false);});
+            selectAll.setOnAction(e->{minusCheck.setSelected(true);zeroCheck.setSelected(true);plusCheck.setSelected(true);uncrossedCheck.setSelected(true);});
+            selectNone.setOnAction(e->{minusCheck.setSelected(false);zeroCheck.setSelected(false);plusCheck.setSelected(false);uncrossedCheck.setSelected(false);});
             HBox quickButtons = new HBox(10, selectAll, selectNone);
 
             VBox content = new VBox(10, info, grid, new Separator(), quickButtons);
@@ -143,14 +159,15 @@ public class PPMAngleSelectionController {
             Node okNode = dialog.getDialogPane().lookupButton(okType);
 
             BooleanBinding valid = Bindings.createBooleanBinding(() -> {
-                boolean any = minusCheck.isSelected() || zeroCheck.isSelected() || plusCheck.isSelected();
+                boolean any = minusCheck.isSelected() || zeroCheck.isSelected() || plusCheck.isSelected() || uncrossedCheck.isSelected();
                 if(!any) return false;
                 if(minusCheck.isSelected() && !isValidPosInt(minusExposure.getText())) return false;
                 if(zeroCheck.isSelected() && !isValidPosInt(zeroExposure.getText())) return false;
                 if(plusCheck.isSelected() && !isValidPosInt(plusExposure.getText())) return false;
+                if(uncrossedCheck.isSelected() && !isValidPosInt(uncrossedExposure.getText())) return false;
                 return true;
-            }, minusCheck.selectedProperty(), zeroCheck.selectedProperty(), plusCheck.selectedProperty(),
-            minusExposure.textProperty(), zeroExposure.textProperty(), plusExposure.textProperty());
+            }, minusCheck.selectedProperty(), zeroCheck.selectedProperty(), plusCheck.selectedProperty(), uncrossedCheck.selectedProperty(),
+            minusExposure.textProperty(), zeroExposure.textProperty(), plusExposure.textProperty(), uncrossedExposure.textProperty());
             okNode.disableProperty().bind(valid.not());
 
             dialog.setResultConverter(button -> {
@@ -159,6 +176,7 @@ public class PPMAngleSelectionController {
                     if(minusCheck.isSelected()) list.add(new AngleExposure(minusAngle,Integer.parseInt(minusExposure.getText())));
                     if(zeroCheck.isSelected()) list.add(new AngleExposure(0.0,Integer.parseInt(zeroExposure.getText())));
                     if(plusCheck.isSelected()) list.add(new AngleExposure(plusAngle,Integer.parseInt(plusExposure.getText())));
+                    if(uncrossedCheck.isSelected()) list.add(new AngleExposure(uncrossedAngle,Integer.parseInt(uncrossedExposure.getText())));
                     logger.info("PPM angles and exposures selected: {}", list);
                     return new AngleExposureResult(list);
                 }

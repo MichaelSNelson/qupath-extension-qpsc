@@ -24,6 +24,8 @@ public class PPMPreferences {
             PathPrefs.createPersistentPreference("PPMZeroSelected", "true");
     private static final StringProperty plusSelected =
             PathPrefs.createPersistentPreference("PPMPlusSelected", "true");
+    private static final StringProperty uncrossedSelected =
+            PathPrefs.createPersistentPreference("PPMUncrossedSelected", "false");
 
     // Exposure times in milliseconds for each angle
     private static final StringProperty minusExposure =
@@ -32,6 +34,8 @@ public class PPMPreferences {
             PathPrefs.createPersistentPreference("PPMZeroExposureMs", "800");
     private static final StringProperty plusExposure =
             PathPrefs.createPersistentPreference("PPMPlusExposureMs", "500");
+    private static final StringProperty uncrossedExposure =
+            PathPrefs.createPersistentPreference("PPMUncrossedExposureMs", "10");
 
     static {
         try {
@@ -49,6 +53,7 @@ public class PPMPreferences {
                                 case "positive" -> plusExposure.set(String.valueOf(ms));
                                 case "negative" -> minusExposure.set(String.valueOf(ms));
                                 case "crossed" -> zeroExposure.set(String.valueOf(ms));
+                                case "uncrossed" -> uncrossedExposure.set(String.valueOf(ms));
                             }
                         }
                     }
@@ -107,6 +112,22 @@ public class PPMPreferences {
 
     public static void setPlusExposureMs(int ms) {
         plusExposure.set(String.valueOf(ms));
+    }
+
+    public static boolean getUncrossedSelected() {
+        return Boolean.parseBoolean(uncrossedSelected.get());
+    }
+
+    public static void setUncrossedSelected(boolean selected) {
+        uncrossedSelected.set(String.valueOf(selected));
+    }
+
+    public static int getUncrossedExposureMs() {
+        return Integer.parseInt(uncrossedExposure.get());
+    }
+
+    public static void setUncrossedExposureMs(int ms) {
+        uncrossedExposure.set(String.valueOf(ms));
     }
 }
 

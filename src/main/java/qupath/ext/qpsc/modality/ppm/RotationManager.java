@@ -44,6 +44,7 @@ public class RotationManager {
             double plusTick = 5.0;
             double minusTick = -5.0;
             double zeroTick = 0.0;
+            double uncrossedTick = 90.0;
 
             if (anglesList != null) {
                 for (Object angleObj : anglesList) {
@@ -56,6 +57,7 @@ public class RotationManager {
                                 case "positive" -> plusTick = tick;
                                 case "negative" -> minusTick = tick;
                                 case "crossed" -> zeroTick = tick;
+                                case "uncrossed" -> uncrossedTick = tick;
                             }
                         }
                     }
@@ -68,11 +70,13 @@ public class RotationManager {
             int plusExposure = PPMPreferences.getPlusExposureMs();
             int minusExposure = PPMPreferences.getMinusExposureMs();
             int zeroExposure = PPMPreferences.getZeroExposureMs();
+            int uncrossedExposure = PPMPreferences.getUncrossedExposureMs();
 
             strategies.add(new PPMRotationStrategy(
                     new AngleExposure(plusTick, plusExposure),
                     new AngleExposure(minusTick, minusExposure),
-                    new AngleExposure(zeroTick, zeroExposure)
+                    new AngleExposure(zeroTick, zeroExposure),
+                    new AngleExposure(uncrossedTick, uncrossedExposure)
             ));
 
             logger.info("PPM ticks configured");

@@ -51,13 +51,16 @@ class PPMRotationStrategy implements RotationStrategy {
     private final AngleExposure plusAngleExposure;
     private final AngleExposure minusAngleExposure;
     private final AngleExposure zeroAngleExposure;
+    private final AngleExposure uncrossedAngleExposure;
 
     public PPMRotationStrategy(AngleExposure plusAngleExposure,
                                AngleExposure minusAngleExposure,
-                               AngleExposure zeroAngleExposure) {
+                               AngleExposure zeroAngleExposure,
+                               AngleExposure uncrossedAngleExposure) {
         this.plusAngleExposure = plusAngleExposure;
         this.minusAngleExposure = minusAngleExposure;
         this.zeroAngleExposure = zeroAngleExposure;
+        this.uncrossedAngleExposure = uncrossedAngleExposure;
     }
 
     @Override
@@ -68,7 +71,7 @@ class PPMRotationStrategy implements RotationStrategy {
     @Override
     public CompletableFuture<List<Double>> getRotationTicks() {
         // Show dialog for angle selection with exposure times
-        return PPMAngleSelectionController.showDialog(plusAngleExposure.ticks(), minusAngleExposure.ticks())
+        return PPMAngleSelectionController.showDialog(plusAngleExposure.ticks(), minusAngleExposure.ticks(), uncrossedAngleExposure.ticks())
                 .thenApply(result -> {
                     if (result == null) {
                         return new ArrayList<>();
@@ -80,7 +83,7 @@ class PPMRotationStrategy implements RotationStrategy {
     @Override
     public CompletableFuture<List<AngleExposure>> getRotationTicksWithExposure() {
         // Show dialog for angle selection with exposure times
-        return PPMAngleSelectionController.showDialog(plusAngleExposure.ticks(), minusAngleExposure.ticks())
+        return PPMAngleSelectionController.showDialog(plusAngleExposure.ticks(), minusAngleExposure.ticks(), uncrossedAngleExposure.ticks())
                 .thenApply(result -> {
                     if (result == null) {
                         return new ArrayList<>();
