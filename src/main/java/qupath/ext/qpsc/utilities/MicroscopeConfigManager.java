@@ -1221,17 +1221,25 @@ public class MicroscopeConfigManager {
         Set<String> objectives = new HashSet<>();
         List<Object> profiles = getList("acq_profiles_new", "profiles");
         
-        if (profiles != null) {
-            for (Object profileObj : profiles) {
-                @SuppressWarnings("unchecked")
-                Map<String, Object> profile = (Map<String, Object>) profileObj;
-                
-                String profileModality = (String) profile.get("modality");
-                String objective = (String) profile.get("objective");
-                
-                if (modalityName.equals(profileModality) && objective != null) {
-                    objectives.add(objective);
-                }
+        if (profiles == null) {
+            logger.warn("No acquisition profiles found in configuration - profiles is null");
+            return objectives;
+        }
+        
+        logger.debug("Found {} total profiles", profiles.size());
+        
+        for (Object profileObj : profiles) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> profile = (Map<String, Object>) profileObj;
+            
+            String profileModality = (String) profile.get("modality");
+            String objective = (String) profile.get("objective");
+            
+            logger.debug("Profile: modality={}, objective={}", profileModality, objective);
+            
+            if (modalityName.equals(profileModality) && objective != null) {
+                objectives.add(objective);
+                logger.debug("Added objective {} for modality {}", objective, modalityName);
             }
         }
         

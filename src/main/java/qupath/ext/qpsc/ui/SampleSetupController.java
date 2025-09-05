@@ -220,9 +220,36 @@ public class SampleSetupController {
             });
 
             // Trigger initial population of objectives
-            if (modalityBox.getValue() != null) {
-                modalityBox.fireEvent(new javafx.event.ActionEvent());
-            }
+            Platform.runLater(() -> {
+                if (modalityBox.getValue() != null) {
+                    // Manually trigger the change listener
+                    String initialModality = modalityBox.getValue();
+                    logger.debug("Triggering initial population for modality: {}", initialModality);
+                    
+                    // Get available objectives for this modality
+                    Set<String> objectiveIds = configManager.getAvailableObjectivesForModality(initialModality);
+                    Map<String, String> objectiveNames = configManager.getObjectiveFriendlyNames(objectiveIds);
+                    
+                    logger.debug("Initial objectives found: {}", objectiveIds);
+                    
+                    // Create display strings that combine friendly name with ID for clarity
+                    List<String> objectiveDisplayItems = objectiveIds.stream()
+                            .map(id -> {
+                                String name = objectiveNames.get(id);
+                                return name + " (" + id + ")";
+                            })
+                            .sorted()
+                            .collect(Collectors.toList());
+                    
+                    objectiveBox.getItems().clear();
+                    objectiveBox.getItems().addAll(objectiveDisplayItems);
+                    
+                    // Select first objective if available
+                    if (!objectiveDisplayItems.isEmpty()) {
+                        objectiveBox.setValue(objectiveDisplayItems.get(0));
+                    }
+                }
+            });
 
             // --- Error label for validation messages ---
             Label errorLabel = new Label();
