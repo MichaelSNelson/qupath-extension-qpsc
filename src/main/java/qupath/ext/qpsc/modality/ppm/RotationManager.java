@@ -67,10 +67,10 @@ public class RotationManager {
             }
 
             // Get exposure times from PPMPreferences
-            int plusExposure = PPMPreferences.getPlusExposureMs();
-            int minusExposure = PPMPreferences.getMinusExposureMs();
-            int zeroExposure = PPMPreferences.getZeroExposureMs();
-            int uncrossedExposure = PPMPreferences.getUncrossedExposureMs();
+            double plusExposure = PPMPreferences.getPlusExposureMs();
+            double minusExposure = PPMPreferences.getMinusExposureMs();
+            double zeroExposure = PPMPreferences.getZeroExposureMs();
+            double uncrossedExposure = PPMPreferences.getUncrossedExposureMs();
 
             strategies.add(new PPMRotationStrategy(
                     new AngleExposure(plusTick, plusExposure),
