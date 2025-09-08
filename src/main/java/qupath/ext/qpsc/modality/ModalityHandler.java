@@ -22,7 +22,7 @@ import javafx.scene.Node;
  * 
  * <h3>Core Responsibilities</h3>
  * <ul>
- *   <li><strong>Rotation Parameters:</strong> Define rotation angles and exposure times for multi-angle acquisitions</li>
+ *   <li><strong>Rotation Parameters:</strong> Define rotation angles and decimal exposure times for multi-angle acquisitions</li>
  *   <li><strong>UI Integration:</strong> Provide optional JavaFX UI components for modality-specific parameters</li>
  *   <li><strong>Parameter Customization:</strong> Apply user overrides to default acquisition parameters</li>
  *   <li><strong>File Naming:</strong> Generate filename-safe suffixes for different rotation angles</li>
@@ -65,12 +65,12 @@ import javafx.scene.Node;
  */
 public interface ModalityHandler {
     /**
-     * Retrieves the rotation angles and exposure times required for this modality's acquisition sequence.
+     * Retrieves the rotation angles and decimal exposure times required for this modality's acquisition sequence.
      * 
      * <p>This method defines the core acquisition parameters for the modality, typically loaded from 
      * configuration files or computed dynamically. For multi-angle modalities like polarized light 
-     * microscopy, this would return multiple angles with their associated exposure times. Single-angle 
-     * modalities may return a single entry or an empty list for default behavior.</p>
+     * microscopy, this would return multiple angles with their associated decimal exposure times. 
+     * Single-angle modalities may return a single entry or an empty list for default behavior.</p>
      * 
      * <p>The returned {@code CompletableFuture} allows for asynchronous parameter loading, which is 
      * useful when angles are computed from configuration files or external resources. Implementations 
@@ -95,7 +95,7 @@ public interface ModalityHandler {
      * 
      * <p>This method allows modalities to provide custom user interface components that integrate 
      * with the bounding box dialog. These UI components typically allow users to override default 
-     * acquisition parameters such as rotation angles, exposure times, or other modality-specific 
+     * acquisition parameters such as rotation angles, decimal exposure times, or other modality-specific 
      * settings before starting an acquisition.</p>
      * 
      * <p>The returned {@link BoundingBoxUI} component is embedded in the main acquisition dialog 

@@ -27,17 +27,18 @@ package qupath.ext.qpsc.modality;
  * </ul>
  * 
  * <p><strong>Exposure Time Constraints:</strong><br>
- * The {@code exposureMs} parameter must be a positive integer representing milliseconds:
+ * The {@code exposureMs} parameter must be a positive decimal number representing milliseconds:
  * <ul>
- *   <li>Typical range: 10ms - 5000ms depending on illumination and detector sensitivity</li>
- *   <li>PPM sequences often use different exposures per angle (e.g., 500ms for polarized, 10ms for uncrossed)</li>
+ *   <li>Typical range: 0.1ms - 5000ms depending on illumination and detector sensitivity</li>
+ *   <li>PPM sequences often use different exposures per angle (e.g., 500.0ms for polarized, 1.2ms for uncrossed)</li>
+ *   <li>Sub-millisecond precision supported for fine exposure control (e.g., 0.5ms, 1.8ms, 15.3ms)</li>
  *   <li>Values are validated by the microscope control system before acquisition</li>
  * </ul>
  * 
  * <p><strong>Command Building Integration:</strong><br>
  * When building Pycro-Manager acquisition commands, {@code AngleExposure} lists are processed as:
  * <pre>{@code
- * --angles (-5,0,5) --exposures (500,800,500)
+ * --angles (-5.0,0.0,5.0) --exposures (500.0,800.5,1.2)
  * }</pre>
  * The {@link #toString()} method provides a comma-separated format for debugging and logging.</p>
  * 
@@ -50,14 +51,14 @@ package qupath.ext.qpsc.modality;
  * <pre>{@code
  * // PPM three-angle sequence
  * List<AngleExposure> ppmSequence = List.of(
- *     new AngleExposure(-5.0, 500),  // Negative polarizer angle
- *     new AngleExposure(0.0, 800),   // Crossed polarizers
- *     new AngleExposure(5.0, 500)    // Positive polarizer angle
+ *     new AngleExposure(-5.0, 500.0),  // Negative polarizer angle
+ *     new AngleExposure(0.0, 800.5),   // Crossed polarizers  
+ *     new AngleExposure(5.0, 1.2)      // Positive polarizer angle (fine control)
  * );
  * 
  * // Single brightfield acquisition
  * List<AngleExposure> brightfield = List.of(
- *     new AngleExposure(0.0, 50)     // No rotation, short exposure
+ *     new AngleExposure(0.0, 50.5)     // No rotation, precise exposure
  * );
  * 
  * // Runtime angle override (maintaining original exposures)
@@ -68,9 +69,9 @@ package qupath.ext.qpsc.modality;
  * @param ticks the rotation angle in hardware-specific tick units. Must be finite.
  *              Negative values represent counter-clockwise rotation, positive values represent 
  *              clockwise rotation. Zero represents the reference/home position.
- * @param exposureMs the camera exposure time in milliseconds. Must be positive (> 0).
- *                   Typical range is 10-5000ms depending on illumination conditions and 
- *                   detector sensitivity.
+ * @param exposureMs the camera exposure time in milliseconds as a double. Must be positive (> 0).
+ *                   Typical range is 0.1-5000.0ms depending on illumination conditions and 
+ *                   detector sensitivity. Decimal precision enables sub-millisecond control.
  * 
  * @author Mike Nelson
  * @since 1.0
@@ -79,7 +80,7 @@ package qupath.ext.qpsc.modality;
  * @see qupath.ext.qpsc.modality.ppm.PPMModalityHandler
  * @see qupath.ext.qpsc.modality.ModalityRegistry
  */
-public record AngleExposure(double ticks, int exposureMs) {
+public record AngleExposure(double ticks, double exposureMs) {
     
     /**
      * Creates an {@code AngleExposure} with validation of input parameters.
@@ -100,7 +101,7 @@ public record AngleExposure(double ticks, int exposureMs) {
     /**
      * Returns a comma-separated string representation for debugging and logging purposes.
      * 
-     * <p>The format is: {@code "ticks,exposureMs"} (e.g., {@code "-5.0,500"})</p>
+     * <p>The format is: {@code "ticks,exposureMs"} (e.g., {@code "-5.0,500.0"})</p>
      * 
      * <p>This format is primarily used for:
      * <ul>

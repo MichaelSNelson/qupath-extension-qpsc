@@ -163,7 +163,7 @@ public class AcquisitionManager {
      * Retrieves rotation angles configured for the imaging modality.
      *
      * <p>For polarized light imaging or other multi-angle acquisitions, this method
-     * retrieves the configured rotation angles and exposure times.
+     * retrieves the configured rotation angles and decimal exposure times.
      *
      * @return CompletableFuture containing list of rotation angles with exposure settings
      */

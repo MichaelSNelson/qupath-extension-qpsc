@@ -102,6 +102,17 @@ public class AcquisitionCommandBuilder {
 
     // Optional parameter setters
 
+    /**
+     * Sets the angle-exposure pairs for multi-angle acquisition sequences.
+     * 
+     * <p>This method configures the rotation angles and their associated decimal exposure times
+     * for modalities that require multiple acquisitions at different polarizer or rotation positions.
+     * The angles and exposures are formatted into separate comma-separated lists in the socket message.</p>
+     * 
+     * @param angleExposures list of angle-exposure pairs with decimal precision exposure times
+     * @return this builder instance for method chaining
+     * @see AngleExposure
+     */
     public AcquisitionCommandBuilder angleExposures(List<AngleExposure> angleExposures) {
         this.angleExposures = angleExposures;
         return this;

@@ -11,8 +11,27 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Stores user preferences for PPM modality such as selected angles and exposure times.
- */
+ * Manages user preferences for PPM (Polarized light Microscopy) modality configuration.
+ * 
+ * <p>This utility class stores and retrieves user preferences for PPM angle selection
+ * and decimal exposure times. Preferences are persisted using QuPath's preference system
+ * and automatically loaded from microscope configuration files when available.</p>
+ * 
+ * <p><strong>Supported Preferences:</strong></p>
+ * <ul>
+ *   <li><strong>Angle Selection:</strong> Boolean flags for each of the four PPM angles</li>
+ *   <li><strong>Exposure Times:</strong> Decimal exposure values in milliseconds for precise timing</li>
+ *   <li><strong>Configuration Loading:</strong> Automatic loading of default exposures from YAML config</li>
+ * </ul>
+ * 
+ * <p>All exposure time values support decimal precision (e.g., 1.2ms, 500.0ms, 0.8ms)
+ * for fine-grained exposure control across different illumination conditions.</p>
+ * 
+ * @author Mike Nelson
+ * @since 1.0
+ * @see qupath.lib.gui.prefs.PathPrefs
+ * @see qupath.ext.qpsc.utilities.MicroscopeConfigManager
+ */"
 public class PPMPreferences {
 
     private static final Logger logger = LoggerFactory.getLogger(PPMPreferences.class);
@@ -27,7 +46,7 @@ public class PPMPreferences {
     private static final StringProperty uncrossedSelected =
             PathPrefs.createPersistentPreference("PPMUncrossedSelected", "false");
 
-    // Exposure times in milliseconds for each angle
+    // Decimal exposure times in milliseconds for each angle (supports sub-millisecond precision)
     private static final StringProperty minusExposure =
             PathPrefs.createPersistentPreference("PPMMinusExposureMs", "500");
     private static final StringProperty zeroExposure =
@@ -48,7 +67,7 @@ public class PPMPreferences {
                         Object name = angle.get("name");
                         Object exposure = angle.get("exposure_ms");
                         if (name != null && exposure instanceof Number) {
-                            int ms = ((Number) exposure).intValue();
+                            double ms = ((Number) exposure).doubleValue();
                             switch (name.toString()) {
                                 case "positive" -> plusExposure.set(String.valueOf(ms));
                                 case "negative" -> minusExposure.set(String.valueOf(ms));
@@ -90,27 +109,51 @@ public class PPMPreferences {
         plusSelected.set(String.valueOf(selected));
     }
 
-    public static int getMinusExposureMs() {
-        return Integer.parseInt(minusExposure.get());
+    /**
+     * Gets the decimal exposure time for the negative (minus) PPM angle.
+     * @return exposure time in milliseconds (supports decimal values like 1.2ms)
+     */
+    public static double getMinusExposureMs() {
+        return Double.parseDouble(minusExposure.get());
     }
 
-    public static void setMinusExposureMs(int ms) {
+    /**
+     * Sets the decimal exposure time for the negative (minus) PPM angle.
+     * @param ms exposure time in milliseconds (decimal values supported)
+     */
+    public static void setMinusExposureMs(double ms) {
         minusExposure.set(String.valueOf(ms));
     }
 
-    public static int getZeroExposureMs() {
-        return Integer.parseInt(zeroExposure.get());
+    /**
+     * Gets the decimal exposure time for the zero-degree (crossed polarizers) PPM angle.
+     * @return exposure time in milliseconds (supports decimal values like 800.5ms)
+     */
+    public static double getZeroExposureMs() {
+        return Double.parseDouble(zeroExposure.get());
     }
 
-    public static void setZeroExposureMs(int ms) {
+    /**
+     * Sets the decimal exposure time for the zero-degree (crossed polarizers) PPM angle.
+     * @param ms exposure time in milliseconds (decimal values supported)
+     */
+    public static void setZeroExposureMs(double ms) {
         zeroExposure.set(String.valueOf(ms));
     }
 
-    public static int getPlusExposureMs() {
-        return Integer.parseInt(plusExposure.get());
+    /**
+     * Gets the decimal exposure time for the positive (plus) PPM angle.
+     * @return exposure time in milliseconds (supports decimal values like 1.8ms)
+     */
+    public static double getPlusExposureMs() {
+        return Double.parseDouble(plusExposure.get());
     }
 
-    public static void setPlusExposureMs(int ms) {
+    /**
+     * Sets the decimal exposure time for the positive (plus) PPM angle.
+     * @param ms exposure time in milliseconds (decimal values supported)
+     */
+    public static void setPlusExposureMs(double ms) {
         plusExposure.set(String.valueOf(ms));
     }
 
@@ -122,11 +165,19 @@ public class PPMPreferences {
         uncrossedSelected.set(String.valueOf(selected));
     }
 
-    public static int getUncrossedExposureMs() {
-        return Integer.parseInt(uncrossedExposure.get());
+    /**
+     * Gets the decimal exposure time for the uncrossed (parallel polarizers) PPM angle.
+     * @return exposure time in milliseconds (supports decimal values like 0.5ms)
+     */
+    public static double getUncrossedExposureMs() {
+        return Double.parseDouble(uncrossedExposure.get());
     }
 
-    public static void setUncrossedExposureMs(int ms) {
+    /**
+     * Sets the decimal exposure time for the uncrossed (parallel polarizers) PPM angle.
+     * @param ms exposure time in milliseconds (decimal values supported)
+     */
+    public static void setUncrossedExposureMs(double ms) {
         uncrossedExposure.set(String.valueOf(ms));
     }
 }
