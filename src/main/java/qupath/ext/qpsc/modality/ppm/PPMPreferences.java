@@ -31,7 +31,7 @@ import java.util.Map;
  * @since 1.0
  * @see qupath.lib.gui.prefs.PathPrefs
  * @see qupath.ext.qpsc.utilities.MicroscopeConfigManager
- */"
+ */
 public class PPMPreferences {
 
     private static final Logger logger = LoggerFactory.getLogger(PPMPreferences.class);

@@ -37,7 +37,7 @@ import java.util.concurrent.CompletableFuture;
  * @see qupath.ext.qpsc.modality.ModalityHandler
  * @see qupath.ext.qpsc.modality.ppm.ui.PPMBoundingBoxUI
  * @see RotationManager
- */"
+ */
 public class PPMModalityHandler implements ModalityHandler {
     /**
      * Retrieves PPM rotation angles and their associated decimal exposure times.
