@@ -218,7 +218,17 @@ public class BoundingBoxWorkflow {
                                         // Get background correction settings
                                         boolean bgEnabled = configManager.getBoolean("modalities", baseModality, "background_correction", "enabled");
                                         String bgMethod = configManager.getString("modalities", baseModality, "background_correction", "method");
-                                        String bgFolder = configManager.getString("modalities", baseModality, "background_correction", "base_folder");
+                                        String bgBaseFolder = configManager.getString("modalities", baseModality, "background_correction", "base_folder");
+                                        
+                                        // Construct detector-specific background folder path
+                                        String bgFolder = null;
+                                        if (bgEnabled && bgBaseFolder != null) {
+                                            // Extract magnification from objective (e.g., "LOCI_OBJECTIVE_OLYMPUS_20X_POL_001" -> "20x")
+                                            String magnification = extractMagnificationFromObjective(objective);
+                                            // Build path: base_folder/detector/modality/magnification
+                                            bgFolder = Paths.get(bgBaseFolder, detector, baseModality, magnification).toString();
+                                            logger.info("Constructed background folder path: {}", bgFolder);
+                                        }
 
                                         // Get autofocus parameters
                                         Map<String, Object> afParams = configManager.getAutofocusParams(objective);
@@ -456,5 +466,27 @@ public class BoundingBoxWorkflow {
                             });
 
                 }); // This closes the thenAccept from the dialog chain
+    }
+
+    /**
+     * Extract magnification from objective identifier.
+     * Examples:
+     * - "LOCI_OBJECTIVE_OLYMPUS_10X_001" -> "10x"
+     * - "LOCI_OBJECTIVE_OLYMPUS_20X_POL_001" -> "20x"
+     * - "LOCI_OBJECTIVE_OLYMPUS_40X_POL_001" -> "40x"
+     */
+    private static String extractMagnificationFromObjective(String objective) {
+        if (objective == null) return "unknown";
+        
+        // Look for pattern like "10X", "20X", "40X"
+        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("(\\d+)X", java.util.regex.Pattern.CASE_INSENSITIVE);
+        java.util.regex.Matcher matcher = pattern.matcher(objective);
+        
+        if (matcher.find()) {
+            return matcher.group(1).toLowerCase() + "x";  // "20X" -> "20x"
+        }
+        
+        // Fallback: return "unknown" if pattern not found
+        return "unknown";
     }
 }
