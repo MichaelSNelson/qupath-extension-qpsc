@@ -107,7 +107,7 @@ public class BackgroundCollectionWorkflow {
                 false   // No cancel button for background collection
         );
         
-        CompletableFuture.runAsync(() -> {
+        CompletableFuture<Void> acquisitionFuture = CompletableFuture.runAsync(() -> {
             try {
                 logger.info("Starting background acquisition async task");
                 
@@ -238,6 +238,17 @@ public class BackgroundCollectionWorkflow {
                             "Failed to acquire background images: " + e.getMessage());
                 });
             }
+        });
+        
+        // Handle any exceptions from the CompletableFuture itself
+        acquisitionFuture.exceptionally(ex -> {
+            logger.error("CompletableFuture execution failed", ex);
+            Platform.runLater(() -> {
+                progressHandle.close();
+                Dialogs.showErrorMessage("Background Acquisition Error", 
+                        "Failed to start background acquisition: " + ex.getMessage());
+            });
+            return null;
         });
     }
     
