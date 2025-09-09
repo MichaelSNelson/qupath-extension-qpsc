@@ -28,6 +28,7 @@ import qupath.ext.qpsc.ui.StageMovementController;
  *   <li><strong>boundingBox</strong> - Full acquisition workflow from annotation selection</li>
  *   <li><strong>existingImage</strong> - Targeted acquisition on existing images with coordinate transformation</li>
  *   <li><strong>microscopeAlignment</strong> - Semi-automated alignment between QuPath and microscope coordinates</li>
+ *   <li><strong>backgroundCollection</strong> - Simplified workflow for acquiring flat field correction backgrounds</li>
  *   <li><strong>basicStageInterface</strong> - Manual stage movement and testing interface</li>
  *   <li><strong>serverConnection</strong> - Connection testing and server communication diagnostics</li>
  *   <li><strong>test</strong> - Hardware connectivity and system validation testing</li>
@@ -148,6 +149,10 @@ public class QPScopeController {
             case "microscopeAlignment" -> {
                 logger.debug("Launching microscope alignment workflow");
                 MicroscopeAlignmentWorkflow.run();
+            }
+            case "backgroundCollection" -> {
+                logger.debug("Launching background collection workflow");
+                BackgroundCollectionWorkflow.run();
             }
             case "serverConnection" -> {
                 logger.debug("Launching server connection dialog");

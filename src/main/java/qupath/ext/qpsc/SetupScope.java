@@ -191,9 +191,20 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 			}
 		});
 
+		// 4) Background collection (for flat field correction)
+		MenuItem backgroundCollectionOption = new MenuItem(res.getString("menu.backgroundCollection"));
+		backgroundCollectionOption.setDisable(!configValid);
+		backgroundCollectionOption.setOnAction(e -> {
+			try {
+				QPScopeController.getInstance().startWorkflow("backgroundCollection");
+			} catch (IOException ex) {
+				throw new RuntimeException(ex);
+			}
+		});
+
 		// === UTILITY MENU ITEMS ===
 
-		// 4) Basic stage control (test only)
+		// 5) Basic stage control (test only)
 		MenuItem stageControlOption = new MenuItem(res.getString("menu.stagecontrol"));
 		stageControlOption.setOnAction(e ->
 				{
@@ -233,6 +244,9 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 				boundingBoxOption,
 				existingImageOption,
 				alignmentOption,
+				new SeparatorMenuItem(),  // Visual separator
+				// Background collection
+				backgroundCollectionOption,
 				new SeparatorMenuItem(),  // Visual separator
 				// Utilities
 				stageControlOption,
