@@ -8,6 +8,7 @@ import qupath.ext.qpsc.modality.ModalityHandler;
 import qupath.ext.qpsc.modality.ModalityRegistry;
 import qupath.ext.qpsc.service.microscope.MicroscopeSocketClient;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
+import qupath.ext.qpsc.controller.MicroscopeController;
 import qupath.ext.qpsc.ui.UIFunctions;
 import qupath.ext.qpsc.ui.BackgroundCollectionController;
 import qupath.ext.qpsc.utilities.MicroscopeConfigManager;
@@ -105,11 +106,16 @@ public class BackgroundCollectionWorkflow {
         );
         
         CompletableFuture.runAsync(() -> {
-            try (var socketClient = new MicroscopeSocketClient()) {
+            try {
+                // Get socket client from MicroscopeController 
+                MicroscopeSocketClient socketClient = MicroscopeController.getInstance().getSocketClient();
                 
-                // Connect to microscope server
-                socketClient.connect();
-                logger.info("Connected to microscope server for background acquisition");
+                // Ensure connection to microscope server
+                if (!MicroscopeController.getInstance().isConnected()) {
+                    logger.info("Connecting to microscope server for background acquisition");
+                    MicroscopeController.getInstance().connect();
+                }
+                logger.info("Using microscope server connection for background acquisition");
                 
                 // Build background acquisition command
                 String configFileLocation = QPPreferenceDialog.getMicroscopeConfigFileProperty();
