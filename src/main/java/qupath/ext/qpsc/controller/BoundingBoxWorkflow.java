@@ -176,6 +176,17 @@ public class BoundingBoxWorkflow {
                     // 7) Get rotation angles based on modality
                     logger.info("Checking rotation requirements for modality: {}", sample.modality());
                     ModalityHandler modalityHandler = ModalityRegistry.getHandler(sample.modality());
+                    
+                    // Load profile-specific exposure defaults for PPM modality
+                    if ("ppm".equals(sample.modality())) {
+                        try {
+                            qupath.ext.qpsc.modality.ppm.PPMPreferences.loadExposuresForProfile(
+                                    sample.objective(), sample.detector());
+                        } catch (Exception e) {
+                            logger.warn("Failed to load PPM exposure defaults for {}/{}: {}", 
+                                       sample.objective(), sample.detector(), e.getMessage());
+                        }
+                    }
 
                     double finalPixelSize = pixelSize;
                     modalityHandler.getRotationAngles(sample.modality())

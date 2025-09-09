@@ -57,30 +57,9 @@ public class PPMPreferences {
             PathPrefs.createPersistentPreference("PPMUncrossedExposureMs", "10");
 
     static {
-        try {
-            MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(
-                    QPPreferenceDialog.getMicroscopeConfigFileProperty());
-            List<?> angles = mgr.getList("exposures", "ppm_angles");
-            if (angles != null) {
-                for (Object obj : angles) {
-                    if (obj instanceof Map<?, ?> angle) {
-                        Object name = angle.get("name");
-                        Object exposure = angle.get("exposure_ms");
-                        if (name != null && exposure instanceof Number) {
-                            double ms = ((Number) exposure).doubleValue();
-                            switch (name.toString()) {
-                                case "positive" -> plusExposure.set(String.valueOf(ms));
-                                case "negative" -> minusExposure.set(String.valueOf(ms));
-                                case "crossed" -> zeroExposure.set(String.valueOf(ms));
-                                case "uncrossed" -> uncrossedExposure.set(String.valueOf(ms));
-                            }
-                        }
-                    }
-                }
-            }
-        } catch (Exception e) {
-            logger.warn("Could not load default PPM exposures from configuration", e);
-        }
+        // PPM exposure defaults are initialized with fallback values.
+        // Use loadExposuresForProfile() to load profile-specific defaults.
+        logger.debug("PPMPreferences initialized with fallback exposure values");
     }
 
     private PPMPreferences() {}
@@ -179,6 +158,98 @@ public class PPMPreferences {
      */
     public static void setUncrossedExposureMs(double ms) {
         uncrossedExposure.set(String.valueOf(ms));
+    }
+
+    /**
+     * Loads exposure defaults from the configuration for the specified objective/detector combination.
+     * Updates the preference values with the profile-specific exposures if found.
+     * 
+     * @param objective the objective identifier (e.g., "LOCI_OBJECTIVE_OLYMPUS_10X_001")
+     * @param detector the detector identifier (e.g., "LOCI_DETECTOR_JAI_001")
+     * @return true if exposures were loaded successfully, false otherwise
+     */
+    public static boolean loadExposuresForProfile(String objective, String detector) {
+        try {
+            MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(
+                    QPPreferenceDialog.getMicroscopeConfigFileProperty());
+            
+            List<?> profiles = mgr.getList("acq_profiles_new", "profiles");
+            if (profiles == null) {
+                logger.warn("No acquisition profiles found in configuration");
+                return false;
+            }
+
+            // Find matching profile for ppm modality with specified objective/detector
+            for (Object profileObj : profiles) {
+                if (profileObj instanceof Map<?, ?> profile) {
+                    Object modalityObj = profile.get("modality");
+                    Object objectiveObj = profile.get("objective");
+                    Object detectorObj = profile.get("detector");
+                    
+                    if ("ppm".equals(modalityObj) && 
+                        objective.equals(objectiveObj) && 
+                        detector.equals(detectorObj)) {
+                        
+                        // Found matching profile, extract exposures
+                        Object settingsObj = profile.get("settings");
+                        if (settingsObj instanceof Map<?, ?> settings) {
+                            Object exposuresObj = settings.get("exposures_ms");
+                            if (exposuresObj instanceof Map<?, ?> exposures) {
+                                
+                                // Load exposures for each angle
+                                loadExposureForAngle(exposures, "negative", "setMinusExposureMs");
+                                loadExposureForAngle(exposures, "crossed", "setZeroExposureMs");
+                                loadExposureForAngle(exposures, "positive", "setPlusExposureMs");
+                                loadExposureForAngle(exposures, "uncrossed", "setUncrossedExposureMs");
+                                
+                                logger.info("Loaded PPM exposures for {}/{} from configuration", 
+                                           objective, detector);
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+            
+            logger.warn("No PPM profile found for objective {} and detector {}", objective, detector);
+            return false;
+            
+        } catch (Exception e) {
+            logger.warn("Failed to load PPM exposures for {}/{}", objective, detector, e);
+            return false;
+        }
+    }
+    
+    /**
+     * Helper method to extract exposure value for a specific angle and set the corresponding preference.
+     */
+    private static void loadExposureForAngle(Map<?, ?> exposures, String angleName, String setterMethod) {
+        Object exposureObj = exposures.get(angleName);
+        if (exposureObj instanceof Number) {
+            // Simple numeric exposure (for TELEDYNE detector)
+            double ms = ((Number) exposureObj).doubleValue();
+            setExposureValue(setterMethod, ms);
+        } else if (exposureObj instanceof Map<?, ?> exposureMap) {
+            // Complex exposure with 'all' fallback (for JAI detector)
+            Object allObj = exposureMap.get("all");
+            if (allObj instanceof Number) {
+                double ms = ((Number) allObj).doubleValue();
+                setExposureValue(setterMethod, ms);
+            }
+        }
+    }
+    
+    /**
+     * Helper method to call the appropriate setter method by name.
+     */
+    private static void setExposureValue(String setterMethod, double ms) {
+        switch (setterMethod) {
+            case "setMinusExposureMs" -> setMinusExposureMs(ms);
+            case "setZeroExposureMs" -> setZeroExposureMs(ms);
+            case "setPlusExposureMs" -> setPlusExposureMs(ms);
+            case "setUncrossedExposureMs" -> setUncrossedExposureMs(ms);
+            default -> logger.warn("Unknown setter method: {}", setterMethod);
+        }
     }
 }
 
