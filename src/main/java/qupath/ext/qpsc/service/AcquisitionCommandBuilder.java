@@ -226,13 +226,20 @@ public class AcquisitionCommandBuilder {
 
     /**
      * Gets the enhanced scan type that includes magnification from the objective.
-     * If no objective is set or magnification cannot be extracted, returns the original scanType.
+     * If no objective is set, magnification cannot be extracted, or scan type is already enhanced,
+     * returns the original scanType.
      * 
      * @return Enhanced scan type with magnification (e.g., "ppm_20x_1")
      */
     public String getEnhancedScanType() {
         if (objective == null) {
             logger.debug("No objective set, using original scan type: {}", scanType);
+            return scanType;
+        }
+        
+        // Check if scan type is already enhanced (contains magnification pattern like "10x", "20x")
+        if (scanType != null && scanType.matches(".*\\d+x.*")) {
+            logger.debug("Scan type already enhanced, using as-is: {}", scanType);
             return scanType;
         }
         
