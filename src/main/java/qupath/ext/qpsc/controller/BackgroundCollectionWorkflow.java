@@ -122,15 +122,52 @@ public class BackgroundCollectionWorkflow {
                 String configFileLocation = QPPreferenceDialog.getMicroscopeConfigFileProperty();
                 var configManager = MicroscopeConfigManager.getInstance(configFileLocation);
                 
+                // Get default objective and detector for this modality to create proper folder structure
+                Set<String> availableObjectives = configManager.getAvailableObjectivesForModality(modality);
+                String objective = availableObjectives.isEmpty() ? null : availableObjectives.iterator().next();
+                
+                String detector = null;
+                if (objective != null) {
+                    Set<String> availableDetectors = configManager.getAvailableDetectorsForModalityObjective(modality, objective);
+                    detector = availableDetectors.isEmpty() ? null : availableDetectors.iterator().next();
+                }
+                
+                // Create proper background folder structure: base_folder/detector/modality/magnification
+                String finalOutputPath = outputPath;
+                if (objective != null && detector != null) {
+                    // Extract magnification from objective (e.g., "LOCI_OBJECTIVE_OLYMPUS_20X_POL_001" -> "20x")
+                    String magnification = extractMagnificationFromObjective(objective);
+                    finalOutputPath = java.nio.file.Paths.get(outputPath, detector, modality, magnification).toString();
+                    logger.info("Created background folder structure: {}", finalOutputPath);
+                } else {
+                    logger.warn("Could not determine objective/detector for {}, using base output path", modality);
+                }
+                
+                // Create the output directory if it doesn't exist
+                java.io.File outputDir = new java.io.File(finalOutputPath);
+                if (!outputDir.exists() && !outputDir.mkdirs()) {
+                    throw new IOException("Failed to create output directory: " + finalOutputPath);
+                }
+                
                 // Create a simple acquisition builder for background collection
-                // This is a simplified acquisition that saves directly to the output path
                 AcquisitionCommandBuilder acquisitionBuilder = AcquisitionCommandBuilder.builder()
                         .yamlPath(configFileLocation)
-                        .projectsFolder(outputPath) // Use output path as base folder
+                        .projectsFolder(finalOutputPath)
                         .sampleLabel("background_" + modality)
                         .scanType(modality + "_backgrounds")
                         .regionName("single_position")
                         .angleExposures(angleExposures);
+                
+                // Add hardware configuration if available
+                if (objective != null && detector != null) {
+                    try {
+                        double pixelSize = configManager.getModalityPixelSize(modality, objective, detector);
+                        acquisitionBuilder.hardware(objective, detector, pixelSize);
+                        logger.info("Using hardware: obj={}, det={}, px={}µm", objective, detector, pixelSize);
+                    } catch (IllegalArgumentException e) {
+                        logger.warn("Could not get pixel size for {}/{}/{}: {}", modality, objective, detector, e.getMessage());
+                    }
+                }
                 
                 logger.info("Starting background acquisition for modality '{}' with {} angles", modality, angleExposures.size());
                 
@@ -193,4 +230,26 @@ public class BackgroundCollectionWorkflow {
             List<AngleExposure> angleExposures,
             String outputPath
     ) {}
+    
+    /**
+     * Extract magnification from objective identifier.
+     * Examples:
+     * - "LOCI_OBJECTIVE_OLYMPUS_10X_001" -> "10x"
+     * - "LOCI_OBJECTIVE_OLYMPUS_20X_POL_001" -> "20x"
+     * - "LOCI_OBJECTIVE_OLYMPUS_40X_POL_001" -> "40x"
+     */
+    private static String extractMagnificationFromObjective(String objective) {
+        if (objective == null) return "unknown";
+        
+        // Look for pattern like "10X", "20X", "40X"
+        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("(\\d+)X", java.util.regex.Pattern.CASE_INSENSITIVE);
+        java.util.regex.Matcher matcher = pattern.matcher(objective);
+        
+        if (matcher.find()) {
+            return matcher.group(1).toLowerCase() + "x";  // "20X" -> "20x"
+        }
+        
+        // Fallback: return "unknown" if pattern not found
+        return "unknown";
+    }
 }
