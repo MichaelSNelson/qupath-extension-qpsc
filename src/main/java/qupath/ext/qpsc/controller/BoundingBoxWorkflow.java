@@ -93,11 +93,17 @@ public class BoundingBoxWorkflow {
                     QuPathGUI qupathGUI = QPEx.getQuPath();
                     Map<String, Object> pd;
                     try {
+                        // Use enhanced scan type for consistent folder structure
+                        String enhancedModality = ObjectiveUtils.createEnhancedFolderName(
+                                sample.modality(), sample.objective());
+                        logger.info("Using enhanced modality for project: {} -> {}", 
+                                sample.modality(), enhancedModality);
+                        
                         pd = QPProjectFunctions.createAndOpenQuPathProject(
                                 qupathGUI,
                                 projectsFolder,
                                 sample.sampleName(),
-                                sample.modality(),
+                                enhancedModality,
                                 invertX,
                                 invertY
                         );
