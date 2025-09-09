@@ -132,7 +132,7 @@ public class AcquisitionCommandBuilder {
         this.backgroundCorrectionEnabled = enabled;
         this.backgroundCorrectionMethod = method;
         this.backgroundCorrectionFolder = folder;
-        if (enabled) {
+        if (enabled && !processingSteps.contains("background_correction")) {
             processingSteps.add("background_correction");
         }
         return this;
