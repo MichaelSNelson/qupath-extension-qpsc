@@ -207,41 +207,47 @@ public class BackgroundCollectionController {
         }
         
         // Get default angles and exposures
-        List<AngleExposure> defaultExposures = handler.getAnglesAndExposures();
-        currentAngleExposures.addAll(defaultExposures);
-        
-        // Create exposure controls
-        GridPane exposureGrid = new GridPane();
-        exposureGrid.setHgap(10);
-        exposureGrid.setVgap(5);
-        
-        for (int i = 0; i < defaultExposures.size(); i++) {
-            AngleExposure ae = defaultExposures.get(i);
-            
-            Label angleLabel = new Label(String.format("%.1f°:", ae.ticks()));
-            TextField exposureField = new TextField(String.valueOf(ae.exposureMs()));
-            exposureField.setPrefWidth(100);
-            
-            // Update current values when user changes exposure
-            final int index = i;
-            exposureField.textProperty().addListener((obs, oldVal, newVal) -> {
-                try {
-                    double newExposure = Double.parseDouble(newVal);
-                    AngleExposure oldAe = currentAngleExposures.get(index);
-                    currentAngleExposures.set(index, new AngleExposure(oldAe.ticks(), newExposure));
-                } catch (NumberFormatException e) {
-                    // Invalid input, ignore
+        handler.getRotationAngles(modality).thenAccept(defaultExposures -> {
+            Platform.runLater(() -> {
+                // Clear and update current values
+                currentAngleExposures.clear();
+                currentAngleExposures.addAll(defaultExposures);
+                
+                // Create exposure controls
+                GridPane exposureGrid = new GridPane();
+                exposureGrid.setHgap(10);
+                exposureGrid.setVgap(5);
+                
+                for (int i = 0; i < defaultExposures.size(); i++) {
+                    AngleExposure ae = defaultExposures.get(i);
+                    
+                    Label angleLabel = new Label(String.format("%.1f°:", ae.ticks()));
+                    TextField exposureField = new TextField(String.valueOf(ae.exposureMs()));
+                    exposureField.setPrefWidth(100);
+                    
+                    // Update current values when user changes exposure
+                    final int index = i;
+                    exposureField.textProperty().addListener((obs, oldVal, newVal) -> {
+                        try {
+                            double newExposure = Double.parseDouble(newVal);
+                            AngleExposure oldAe = currentAngleExposures.get(index);
+                            currentAngleExposures.set(index, new AngleExposure(oldAe.ticks(), newExposure));
+                        } catch (NumberFormatException e) {
+                            // Invalid input, ignore
+                        }
+                    });
+                    
+                    exposureGrid.add(angleLabel, 0, i);
+                    exposureGrid.add(exposureField, 1, i);
+                    exposureGrid.add(new Label("ms"), 2, i);
+                    
+                    exposureFields.add(exposureField);
                 }
+                
+                // Add the grid to the exposure controls pane
+                exposureControlsPane.getChildren().add(exposureGrid);
             });
-            
-            exposureGrid.add(angleLabel, 0, i);
-            exposureGrid.add(exposureField, 1, i);
-            exposureGrid.add(new Label("ms"), 2, i);
-            
-            exposureFields.add(exposureField);
-        }
-        
-        exposureControlsPane.getChildren().add(exposureGrid);
+        });
     }
     
     private void browseForOutputFolder() {
