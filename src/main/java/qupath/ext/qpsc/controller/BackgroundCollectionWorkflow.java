@@ -19,6 +19,7 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -100,13 +101,18 @@ public class BackgroundCollectionWorkflow {
         
         // Create progress counter and show progress bar
         AtomicInteger progressCounter = new AtomicInteger(0);
-        UIFunctions.ProgressHandle progressHandle = UIFunctions.showProgressBarAsync(
-                progressCounter,
-                angleExposures.size(),
-                300000, // 5 minute timeout
-                false   // No cancel button for background collection
-        );
+        // Temporarily disable progress bar to test if it's blocking execution
+        // UIFunctions.ProgressHandle progressHandle = UIFunctions.showProgressBarAsync(
+        //         progressCounter,
+        //         angleExposures.size(),
+        //         300000, // 5 minute timeout
+        //         false   // No cancel button for background collection
+        // );
+        UIFunctions.ProgressHandle progressHandle = null; // Temporary fix
         
+        logger.info("Creating background acquisition CompletableFuture");
+        // Use explicit executor to avoid common pool issues
+        var executor = Executors.newSingleThreadExecutor();
         CompletableFuture<Void> acquisitionFuture = CompletableFuture.runAsync(() -> {
             try {
                 logger.info("Starting background acquisition async task");
@@ -212,7 +218,7 @@ public class BackgroundCollectionWorkflow {
                 if (finalState == MicroscopeSocketClient.AcquisitionState.COMPLETED) {
                     logger.info("Background acquisition completed successfully");
                     Platform.runLater(() -> {
-                        progressHandle.close();
+                        if (progressHandle != null) progressHandle.close();
                         Dialogs.showInfoNotification("Background Collection Complete", 
                                 String.format("Successfully acquired %d background images for %s modality", 
                                         angleExposures.size(), modality));
@@ -220,7 +226,7 @@ public class BackgroundCollectionWorkflow {
                 } else if (finalState == MicroscopeSocketClient.AcquisitionState.CANCELLED) {
                     logger.warn("Background acquisition was cancelled");
                     Platform.runLater(() -> {
-                        progressHandle.close();
+                        if (progressHandle != null) progressHandle.close();
                         Dialogs.showInfoNotification("Background Collection Cancelled",
                                 "Background acquisition was cancelled by user request");
                     });
@@ -233,7 +239,7 @@ public class BackgroundCollectionWorkflow {
             } catch (Exception e) {
                 logger.error("Background acquisition failed", e);
                 Platform.runLater(() -> {
-                    progressHandle.close();
+                    if (progressHandle != null) progressHandle.close();
                     Dialogs.showErrorMessage("Background Acquisition Failed", 
                             "Failed to acquire background images: " + e.getMessage());
                 });
@@ -244,7 +250,7 @@ public class BackgroundCollectionWorkflow {
         acquisitionFuture.exceptionally(ex -> {
             logger.error("CompletableFuture execution failed", ex);
             Platform.runLater(() -> {
-                progressHandle.close();
+                if (progressHandle != null) progressHandle.close();
                 Dialogs.showErrorMessage("Background Acquisition Error", 
                         "Failed to start background acquisition: " + ex.getMessage());
             });
