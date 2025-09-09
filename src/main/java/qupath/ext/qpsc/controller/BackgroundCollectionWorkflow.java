@@ -109,29 +109,40 @@ public class BackgroundCollectionWorkflow {
         
         CompletableFuture.runAsync(() -> {
             try {
+                logger.info("Starting background acquisition async task");
+                
                 // Get socket client from MicroscopeController 
                 MicroscopeSocketClient socketClient = MicroscopeController.getInstance().getSocketClient();
+                logger.info("Retrieved socket client from MicroscopeController");
                 
                 // Ensure connection to microscope server
                 if (!MicroscopeController.getInstance().isConnected()) {
                     logger.info("Connecting to microscope server for background acquisition");
                     MicroscopeController.getInstance().connect();
+                    logger.info("Connection attempt completed");
+                } else {
+                    logger.info("Already connected to microscope server");
                 }
                 logger.info("Using microscope server connection for background acquisition");
                 
                 // Build background acquisition command using AcquisitionCommandBuilder
                 String configFileLocation = QPPreferenceDialog.getMicroscopeConfigFileProperty();
+                logger.info("Using config file: {}", configFileLocation);
                 var configManager = MicroscopeConfigManager.getInstance(configFileLocation);
+                logger.info("Retrieved config manager");
                 
                 // Get default objective and detector for this modality to create proper folder structure
                 Set<String> availableObjectives = configManager.getAvailableObjectivesForModality(modality);
+                logger.info("Available objectives for {}: {}", modality, availableObjectives);
                 String objective = availableObjectives.isEmpty() ? null : availableObjectives.iterator().next();
                 
                 String detector = null;
                 if (objective != null) {
                     Set<String> availableDetectors = configManager.getAvailableDetectorsForModalityObjective(modality, objective);
+                    logger.info("Available detectors for {}/{}: {}", modality, objective, availableDetectors);
                     detector = availableDetectors.isEmpty() ? null : availableDetectors.iterator().next();
                 }
+                logger.info("Selected hardware: objective={}, detector={}", objective, detector);
                 
                 // Create proper background folder structure: base_folder/detector/modality/magnification
                 String finalOutputPath = outputPath;
@@ -146,11 +157,14 @@ public class BackgroundCollectionWorkflow {
                 
                 // Create the output directory if it doesn't exist
                 java.io.File outputDir = new java.io.File(finalOutputPath);
+                logger.info("Creating output directory: {}", finalOutputPath);
                 if (!outputDir.exists() && !outputDir.mkdirs()) {
                     throw new IOException("Failed to create output directory: " + finalOutputPath);
                 }
+                logger.info("Output directory ready: {}", finalOutputPath);
                 
                 // Create a simple acquisition builder for background collection
+                logger.info("Building acquisition command with {} angles", angleExposures.size());
                 AcquisitionCommandBuilder acquisitionBuilder = AcquisitionCommandBuilder.builder()
                         .yamlPath(configFileLocation)
                         .projectsFolder(finalOutputPath)
@@ -158,6 +172,7 @@ public class BackgroundCollectionWorkflow {
                         .scanType(modality + "_backgrounds")
                         .regionName("single_position")
                         .angleExposures(angleExposures);
+                logger.info("Acquisition builder created");
                 
                 // Add hardware configuration if available
                 if (objective != null && detector != null) {
@@ -173,10 +188,13 @@ public class BackgroundCollectionWorkflow {
                 logger.info("Starting background acquisition for modality '{}' with {} angles", modality, angleExposures.size());
                 
                 // Start acquisition via MicroscopeController
+                logger.info("Sending acquisition command to MicroscopeController");
                 MicroscopeController.getInstance().startAcquisition(acquisitionBuilder);
+                logger.info("Acquisition command sent, waiting for server response");
                 
                 // Wait a moment for the server to process the acquisition command
                 Thread.sleep(1000);
+                logger.info("Starting acquisition monitoring");
                 
                 // Monitor acquisition with progress updates
                 MicroscopeSocketClient.AcquisitionState finalState =
