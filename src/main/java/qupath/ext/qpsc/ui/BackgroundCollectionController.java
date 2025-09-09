@@ -44,6 +44,7 @@ public class BackgroundCollectionController {
     private static final Logger logger = LoggerFactory.getLogger(BackgroundCollectionController.class);
     
     private ComboBox<String> modalityComboBox;
+    private ComboBox<String> objectiveComboBox;
     private TextField outputPathField;
     private VBox exposureControlsPane;
     private List<AngleExposure> currentAngleExposures = new ArrayList<>();
@@ -84,16 +85,29 @@ public class BackgroundCollectionController {
                 Button okButton = (Button) dialog.getDialogPane().lookupButton(okButtonType);
                 okButton.setDisable(true);
                 
-                // Enable OK when valid modality is selected
+                // Enable OK when valid modality and objective are selected
                 modalityComboBox.valueProperty().addListener((obs, oldVal, newVal) -> {
-                    okButton.setDisable(newVal == null || outputPathField.getText().trim().isEmpty());
+                    boolean isValid = newVal != null && objectiveComboBox.getValue() != null && !outputPathField.getText().trim().isEmpty();
+                    okButton.setDisable(!isValid);
                     if (newVal != null) {
+                        updateObjectiveSelection(newVal);
                         updateExposureControls(newVal);
+                    } else {
+                        // Clear objectives when modality is cleared
+                        objectiveComboBox.getItems().clear();
+                        objectiveComboBox.setDisable(true);
                     }
                 });
                 
+                // Add objective change listener
+                objectiveComboBox.valueProperty().addListener((obs, oldVal, newVal) -> {
+                    boolean isValid = modalityComboBox.getValue() != null && newVal != null && !outputPathField.getText().trim().isEmpty();
+                    okButton.setDisable(!isValid);
+                });
+                
                 outputPathField.textProperty().addListener((obs, oldVal, newVal) -> {
-                    okButton.setDisable(modalityComboBox.getValue() == null || newVal.trim().isEmpty());
+                    boolean isValid = modalityComboBox.getValue() != null && objectiveComboBox.getValue() != null && !newVal.trim().isEmpty();
+                    okButton.setDisable(!isValid);
                 });
                 
                 // Set result converter
@@ -160,6 +174,15 @@ public class BackgroundCollectionController {
         modalityPane.add(modalityLabel, 0, 0);
         modalityPane.add(modalityComboBox, 1, 0);
         
+        // Objective selection
+        Label objectiveLabel = new Label("Objective:");
+        objectiveComboBox = new ComboBox<>();
+        objectiveComboBox.setPromptText("Select objective...");
+        objectiveComboBox.setDisable(true); // Disabled until modality is selected
+        
+        modalityPane.add(objectiveLabel, 0, 1);
+        modalityPane.add(objectiveComboBox, 1, 1);
+        
         // Output path selection
         Label outputLabel = new Label("Output folder:");
         outputPathField = new TextField();
@@ -172,8 +195,8 @@ public class BackgroundCollectionController {
         HBox outputPane = new HBox(10, outputPathField, browseButton);
         outputPane.setAlignment(Pos.CENTER_LEFT);
         
-        modalityPane.add(outputLabel, 0, 1);
-        modalityPane.add(outputPane, 1, 1);
+        modalityPane.add(outputLabel, 0, 2);
+        modalityPane.add(outputPane, 1, 2);
         
         // Set default output path
         setDefaultOutputPath();
@@ -267,6 +290,30 @@ public class BackgroundCollectionController {
         });
     }
     
+    private void updateObjectiveSelection(String modality) {
+        logger.info("Updating objective selection for modality: {}", modality);
+        
+        objectiveComboBox.getItems().clear();
+        
+        try {
+            String configPath = qupath.ext.qpsc.preferences.QPPreferenceDialog.getMicroscopeConfigFileProperty();
+            MicroscopeConfigManager configManager = MicroscopeConfigManager.getInstance(configPath);
+            Set<String> availableObjectives = configManager.getAvailableObjectivesForModality(modality);
+            
+            if (!availableObjectives.isEmpty()) {
+                objectiveComboBox.getItems().addAll(availableObjectives);
+                objectiveComboBox.setDisable(false);
+                logger.info("Loaded {} objectives for modality {}", availableObjectives.size(), modality);
+            } else {
+                logger.warn("No objectives found for modality: {}", modality);
+                objectiveComboBox.setDisable(true);
+            }
+        } catch (Exception e) {
+            logger.error("Failed to load objectives for modality: {}", modality, e);
+            objectiveComboBox.setDisable(true);
+        }
+    }
+    
     private void browseForOutputFolder() {
         DirectoryChooser chooser = new DirectoryChooser();
         chooser.setTitle("Select Background Images Output Folder");
@@ -318,9 +365,10 @@ public class BackgroundCollectionController {
     private BackgroundCollectionResult createResult() {
         try {
             String modality = modalityComboBox.getValue();
+            String objective = objectiveComboBox.getValue();
             String outputPath = outputPathField.getText().trim();
             
-            if (modality == null || outputPath.isEmpty()) {
+            if (modality == null || objective == null || outputPath.isEmpty()) {
                 return null;
             }
             
@@ -338,7 +386,7 @@ public class BackgroundCollectionController {
                 }
             }
             
-            return new BackgroundCollectionResult(modality, finalExposures, outputPath);
+            return new BackgroundCollectionResult(modality, objective, finalExposures, outputPath);
             
         } catch (Exception e) {
             logger.error("Error creating result", e);

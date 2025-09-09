@@ -65,7 +65,7 @@ public class BackgroundCollectionWorkflow {
                                     result.modality(), result.angleExposures().size());
                             
                             // Execute background acquisition
-                            executeBackgroundAcquisition(result.modality(), result.angleExposures(), 
+                            executeBackgroundAcquisition(result.modality(), result.objective(), result.angleExposures(), 
                                     result.outputPath());
                         } else {
                             logger.info("Background collection cancelled by user");
@@ -90,10 +90,11 @@ public class BackgroundCollectionWorkflow {
      * Executes the background acquisition process via socket communication.
      * 
      * @param modality The modality (e.g., "ppm")
+     * @param objective The selected objective
      * @param angleExposures List of angle-exposure pairs
      * @param outputPath Base output path for background images
      */
-    private static void executeBackgroundAcquisition(String modality, List<AngleExposure> angleExposures, 
+    private static void executeBackgroundAcquisition(String modality, String objective, List<AngleExposure> angleExposures, 
             String outputPath) {
         
         logger.info("Executing background acquisition for modality '{}' with {} angles", 
@@ -137,10 +138,8 @@ public class BackgroundCollectionWorkflow {
                 var configManager = MicroscopeConfigManager.getInstance(configFileLocation);
                 logger.info("Retrieved config manager");
                 
-                // Get default objective and detector for this modality to create proper folder structure
-                Set<String> availableObjectives = configManager.getAvailableObjectivesForModality(modality);
-                logger.info("Available objectives for {}: {}", modality, availableObjectives);
-                String objective = availableObjectives.isEmpty() ? null : availableObjectives.iterator().next();
+                // Use the user-selected objective
+                logger.info("Using user-selected objective: {}", objective);
                 
                 String detector = null;
                 if (objective != null) {
@@ -175,10 +174,13 @@ public class BackgroundCollectionWorkflow {
                         .yamlPath(configFileLocation)
                         .projectsFolder(finalOutputPath)
                         .sampleLabel("background_" + modality)
-                        .scanType(modality + "_backgrounds")
+                        .scanType(modality)  // Use base modality to avoid TileConfiguration.txt requirement
                         .regionName("single_position")
-                        .angleExposures(angleExposures);
-                logger.info("Acquisition builder created");
+                        .angleExposures(angleExposures)
+                        // CRITICAL: Disable all processing for background collection - we need RAW images
+                        .backgroundCorrection(false, null, null)  // No background correction
+                        .whiteBalance(false);  // No white balance - RAW images only
+                logger.info("Acquisition builder created with RAW processing disabled");
                 
                 // Add hardware configuration if available
                 if (objective != null && detector != null) {
@@ -263,6 +265,7 @@ public class BackgroundCollectionWorkflow {
      */
     public record BackgroundCollectionResult(
             String modality,
+            String objective,
             List<AngleExposure> angleExposures,
             String outputPath
     ) {}
