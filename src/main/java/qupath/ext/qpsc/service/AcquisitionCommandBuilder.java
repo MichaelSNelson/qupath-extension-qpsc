@@ -3,6 +3,7 @@ package qupath.ext.qpsc.service;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qupath.ext.qpsc.modality.AngleExposure;
+import qupath.ext.qpsc.utilities.ObjectiveUtils;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -34,6 +35,9 @@ public class AcquisitionCommandBuilder {
     private boolean backgroundCorrectionEnabled = false;
     private String backgroundCorrectionMethod;
     private String backgroundCorrectionFolder;
+
+    // White balance parameters
+    private boolean whiteBalanceEnabled = true; // Default enabled for backward compatibility
 
     // Autofocus parameters
     private Integer autofocusNTiles;
@@ -135,6 +139,18 @@ public class AcquisitionCommandBuilder {
     }
 
     /**
+     * Configure white balance
+     * @param enabled Whether white balance is enabled
+     */
+    public AcquisitionCommandBuilder whiteBalance(boolean enabled) {
+        this.whiteBalanceEnabled = enabled;
+        if (enabled && !processingSteps.contains("white_balance")) {
+            processingSteps.add("white_balance");
+        }
+        return this;
+    }
+
+    /**
      * Configure autofocus parameters
      * @param nTiles Number of tiles for autofocus grid
      * @param nSteps Number of Z steps for focus search
@@ -209,6 +225,21 @@ public class AcquisitionCommandBuilder {
     }
 
     /**
+     * Gets the enhanced scan type that includes magnification from the objective.
+     * If no objective is set or magnification cannot be extracted, returns the original scanType.
+     * 
+     * @return Enhanced scan type with magnification (e.g., "ppm_20x_1")
+     */
+    public String getEnhancedScanType() {
+        if (objective == null) {
+            logger.debug("No objective set, using original scan type: {}", scanType);
+            return scanType;
+        }
+        
+        return ObjectiveUtils.createEnhancedFolderName(scanType, objective);
+    }
+
+    /**
      * Validates that all required parameters are set
      */
     private void validate() {
@@ -234,12 +265,13 @@ public class AcquisitionCommandBuilder {
 
         List<String> args = new ArrayList<>();
 
-        // Add required parameters with flags
+        // Add required parameters with flags (use enhanced scan type with magnification)
+        String enhancedScanType = getEnhancedScanType();
         args.addAll(Arrays.asList(
                 "--yaml", yamlPath,
                 "--projects", projectsFolder,
                 "--sample", sampleLabel,
-                "--scan-type", scanType,
+                "--scan-type", enhancedScanType,
                 "--region", regionName
         ));
 
@@ -279,6 +311,9 @@ public class AcquisitionCommandBuilder {
                 args.addAll(Arrays.asList("--bg-folder", backgroundCorrectionFolder));
             }
         }
+
+        // Add white balance parameter
+        args.addAll(Arrays.asList("--white-balance", String.valueOf(whiteBalanceEnabled)));
 
         // Add autofocus parameters
         if (autofocusNTiles != null && autofocusNSteps != null && autofocusSearchRange != null) {
