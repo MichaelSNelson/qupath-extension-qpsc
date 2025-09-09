@@ -168,19 +168,19 @@ public class BackgroundCollectionWorkflow {
                 }
                 logger.info("Output directory ready: {}", finalOutputPath);
                 
-                // Create a simple acquisition builder for background collection
-                logger.info("Building acquisition command with {} angles", angleExposures.size());
+                // Build background acquisition command using AcquisitionCommandBuilder
+                logger.info("Building background acquisition command with {} angles", angleExposures.size());
                 AcquisitionCommandBuilder acquisitionBuilder = AcquisitionCommandBuilder.builder()
                         .yamlPath(configFileLocation)
                         .projectsFolder(finalOutputPath)
                         .sampleLabel("background_" + modality)
-                        .scanType(modality)  // Use base modality to avoid TileConfiguration.txt requirement
+                        .scanType(modality)
                         .regionName("single_position")
                         .angleExposures(angleExposures)
                         // CRITICAL: Disable all processing for background collection - we need RAW images
                         .backgroundCorrection(false, null, null)  // No background correction
                         .whiteBalance(false);  // No white balance - RAW images only
-                logger.info("Acquisition builder created with RAW processing disabled");
+                logger.info("Background acquisition builder created with RAW processing disabled");
                 
                 // Add hardware configuration if available
                 if (objective != null && detector != null) {
@@ -195,14 +195,10 @@ public class BackgroundCollectionWorkflow {
                 
                 logger.info("Starting background acquisition for modality '{}' with {} angles", modality, angleExposures.size());
                 
-                // Start acquisition via MicroscopeController
-                logger.info("Sending acquisition command to MicroscopeController");
-                MicroscopeController.getInstance().startAcquisition(acquisitionBuilder);
-                logger.info("Acquisition command sent, waiting for server response");
-                
-                // Wait a moment for the server to process the acquisition command
-                Thread.sleep(1000);
-                logger.info("Starting acquisition monitoring");
+                // Send BGACQUIRE command via MicroscopeSocketClient
+                logger.info("Sending BGACQUIRE command to server");
+                socketClient.startBackgroundAcquisition(acquisitionBuilder);
+                logger.info("Background acquisition command sent, monitoring progress");
                 
                 // Monitor acquisition with progress updates
                 MicroscopeSocketClient.AcquisitionState finalState =

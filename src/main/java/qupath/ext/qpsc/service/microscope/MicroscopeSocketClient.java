@@ -100,6 +100,8 @@ public class MicroscopeSocketClient implements AutoCloseable {
         DISCONNECT("quitclnt"),
         /** Start acquisition */
         ACQUIRE("acquire_"),
+        /** Background acquisition */
+        BGACQUIRE("bgacquir"),
         /** Get acquisition status */
         STATUS("status__"),
         /** Get acquisition progress */
@@ -426,6 +428,52 @@ public class MicroscopeSocketClient implements AutoCloseable {
             } catch (IOException | InterruptedException e) {
                 handleIOException(new IOException("Failed to send acquisition command", e));
                 throw new IOException("Failed to send acquisition command", e);
+            }
+        }
+    }
+
+    /**
+     * Starts a background acquisition workflow on the server for flat field correction.
+     * This method uses the BGACQUIRE command to acquire raw background images at the
+     * current microscope position without tile configuration or processing.
+     *
+     * @param builder Pre-configured acquisition command builder with background parameters
+     * @throws IOException if communication fails
+     */
+    public void startBackgroundAcquisition(AcquisitionCommandBuilder builder) throws IOException {
+        String message = builder.buildSocketMessage() + " END_MARKER";
+        byte[] messageBytes = message.getBytes(StandardCharsets.UTF_8);
+
+        logger.info("Sending background acquisition command:");
+        logger.info("  Message length: {} bytes", messageBytes.length);
+        logger.info("  Message content: {}", message);
+
+        synchronized (socketLock) {
+            ensureConnected();
+
+            try {
+                // Send BGACQUIRE command (8 bytes)
+                output.write(Command.BGACQUIRE.getValue());
+                output.flush();
+                logger.debug("Sent BGACQUIRE command (8 bytes)");
+
+                // Small delay to ensure command is processed
+                Thread.sleep(50);
+
+                // Send message
+                output.write(messageBytes);
+                output.flush();
+                logger.debug("Sent background acquisition message ({} bytes)", messageBytes.length);
+
+                // Ensure all data is sent
+                output.flush();
+
+                lastActivityTime.set(System.currentTimeMillis());
+                logger.info("Background acquisition command sent successfully");
+
+            } catch (IOException | InterruptedException e) {
+                handleIOException(new IOException("Failed to send background acquisition command", e));
+                throw new IOException("Failed to send background acquisition command", e);
             }
         }
     }
