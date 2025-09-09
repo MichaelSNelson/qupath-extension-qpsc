@@ -141,7 +141,17 @@ public class BackgroundCollectionController {
         
         Label modalityLabel = new Label("Modality:");
         modalityComboBox = new ComboBox<>();
-        modalityComboBox.getItems().addAll(ModalityRegistry.getInstance().getRegisteredPrefixes());
+        // Get available modalities from configuration
+        try {
+            String configPath = qupath.ext.qpsc.preferences.QPPreferenceDialog.getMicroscopeConfigFileProperty();
+            MicroscopeConfigManager configManager = MicroscopeConfigManager.getInstance(configPath);
+            Set<String> availableModalities = configManager.getAvailableModalities();
+            modalityComboBox.getItems().addAll(availableModalities);
+        } catch (Exception e) {
+            logger.error("Failed to load available modalities", e);
+            // Fallback to common modality names
+            modalityComboBox.getItems().addAll("ppm", "brightfield", "fluorescence");
+        }
         modalityComboBox.setPromptText("Select modality...");
         
         modalityPane.add(modalityLabel, 0, 0);
@@ -257,13 +267,21 @@ public class BackgroundCollectionController {
     private void setDefaultOutputPath() {
         // Try to get default background folder from config or preferences
         try {
-            var configManager = MicroscopeConfigManager.getInstance();
-            var config = configManager.getConfig();
+            String configPath = qupath.ext.qpsc.preferences.QPPreferenceDialog.getMicroscopeConfigFileProperty();
+            var configManager = MicroscopeConfigManager.getInstance(configPath);
             
-            // Look for background_tiles folder path in config
-            String defaultPath = configManager.lookupPath("background_correction.base_folder")
-                    .map(Object::toString)
-                    .orElse("C:/qpsc_data/background_tiles");
+            // Look for default background folder in modality configuration
+            // Use the first available modality to get a default base folder
+            Set<String> modalities = configManager.getAvailableModalities();
+            String defaultPath = "C:/qpsc_data/background_tiles"; // fallback
+            
+            if (!modalities.isEmpty()) {
+                String firstModality = modalities.iterator().next();
+                String bgFolder = configManager.getBackgroundCorrectionFolder(firstModality);
+                if (bgFolder != null) {
+                    defaultPath = bgFolder;
+                }
+            }
             
             outputPathField.setText(defaultPath);
             
