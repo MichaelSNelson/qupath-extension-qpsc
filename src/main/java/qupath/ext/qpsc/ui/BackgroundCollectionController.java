@@ -72,7 +72,9 @@ public class BackgroundCollectionController {
                 // Create UI
                 VBox content = createDialogContent();
                 dialog.getDialogPane().setContent(content);
-                dialog.getDialogPane().setPrefWidth(500);
+                dialog.getDialogPane().setPrefWidth(600);
+                dialog.getDialogPane().setPrefHeight(500);
+                dialog.setResizable(true);
                 
                 // Add buttons
                 ButtonType okButtonType = new ButtonType("Acquire Backgrounds", ButtonBar.ButtonData.OK_DONE);
@@ -195,6 +197,7 @@ public class BackgroundCollectionController {
     private void updateExposureControls(String modality) {
         logger.info("Updating exposure controls for modality: {}", modality);
         
+        logger.debug("Clearing existing exposure controls");
         exposureControlsPane.getChildren().clear();
         exposureFields.clear();
         currentAngleExposures.clear();
@@ -207,8 +210,11 @@ public class BackgroundCollectionController {
         }
         
         // Get default angles and exposures
+        logger.debug("Requesting rotation angles for modality: {}", modality);
         handler.getRotationAngles(modality).thenAccept(defaultExposures -> {
             Platform.runLater(() -> {
+                logger.debug("Creating exposure controls for {} angles", defaultExposures.size());
+                
                 // Clear and update current values
                 currentAngleExposures.clear();
                 currentAngleExposures.addAll(defaultExposures);
@@ -230,8 +236,10 @@ public class BackgroundCollectionController {
                     exposureField.textProperty().addListener((obs, oldVal, newVal) -> {
                         try {
                             double newExposure = Double.parseDouble(newVal);
-                            AngleExposure oldAe = currentAngleExposures.get(index);
-                            currentAngleExposures.set(index, new AngleExposure(oldAe.ticks(), newExposure));
+                            if (index < currentAngleExposures.size()) {
+                                AngleExposure oldAe = currentAngleExposures.get(index);
+                                currentAngleExposures.set(index, new AngleExposure(oldAe.ticks(), newExposure));
+                            }
                         } catch (NumberFormatException e) {
                             // Invalid input, ignore
                         }
@@ -246,7 +254,16 @@ public class BackgroundCollectionController {
                 
                 // Add the grid to the exposure controls pane
                 exposureControlsPane.getChildren().add(exposureGrid);
+                logger.debug("Exposure controls added to dialog");
             });
+        }).exceptionally(ex -> {
+            logger.error("Failed to get rotation angles for modality: {}", modality, ex);
+            Platform.runLater(() -> {
+                Label errorLabel = new Label("Failed to load exposure settings for " + modality);
+                errorLabel.setStyle("-fx-text-fill: red;");
+                exposureControlsPane.getChildren().add(errorLabel);
+            });
+            return null;
         });
     }
     
