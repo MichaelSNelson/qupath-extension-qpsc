@@ -9,6 +9,7 @@ import qupath.ext.qpsc.modality.ModalityRegistry;
 import qupath.ext.qpsc.service.microscope.MicroscopeSocketClient;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.controller.MicroscopeController;
+import qupath.ext.qpsc.service.AcquisitionCommandBuilder;
 import qupath.ext.qpsc.ui.UIFunctions;
 import qupath.ext.qpsc.ui.BackgroundCollectionController;
 import qupath.ext.qpsc.utilities.MicroscopeConfigManager;
@@ -117,46 +118,61 @@ public class BackgroundCollectionWorkflow {
                 }
                 logger.info("Using microscope server connection for background acquisition");
                 
-                // Build background acquisition command
+                // Build background acquisition command using AcquisitionCommandBuilder
                 String configFileLocation = QPPreferenceDialog.getMicroscopeConfigFileProperty();
                 var configManager = MicroscopeConfigManager.getInstance(configFileLocation);
-                String yamlPath = configFileLocation;
                 
-                // Format angles and exposures for Python
-                var angles = angleExposures.stream()
-                        .map(ae -> String.valueOf(ae.ticks()))
-                        .collect(java.util.stream.Collectors.joining(",", "(", ")"));
-                        
-                var exposures = angleExposures.stream()
-                        .map(ae -> String.valueOf(ae.exposureMs()))
-                        .collect(java.util.stream.Collectors.joining(",", "(", ")"));
+                // Create a simple acquisition builder for background collection
+                // This is a simplified acquisition that saves directly to the output path
+                AcquisitionCommandBuilder acquisitionBuilder = AcquisitionCommandBuilder.builder()
+                        .yamlPath(configFileLocation)
+                        .projectsFolder(outputPath) // Use output path as base folder
+                        .sampleLabel("background_" + modality)
+                        .scanType(modality + "_backgrounds")
+                        .regionName("single_position")
+                        .angleExposures(angleExposures);
                 
-                // Send background acquisition command to Python using BGACQUIRE
-                String command = String.format(
-                        "--yaml %s --output %s --modality %s --angles %s --exposures %s",
-                        yamlPath, outputPath, modality, angles, exposures
-                );
+                logger.info("Starting background acquisition for modality '{}' with {} angles", modality, angleExposures.size());
                 
-                logger.info("Sending background acquisition command: {}", command);
+                // Start acquisition via MicroscopeController
+                MicroscopeController.getInstance().startAcquisition(acquisitionBuilder);
                 
-                // Send BGACQUIRE command followed by the message with END_MARKER
-                socketClient.sendExtendedCommand("BGACQUIRE");
-                socketClient.sendMessage(command + " END_MARKER");
+                // Wait a moment for the server to process the acquisition command
+                Thread.sleep(1000);
                 
-                // Monitor progress
-                socketClient.monitorProgress((current, total) -> {
-                    progressCounter.set(current);
-                    logger.debug("Background collection progress: {}/{}", current, total);
-                }, () -> false); // No cancellation for now
+                // Monitor acquisition with progress updates
+                MicroscopeSocketClient.AcquisitionState finalState =
+                        socketClient.monitorAcquisition(
+                                // Progress callback - update the progress counter
+                                progress -> {
+                                    logger.debug("Background collection progress: {}", progress);
+                                    progressCounter.set(progress.current);
+                                },
+                                500,    // Poll every 500ms
+                                300000  // 5 minute timeout
+                        );
                 
-                logger.info("Background acquisition completed successfully");
-                
-                Platform.runLater(() -> {
-                    progressHandle.close();
-                    Dialogs.showInfoNotification("Background Collection Complete", 
-                            String.format("Successfully acquired %d background images for %s modality", 
-                                    angleExposures.size(), modality));
-                });
+                // Check final state
+                if (finalState == MicroscopeSocketClient.AcquisitionState.COMPLETED) {
+                    logger.info("Background acquisition completed successfully");
+                    Platform.runLater(() -> {
+                        progressHandle.close();
+                        Dialogs.showInfoNotification("Background Collection Complete", 
+                                String.format("Successfully acquired %d background images for %s modality", 
+                                        angleExposures.size(), modality));
+                    });
+                } else if (finalState == MicroscopeSocketClient.AcquisitionState.CANCELLED) {
+                    logger.warn("Background acquisition was cancelled");
+                    Platform.runLater(() -> {
+                        progressHandle.close();
+                        Dialogs.showInfoNotification("Background Collection Cancelled",
+                                "Background acquisition was cancelled by user request");
+                    });
+                } else if (finalState == MicroscopeSocketClient.AcquisitionState.FAILED) {
+                    throw new RuntimeException("Background acquisition failed on server");
+                } else {
+                    logger.warn("Background acquisition ended in unexpected state: {}", finalState);
+                }
                 
             } catch (Exception e) {
                 logger.error("Background acquisition failed", e);
