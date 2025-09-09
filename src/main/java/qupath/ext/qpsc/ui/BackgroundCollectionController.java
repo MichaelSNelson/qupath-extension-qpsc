@@ -25,6 +25,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -199,7 +200,7 @@ public class BackgroundCollectionController {
         currentAngleExposures.clear();
         
         // Get modality handler
-        ModalityHandler handler = ModalityRegistry.getInstance().getHandler(modality);
+        ModalityHandler handler = ModalityRegistry.getHandler(modality);
         if (handler == null) {
             logger.warn("No handler found for modality: {}", modality);
             return;
@@ -330,7 +331,8 @@ public class BackgroundCollectionController {
         try {
             logger.info("Saving exposure changes to config for modality: {}", modality);
             
-            var configManager = MicroscopeConfigManager.getInstance();
+            String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
+            var configManager = MicroscopeConfigManager.getInstance(configPath);
             
             // TODO: Implement exposure time persistence to YAML config
             // This will require updating the MicroscopeConfigManager to support writing values back
