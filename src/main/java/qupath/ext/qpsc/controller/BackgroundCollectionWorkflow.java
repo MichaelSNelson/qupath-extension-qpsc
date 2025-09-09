@@ -168,36 +168,24 @@ public class BackgroundCollectionWorkflow {
                 }
                 logger.info("Output directory ready: {}", finalOutputPath);
                 
-                // Build background acquisition command using AcquisitionCommandBuilder
-                logger.info("Building background acquisition command with {} angles", angleExposures.size());
-                AcquisitionCommandBuilder acquisitionBuilder = AcquisitionCommandBuilder.builder()
-                        .yamlPath(configFileLocation)
-                        .projectsFolder(finalOutputPath)
-                        .sampleLabel("background_" + modality)
-                        .scanType(modality)
-                        .regionName("single_position")
-                        .angleExposures(angleExposures)
-                        // CRITICAL: Disable all processing for background collection - we need RAW images
-                        .backgroundCorrection(false, null, null)  // No background correction
-                        .whiteBalance(false);  // No white balance - RAW images only
-                logger.info("Background acquisition builder created with RAW processing disabled");
+                // Build BGACQUIRE-specific command parameters (different from regular acquisition)
+                logger.info("Building BGACQUIRE command with {} angles", angleExposures.size());
                 
-                // Add hardware configuration if available
-                if (objective != null && detector != null) {
-                    try {
-                        double pixelSize = configManager.getModalityPixelSize(modality, objective, detector);
-                        acquisitionBuilder.hardware(objective, detector, pixelSize);
-                        logger.info("Using hardware: obj={}, det={}, px={}µm", objective, detector, pixelSize);
-                    } catch (IllegalArgumentException e) {
-                        logger.warn("Could not get pixel size for {}/{}/{}: {}", modality, objective, detector, e.getMessage());
-                    }
-                }
+                // Format angles and exposures for BGACQUIRE command (server expects parentheses format)
+                String angles = angleExposures.stream()
+                        .map(ae -> String.valueOf(ae.ticks()))
+                        .collect(java.util.stream.Collectors.joining(",", "(", ")"));
+                String exposures = angleExposures.stream()
+                        .map(ae -> String.valueOf(ae.exposureMs()))
+                        .collect(java.util.stream.Collectors.joining(",", "(", ")"));
+                
+                logger.info("Formatted for BGACQUIRE - angles: {}, exposures: {}", angles, exposures);
                 
                 logger.info("Starting background acquisition for modality '{}' with {} angles", modality, angleExposures.size());
                 
-                // Send BGACQUIRE command via MicroscopeSocketClient
+                // Send BGACQUIRE command with correct parameters
                 logger.info("Sending BGACQUIRE command to server");
-                socketClient.startBackgroundAcquisition(acquisitionBuilder);
+                socketClient.startBackgroundAcquisition(configFileLocation, finalOutputPath, modality, angles, exposures);
                 logger.info("Background acquisition command sent, monitoring progress");
                 
                 // Monitor acquisition with progress updates

@@ -434,14 +434,22 @@ public class MicroscopeSocketClient implements AutoCloseable {
 
     /**
      * Starts a background acquisition workflow on the server for flat field correction.
-     * This method uses the BGACQUIRE command to acquire raw background images at the
-     * current microscope position without tile configuration or processing.
+     * This method uses the BGACQUIRE command with custom parameters that match the
+     * server's expected format (--yaml, --output, --modality, --angles, --exposures).
      *
-     * @param builder Pre-configured acquisition command builder with background parameters
+     * @param yamlPath Path to microscope configuration YAML file
+     * @param outputPath Output directory for background images
+     * @param modality Modality name (e.g., "ppm")
+     * @param angles Angle values in parentheses format (e.g., "(-5.0,0.0,5.0,90.0)")
+     * @param exposures Exposure values in parentheses format (e.g., "(120.0,250.0,60.0,1.2)")
      * @throws IOException if communication fails
      */
-    public void startBackgroundAcquisition(AcquisitionCommandBuilder builder) throws IOException {
-        String message = builder.buildSocketMessage() + " END_MARKER";
+    public void startBackgroundAcquisition(String yamlPath, String outputPath, String modality, 
+                                          String angles, String exposures) throws IOException {
+        
+        // Build BGACQUIRE-specific command message
+        String message = String.format("--yaml %s --output %s --modality %s --angles %s --exposures %s END_MARKER",
+                yamlPath, outputPath, modality, angles, exposures);
         byte[] messageBytes = message.getBytes(StandardCharsets.UTF_8);
 
         logger.info("Sending background acquisition command:");
