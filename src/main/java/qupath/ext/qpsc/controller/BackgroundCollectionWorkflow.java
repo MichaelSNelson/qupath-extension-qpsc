@@ -7,6 +7,7 @@ import qupath.ext.qpsc.modality.AngleExposure;
 import qupath.ext.qpsc.modality.ModalityHandler;
 import qupath.ext.qpsc.modality.ModalityRegistry;
 import qupath.ext.qpsc.service.microscope.MicroscopeSocketClient;
+import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.ui.UIFunctions;
 import qupath.ext.qpsc.ui.BackgroundCollectionController;
 import qupath.ext.qpsc.utilities.MicroscopeConfigManager;
@@ -94,11 +95,13 @@ public class BackgroundCollectionWorkflow {
         logger.info("Executing background acquisition for modality '{}' with {} angles", 
                 modality, angleExposures.size());
         
-        // Show progress dialog
-        var progressFuture = UIFunctions.showProgressDialog(
-                "Background Collection", 
-                "Acquiring background images...",
-                angleExposures.size()
+        // Create progress counter and show progress bar
+        AtomicInteger progressCounter = new AtomicInteger(0);
+        UIFunctions.ProgressHandle progressHandle = UIFunctions.showProgressBarAsync(
+                progressCounter,
+                angleExposures.size(),
+                300000, // 5 minute timeout
+                false   // No cancel button for background collection
         );
         
         CompletableFuture.runAsync(() -> {
@@ -109,8 +112,9 @@ public class BackgroundCollectionWorkflow {
                 logger.info("Connected to microscope server for background acquisition");
                 
                 // Build background acquisition command
-                var configManager = MicroscopeConfigManager.getInstance();
-                String yamlPath = configManager.getConfigFilePath();
+                String configFileLocation = QPPreferenceDialog.getMicroscopeConfigFileProperty();
+                var configManager = MicroscopeConfigManager.getInstance(configFileLocation);
+                String yamlPath = configFileLocation;
                 
                 // Format angles and exposures for Python
                 var angles = angleExposures.stream()
@@ -134,17 +138,15 @@ public class BackgroundCollectionWorkflow {
                 socketClient.sendMessage(command + " END_MARKER");
                 
                 // Monitor progress
-                AtomicInteger completedImages = new AtomicInteger(0);
-                
                 socketClient.monitorProgress((current, total) -> {
-                    completedImages.set(current);
-                    Platform.runLater(() -> progressFuture.updateProgress(current, total));
+                    progressCounter.set(current);
+                    logger.debug("Background collection progress: {}/{}", current, total);
                 }, () -> false); // No cancellation for now
                 
                 logger.info("Background acquisition completed successfully");
                 
                 Platform.runLater(() -> {
-                    progressFuture.close();
+                    progressHandle.close();
                     Dialogs.showInfoNotification("Background Collection Complete", 
                             String.format("Successfully acquired %d background images for %s modality", 
                                     angleExposures.size(), modality));
@@ -153,7 +155,7 @@ public class BackgroundCollectionWorkflow {
             } catch (Exception e) {
                 logger.error("Background acquisition failed", e);
                 Platform.runLater(() -> {
-                    progressFuture.close();
+                    progressHandle.close();
                     Dialogs.showErrorMessage("Background Acquisition Failed", 
                             "Failed to acquire background images: " + e.getMessage());
                 });
