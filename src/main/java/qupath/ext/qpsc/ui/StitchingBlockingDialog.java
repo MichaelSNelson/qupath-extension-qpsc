@@ -51,9 +51,9 @@ public class StitchingBlockingDialog {
     
     private static final Logger logger = LoggerFactory.getLogger(StitchingBlockingDialog.class);
     
-    private final Dialog<Void> dialog;
-    private final Label statusLabel;
-    private final ProgressIndicator progressIndicator;
+    private final Dialog<Void> dialog = new Dialog<>();
+    private final Label statusLabel = new Label();
+    private final ProgressIndicator progressIndicator = new ProgressIndicator();
     private final AtomicBoolean isComplete = new AtomicBoolean(false);
     
     /**
@@ -62,11 +62,8 @@ public class StitchingBlockingDialog {
      * @param sampleName The name of the sample being stitched
      */
     private StitchingBlockingDialog(String sampleName) {
-        dialog = new Dialog<>();
-        
-        // Initialize components first
-        statusLabel = new Label("Please wait while " + sampleName + " is being stitched.");
-        progressIndicator = new ProgressIndicator();
+        // Initialize status label text
+        statusLabel.setText("Please wait while " + sampleName + " is being stitched.");
         
         // Configure dialog properties
         dialog.setTitle("Stitching in Progress");
