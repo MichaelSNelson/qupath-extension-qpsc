@@ -64,6 +64,10 @@ public class StitchingBlockingDialog {
     private StitchingBlockingDialog(String sampleName) {
         dialog = new Dialog<>();
         
+        // Initialize components first
+        statusLabel = new Label("Please wait while " + sampleName + " is being stitched.");
+        progressIndicator = new ProgressIndicator();
+        
         // Configure dialog properties
         dialog.setTitle("Stitching in Progress");
         dialog.setHeaderText("Processing " + sampleName);
@@ -112,12 +116,10 @@ public class StitchingBlockingDialog {
         Label mainMessage = new Label("Stitching operation in progress...");
         mainMessage.setStyle("-fx-font-size: 14px; -fx-font-weight: bold;");
         
-        // Progress indicator
-        progressIndicator = new ProgressIndicator();
+        // Progress indicator (already initialized)
         progressIndicator.setPrefSize(60, 60);
         
-        // Status label
-        statusLabel = new Label("Please wait while " + sampleName + " is being stitched.");
+        // Status label (already initialized)
         statusLabel.setWrapText(true);
         statusLabel.setMaxWidth(350);
         statusLabel.setStyle("-fx-text-alignment: center;");
