@@ -8,6 +8,7 @@ import qupath.ext.qpsc.modality.AngleExposure;
 import qupath.ext.qpsc.modality.ModalityHandler;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.ui.SampleSetupController;
+import qupath.ext.qpsc.ui.StitchingBlockingDialog;
 import qupath.ext.qpsc.ui.UIFunctions;
 import qupath.ext.qpsc.utilities.ImageMetadataManager;
 import qupath.ext.qpsc.utilities.TransformationFunctions;
@@ -141,6 +142,19 @@ public class StitchingHelper {
                 annotation, sample, gui, project, fullResToStage
         );
 
+        // Create blocking dialog on JavaFX thread before starting stitching
+        final StitchingBlockingDialog[] dialogRef = {null};
+        try {
+            Platform.runLater(() -> {
+                dialogRef[0] = StitchingBlockingDialog.show(sample.sampleName() + " - " + annotation.getName());
+            });
+            // Wait briefly for dialog creation
+            Thread.sleep(100);
+        } catch (Exception e) {
+            logger.warn("Failed to create stitching blocking dialog", e);
+        }
+        final StitchingBlockingDialog blockingDialog = dialogRef[0];
+
         if (angleExposures != null && angleExposures.size() > 1) {
             logger.info("Stitching {} angles for annotation: {}",
                     angleExposures.size(), annotation.getName());
@@ -149,6 +163,10 @@ public class StitchingHelper {
             return CompletableFuture.runAsync(() -> {
                 try {
                     String annotationName = annotation.getName();
+                    
+                    if (blockingDialog != null) {
+                        blockingDialog.updateStatus("Initializing multi-angle stitching for " + annotationName + "...");
+                    }
 
                     logger.info("Performing batch stitching for {} with {} angles",
                             annotationName, angleExposures.size());
@@ -163,6 +181,10 @@ public class StitchingHelper {
                     // Create enhanced parameters map for UtilityFunctions
                     Map<String, Object> stitchParams = new HashMap<>();
                     stitchParams.put("metadata", metadata);
+                    
+                    if (blockingDialog != null) {
+                        blockingDialog.updateStatus("Processing " + angleExposures.size() + " angles for " + annotationName + "...");
+                    }
 
                     // Perform ONE batch stitching operation with "." to process all angles
                     String outPath = TileProcessingUtilities.stitchImagesAndUpdateProject(
@@ -182,16 +204,27 @@ public class StitchingHelper {
 
                     logger.info("Batch stitching completed for {}, output: {}",
                             annotationName, outPath);
+                    
+                    // Close blocking dialog on success
+                    if (blockingDialog != null) {
+                        blockingDialog.close();
+                    }
 
                 } catch (Exception e) {
                     logger.error("Stitching failed for {}", annotation.getName(), e);
-                    Platform.runLater(() ->
-                            UIFunctions.notifyUserOfError(
-                                    String.format("Stitching failed for %s: %s",
-                                            annotation.getName(), e.getMessage()),
-                                    "Stitching Error"
-                            )
-                    );
+                    
+                    // Close blocking dialog with error
+                    if (blockingDialog != null) {
+                        blockingDialog.closeWithError(e.getMessage());
+                    } else {
+                        Platform.runLater(() ->
+                                UIFunctions.notifyUserOfError(
+                                        String.format("Stitching failed for %s: %s",
+                                                annotation.getName(), e.getMessage()),
+                                        "Stitching Error"
+                                )
+                        );
+                    }
                 }
             }, executor);
         } else {
@@ -199,6 +232,10 @@ public class StitchingHelper {
             return CompletableFuture.runAsync(() -> {
                 try {
                     String annotationName = annotation.getName();
+                    
+                    if (blockingDialog != null) {
+                        blockingDialog.updateStatus("Initializing single stitching for " + annotationName + "...");
+                    }
 
                     logger.info("Stitching single acquisition for {}", annotationName);
                     logger.info("Metadata - offset: ({}, {}) µm, flipped: {}, parent: {}",
@@ -211,6 +248,10 @@ public class StitchingHelper {
                     // Create enhanced parameters map
                     Map<String, Object> stitchParams = new HashMap<>();
                     stitchParams.put("metadata", metadata);
+                    
+                    if (blockingDialog != null) {
+                        blockingDialog.updateStatus("Processing single acquisition for " + annotationName + "...");
+                    }
 
                     // For non-angle acquisitions, use annotation name as matching string
                     String outPath = TileProcessingUtilities.stitchImagesAndUpdateProject(
@@ -230,16 +271,27 @@ public class StitchingHelper {
 
                     logger.info("Stitching completed for {}, output: {}",
                             annotationName, outPath);
+                    
+                    // Close blocking dialog on success
+                    if (blockingDialog != null) {
+                        blockingDialog.close();
+                    }
 
                 } catch (Exception e) {
                     logger.error("Stitching failed for {}", annotation.getName(), e);
-                    Platform.runLater(() ->
-                            UIFunctions.notifyUserOfError(
-                                    String.format("Stitching failed for %s: %s",
-                                            annotation.getName(), e.getMessage()),
-                                    "Stitching Error"
-                            )
-                    );
+                    
+                    // Close blocking dialog with error
+                    if (blockingDialog != null) {
+                        blockingDialog.closeWithError(e.getMessage());
+                    } else {
+                        Platform.runLater(() ->
+                                UIFunctions.notifyUserOfError(
+                                        String.format("Stitching failed for %s: %s",
+                                                annotation.getName(), e.getMessage()),
+                                        "Stitching Error"
+                                )
+                        );
+                    }
                 }
             }, executor);
         }

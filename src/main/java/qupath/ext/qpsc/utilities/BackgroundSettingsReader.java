@@ -1,0 +1,247 @@
+package qupath.ext.qpsc.utilities;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import qupath.ext.qpsc.modality.AngleExposure;
+
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileReader;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+/**
+ * BackgroundSettingsReader - Utility for reading background collection settings files
+ * 
+ * <p>This class reads the background_settings.txt files created during background collection
+ * and provides access to the stored acquisition parameters. This enables validation and
+ * autofilling of background correction settings to ensure consistency.</p>
+ */
+public class BackgroundSettingsReader {
+    
+    private static final Logger logger = LoggerFactory.getLogger(BackgroundSettingsReader.class);
+    
+    /**
+     * Container for background settings read from file
+     */
+    public static class BackgroundSettings {
+        public final String modality;
+        public final String objective;
+        public final String detector;
+        public final String magnification;
+        public final List<AngleExposure> angleExposures;
+        public final String settingsFilePath;
+        
+        public BackgroundSettings(String modality, String objective, String detector, 
+                String magnification, List<AngleExposure> angleExposures, String settingsFilePath) {
+            this.modality = modality;
+            this.objective = objective;
+            this.detector = detector;
+            this.magnification = magnification;
+            this.angleExposures = angleExposures;
+            this.settingsFilePath = settingsFilePath;
+        }
+        
+        @Override
+        public String toString() {
+            return String.format("BackgroundSettings[modality=%s, objective=%s, detector=%s, angles=%d]",
+                    modality, objective, detector, angleExposures.size());
+        }
+    }
+    
+    /**
+     * Attempt to find and read background settings for a given modality/objective/detector combination.
+     * 
+     * @param baseBackgroundFolder The base background correction folder from config
+     * @param modality The modality name (e.g., "ppm")
+     * @param objective The objective ID (e.g., "LOCI_OBJECTIVE_OLYMPUS_20X_POL_001")
+     * @param detector The detector ID (e.g., "LOCI_DETECTOR_JAI_001")
+     * @return BackgroundSettings if found and valid, null otherwise
+     */
+    public static BackgroundSettings findBackgroundSettings(String baseBackgroundFolder, 
+            String modality, String objective, String detector) {
+        
+        if (baseBackgroundFolder == null || modality == null || objective == null || detector == null) {
+            logger.debug("Cannot search for background settings - missing required parameters");
+            return null;
+        }
+        
+        try {
+            // Extract magnification from objective
+            String magnification = extractMagnificationFromObjective(objective);
+            
+            // Construct expected path: baseFolder/detector/modality/magnification/background_settings.txt
+            File settingsFile = new File(baseBackgroundFolder, 
+                    detector + File.separator + modality + File.separator + magnification + File.separator + "background_settings.txt");
+            
+            logger.debug("Looking for background settings at: {}", settingsFile.getAbsolutePath());
+            
+            if (!settingsFile.exists()) {
+                logger.debug("Background settings file not found: {}", settingsFile.getAbsolutePath());
+                return null;
+            }
+            
+            return readBackgroundSettings(settingsFile);
+            
+        } catch (Exception e) {
+            logger.error("Error searching for background settings", e);
+            return null;
+        }
+    }
+    
+    /**
+     * Read background settings from a specific file.
+     * 
+     * @param settingsFile The background_settings.txt file to read
+     * @return BackgroundSettings if valid, null otherwise
+     */
+    public static BackgroundSettings readBackgroundSettings(File settingsFile) {
+        logger.info("Reading background settings from: {}", settingsFile.getAbsolutePath());
+        
+        try (BufferedReader reader = new BufferedReader(new FileReader(settingsFile))) {
+            String modality = null;
+            String objective = null;
+            String detector = null;
+            String magnification = null;
+            List<AngleExposure> angleExposures = new ArrayList<>();
+            
+            // Pattern for angle_<degrees>=<exposure> lines
+            Pattern anglePattern = Pattern.compile("angle_([+-]?\\d+\\.\\d+)=([+-]?\\d+\\.\\d+)");
+            
+            String line;
+            while ((line = reader.readLine()) != null) {
+                line = line.trim();
+                
+                // Skip comments and empty lines
+                if (line.isEmpty() || line.startsWith("#")) {
+                    continue;
+                }
+                
+                // Parse key=value pairs
+                if (line.contains("=")) {
+                    String[] parts = line.split("=", 2);
+                    String key = parts[0].trim();
+                    String value = parts[1].trim();
+                    
+                    switch (key) {
+                        case "modality":
+                            modality = value;
+                            break;
+                        case "objective":
+                            objective = value;
+                            break;
+                        case "detector":
+                            detector = value;
+                            break;
+                        case "magnification":
+                            magnification = value;
+                            break;
+                        default:
+                            // Check if this is an angle_<degrees>=<exposure> line
+                            Matcher angleMatcher = anglePattern.matcher(line);
+                            if (angleMatcher.matches()) {
+                                double angle = Double.parseDouble(angleMatcher.group(1));
+                                double exposure = Double.parseDouble(angleMatcher.group(2));
+                                angleExposures.add(new AngleExposure(angle, exposure));
+                                logger.debug("Parsed angle exposure: {}° = {}ms", angle, exposure);
+                            }
+                            break;
+                    }
+                }
+            }
+            
+            // Validate that we have the essential information
+            if (modality == null || angleExposures.isEmpty()) {
+                logger.warn("Background settings file is missing essential information: {}", settingsFile.getAbsolutePath());
+                return null;
+            }
+            
+            BackgroundSettings settings = new BackgroundSettings(modality, objective, detector, 
+                    magnification, angleExposures, settingsFile.getAbsolutePath());
+            
+            logger.info("Successfully read background settings: {}", settings);
+            return settings;
+            
+        } catch (IOException e) {
+            logger.error("Failed to read background settings file: {}", settingsFile.getAbsolutePath(), e);
+            return null;
+        } catch (NumberFormatException e) {
+            logger.error("Invalid number format in background settings file: {}", settingsFile.getAbsolutePath(), e);
+            return null;
+        }
+    }
+    
+    /**
+     * Check if the provided angle-exposure list matches the background settings.
+     * 
+     * @param settings The background settings to compare against
+     * @param currentAngleExposures The current angle-exposure list
+     * @param tolerance Tolerance for exposure time comparison (e.g., 0.1 for 0.1ms tolerance)
+     * @return true if they match within tolerance, false otherwise
+     */
+    public static boolean validateAngleExposures(BackgroundSettings settings, 
+            List<AngleExposure> currentAngleExposures, double tolerance) {
+        
+        if (settings == null || currentAngleExposures == null) {
+            return false;
+        }
+        
+        if (settings.angleExposures.size() != currentAngleExposures.size()) {
+            logger.debug("Angle count mismatch: settings={}, current={}", 
+                    settings.angleExposures.size(), currentAngleExposures.size());
+            return false;
+        }
+        
+        // Sort both lists by angle for comparison
+        List<AngleExposure> sortedSettings = new ArrayList<>(settings.angleExposures);
+        List<AngleExposure> sortedCurrent = new ArrayList<>(currentAngleExposures);
+        sortedSettings.sort((a, b) -> Double.compare(a.ticks(), b.ticks()));
+        sortedCurrent.sort((a, b) -> Double.compare(a.ticks(), b.ticks()));
+        
+        for (int i = 0; i < sortedSettings.size(); i++) {
+            AngleExposure settingsAe = sortedSettings.get(i);
+            AngleExposure currentAe = sortedCurrent.get(i);
+            
+            // Check angle match (exact)
+            if (Math.abs(settingsAe.ticks() - currentAe.ticks()) > 0.001) {
+                logger.debug("Angle mismatch at index {}: settings={}°, current={}°", 
+                        i, settingsAe.ticks(), currentAe.ticks());
+                return false;
+            }
+            
+            // Check exposure match (within tolerance)
+            if (Math.abs(settingsAe.exposureMs() - currentAe.exposureMs()) > tolerance) {
+                logger.debug("Exposure mismatch at index {}: settings={}ms, current={}ms (tolerance={}ms)", 
+                        i, settingsAe.exposureMs(), currentAe.exposureMs(), tolerance);
+                return false;
+            }
+        }
+        
+        return true;
+    }
+    
+    /**
+     * Extract magnification from objective identifier.
+     * Examples:
+     * - "LOCI_OBJECTIVE_OLYMPUS_10X_001" -> "10x"
+     * - "LOCI_OBJECTIVE_OLYMPUS_20X_POL_001" -> "20x"
+     * - "LOCI_OBJECTIVE_OLYMPUS_40X_POL_001" -> "40x"
+     */
+    private static String extractMagnificationFromObjective(String objective) {
+        if (objective == null) return "unknown";
+        
+        // Look for pattern like "10X", "20X", "40X"
+        Pattern pattern = Pattern.compile("(\\d+)X", Pattern.CASE_INSENSITIVE);
+        Matcher matcher = pattern.matcher(objective);
+        
+        if (matcher.find()) {
+            return matcher.group(1).toLowerCase() + "x";  // "20X" -> "20x"
+        }
+        
+        // Fallback: return "unknown" if pattern not found
+        return "unknown";
+    }
+}

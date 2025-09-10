@@ -7,6 +7,7 @@ import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.service.AcquisitionCommandBuilder;
 import qupath.ext.qpsc.service.microscope.MicroscopeSocketClient;
 import qupath.ext.qpsc.ui.UIFunctions;
+import qupath.ext.qpsc.ui.StitchingBlockingDialog;
 import qupath.ext.qpsc.utilities.*;
 import qupath.ext.qpsc.ui.BoundingBoxController;
 import qupath.ext.qpsc.ui.SampleSetupController;
@@ -412,16 +413,36 @@ public class BoundingBoxWorkflow {
                                     // Check if acquisition was cancelled
                                     if (ignored == null) {
                                         // Normal completion - proceed with stitching
+                                        // Show blocking dialog before starting stitching
+                                        StitchingBlockingDialog blockingDialog = null;
+                                        try {
+                                            // Must create blocking dialog on JavaFX thread
+                                            final StitchingBlockingDialog[] dialogRef = {null};
+                                            Platform.runLater(() -> {
+                                                dialogRef[0] = StitchingBlockingDialog.show(sample.sampleName());
+                                            });
+                                            // Wait briefly for dialog creation
+                                            Thread.sleep(100);
+                                            blockingDialog = dialogRef[0];
+                                        } catch (Exception e) {
+                                            logger.warn("Failed to create stitching blocking dialog", e);
+                                        }
+                                        
+                                        final StitchingBlockingDialog finalDialog = blockingDialog;
+                                        
                                         CompletableFuture<Void> stitchFuture = CompletableFuture.runAsync(() -> {
                                             try {
-                                                Platform.runLater(() ->
-                                                        qupath.fx.dialogs.Dialogs.showInfoNotification(
-                                                                "Stitching",
-                                                                angleExposures.size() > 1
-                                                                        ? "Stitching " + sample.sampleName() + " for all angles…"
-                                                                        : "Stitching " + sample.sampleName() + "…"));
+                                                if (finalDialog != null) {
+                                                    finalDialog.updateStatus("Initializing stitching operation...");
+                                                }
 
                                                 String matchingPattern = angleExposures.size() > 1 ? "." : boundsMode;
+
+                                                if (finalDialog != null) {
+                                                    finalDialog.updateStatus(angleExposures.size() > 1 
+                                                            ? "Stitching " + sample.sampleName() + " for all angles..."
+                                                            : "Stitching " + sample.sampleName() + "...");
+                                                }
 
                                                 String outPath = TileProcessingUtilities.stitchImagesAndUpdateProject(
                                                         projectsFolder,
@@ -440,6 +461,11 @@ public class BoundingBoxWorkflow {
 
                                                 logger.info("Stitching completed. Last output path: {}", outPath);
 
+                                                // Close blocking dialog and show completion notification
+                                                if (finalDialog != null) {
+                                                    finalDialog.close();
+                                                }
+                                                
                                                 Platform.runLater(() ->
                                                         qupath.fx.dialogs.Dialogs.showInfoNotification(
                                                                 "Stitching complete",
@@ -449,10 +475,16 @@ public class BoundingBoxWorkflow {
 
                                             } catch (Exception e) {
                                                 logger.error("Stitching failed", e);
-                                                Platform.runLater(() ->
-                                                        UIFunctions.notifyUserOfError(
-                                                                "Stitching failed:\n" + e.getMessage(),
-                                                                "Stitching Error"));
+                                                
+                                                // Close blocking dialog with error
+                                                if (finalDialog != null) {
+                                                    finalDialog.closeWithError(e.getMessage());
+                                                } else {
+                                                    Platform.runLater(() ->
+                                                            UIFunctions.notifyUserOfError(
+                                                                    "Stitching failed:\n" + e.getMessage(),
+                                                                    "Stitching Error"));
+                                                }
                                             }
                                         }, STITCH_EXECUTOR);
 

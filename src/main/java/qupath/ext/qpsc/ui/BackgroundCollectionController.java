@@ -17,6 +17,7 @@ import qupath.ext.qpsc.modality.ModalityHandler;
 import qupath.ext.qpsc.modality.ModalityRegistry;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.utilities.MicroscopeConfigManager;
+import qupath.ext.qpsc.utilities.BackgroundSettingsReader;
 import qupath.fx.dialogs.Dialogs;
 import qupath.lib.gui.QuPathGUI;
 
@@ -49,6 +50,8 @@ public class BackgroundCollectionController {
     private VBox exposureControlsPane;
     private List<AngleExposure> currentAngleExposures = new ArrayList<>();
     private List<TextField> exposureFields = new ArrayList<>();
+    private BackgroundSettingsReader.BackgroundSettings existingBackgroundSettings;
+    private Label backgroundValidationLabel;
     
     /**
      * Shows the background collection dialog and returns the result.
@@ -91,11 +94,15 @@ public class BackgroundCollectionController {
                     okButton.setDisable(!isValid);
                     if (newVal != null) {
                         updateObjectiveSelection(newVal);
-                        updateExposureControls(newVal);
+                        // Only update exposure controls if both modality and objective are selected
+                        if (objectiveComboBox.getValue() != null) {
+                            updateExposureControlsWithBackground(newVal, objectiveComboBox.getValue());
+                        }
                     } else {
                         // Clear objectives when modality is cleared
                         objectiveComboBox.getItems().clear();
                         objectiveComboBox.setDisable(true);
+                        clearExposureControls();
                     }
                 });
                 
@@ -103,6 +110,12 @@ public class BackgroundCollectionController {
                 objectiveComboBox.valueProperty().addListener((obs, oldVal, newVal) -> {
                     boolean isValid = modalityComboBox.getValue() != null && newVal != null && !outputPathField.getText().trim().isEmpty();
                     okButton.setDisable(!isValid);
+                    // Update exposure controls when objective changes (if modality is also selected)
+                    if (newVal != null && modalityComboBox.getValue() != null) {
+                        updateExposureControlsWithBackground(modalityComboBox.getValue(), newVal);
+                    } else {
+                        clearExposureControls();
+                    }
                 });
                 
                 outputPathField.textProperty().addListener((obs, oldVal, newVal) -> {
@@ -201,9 +214,14 @@ public class BackgroundCollectionController {
         // Set default output path
         setDefaultOutputPath();
         
-        // Exposure controls (will be populated when modality is selected)
+        // Exposure controls (will be populated when modality AND objective are selected)
         Label exposureLabel = new Label("Exposure Times (ms):");
         exposureControlsPane = new VBox(10);
+        
+        // Background validation label
+        backgroundValidationLabel = new Label();
+        backgroundValidationLabel.setWrapText(true);
+        backgroundValidationLabel.setVisible(false); // Hidden until needed
         
         content.getChildren().addAll(
                 instructionLabel,
@@ -211,19 +229,32 @@ public class BackgroundCollectionController {
                 modalityPane,
                 new Separator(),
                 exposureLabel,
+                backgroundValidationLabel,
                 exposureControlsPane
         );
         
         return content;
     }
     
-    private void updateExposureControls(String modality) {
-        logger.info("Updating exposure controls for modality: {}", modality);
-        
-        logger.debug("Clearing existing exposure controls");
+    /**
+     * Clear exposure controls when no valid modality/objective combination is selected
+     */
+    private void clearExposureControls() {
+        logger.debug("Clearing exposure controls");
         exposureControlsPane.getChildren().clear();
         exposureFields.clear();
         currentAngleExposures.clear();
+        existingBackgroundSettings = null;
+        backgroundValidationLabel.setVisible(false);
+    }
+    
+    /**
+     * Update exposure controls with background validation for the given modality and objective
+     */
+    private void updateExposureControlsWithBackground(String modality, String objective) {
+        logger.info("Updating exposure controls with background validation for modality: {}, objective: {}", modality, objective);
+        
+        clearExposureControls();
         
         // Get modality handler
         ModalityHandler handler = ModalityRegistry.getHandler(modality);
@@ -232,23 +263,56 @@ public class BackgroundCollectionController {
             return;
         }
         
+        // Try to find existing background settings
+        try {
+            String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
+            MicroscopeConfigManager configManager = MicroscopeConfigManager.getInstance(configPath);
+            String baseBackgroundFolder = configManager.getBackgroundCorrectionFolder(modality);
+            
+            if (baseBackgroundFolder != null) {
+                // Get detector for this modality/objective combination
+                Set<String> detectors = configManager.getAvailableDetectorsForModalityObjective(modality, objective);
+                if (!detectors.isEmpty()) {
+                    String detector = detectors.iterator().next();
+                    existingBackgroundSettings = BackgroundSettingsReader.findBackgroundSettings(
+                            baseBackgroundFolder, modality, objective, detector);
+                    
+                    if (existingBackgroundSettings != null) {
+                        logger.info("Found existing background settings: {}", existingBackgroundSettings);
+                    } else {
+                        logger.debug("No existing background settings found for {}/{}/{}", modality, objective, detector);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("Error searching for background settings", e);
+        }
+        
         // Get default angles and exposures
         logger.debug("Requesting rotation angles for modality: {}", modality);
         handler.getRotationAngles(modality).thenAccept(defaultExposures -> {
             Platform.runLater(() -> {
                 logger.debug("Creating exposure controls for {} angles", defaultExposures.size());
                 
+                // Use background settings if available, otherwise use defaults
+                List<AngleExposure> exposuresToUse = defaultExposures;
+                if (existingBackgroundSettings != null) {
+                    exposuresToUse = existingBackgroundSettings.angleExposures;
+                    showBackgroundValidationMessage("Found existing background settings. Values have been auto-filled.", 
+                            "-fx-text-fill: green; -fx-font-weight: bold;");
+                }
+                
                 // Clear and update current values
                 currentAngleExposures.clear();
-                currentAngleExposures.addAll(defaultExposures);
+                currentAngleExposures.addAll(exposuresToUse);
                 
                 // Create exposure controls
                 GridPane exposureGrid = new GridPane();
                 exposureGrid.setHgap(10);
                 exposureGrid.setVgap(5);
                 
-                for (int i = 0; i < defaultExposures.size(); i++) {
-                    AngleExposure ae = defaultExposures.get(i);
+                for (int i = 0; i < exposuresToUse.size(); i++) {
+                    AngleExposure ae = exposuresToUse.get(i);
                     
                     Label angleLabel = new Label(String.format("%.1f°:", ae.ticks()));
                     TextField exposureField = new TextField(String.valueOf(ae.exposureMs()));
@@ -262,6 +326,9 @@ public class BackgroundCollectionController {
                             if (index < currentAngleExposures.size()) {
                                 AngleExposure oldAe = currentAngleExposures.get(index);
                                 currentAngleExposures.set(index, new AngleExposure(oldAe.ticks(), newExposure));
+                                
+                                // Validate against background settings if they exist
+                                validateCurrentSettings();
                             }
                         } catch (NumberFormatException e) {
                             // Invalid input, ignore
@@ -288,6 +355,38 @@ public class BackgroundCollectionController {
             });
             return null;
         });
+    }
+    
+    /**
+     * Validate current settings against existing background settings
+     */
+    private void validateCurrentSettings() {
+        if (existingBackgroundSettings == null) {
+            return; // No background settings to validate against
+        }
+        
+        boolean isValid = BackgroundSettingsReader.validateAngleExposures(
+                existingBackgroundSettings, currentAngleExposures, 0.1); // 0.1ms tolerance
+        
+        if (!isValid) {
+            showBackgroundValidationMessage(
+                    "⚠️ WARNING: Settings differ from existing background images. " +
+                    "Background correction will be disabled unless you acquire new background images with these settings.",
+                    "-fx-text-fill: orange; -fx-font-weight: bold;");
+        } else {
+            showBackgroundValidationMessage(
+                    "✓ Settings match existing background images. Background correction will be enabled.",
+                    "-fx-text-fill: green; -fx-font-weight: bold;");
+        }
+    }
+    
+    /**
+     * Show or hide background validation message
+     */
+    private void showBackgroundValidationMessage(String message, String style) {
+        backgroundValidationLabel.setText(message);
+        backgroundValidationLabel.setStyle(style);
+        backgroundValidationLabel.setVisible(true);
     }
     
     private void updateObjectiveSelection(String modality) {
@@ -386,7 +485,11 @@ public class BackgroundCollectionController {
                 }
             }
             
-            return new BackgroundCollectionResult(modality, objective, finalExposures, outputPath);
+            // Check if settings match existing background
+            boolean settingsMatchExisting = existingBackgroundSettings != null && 
+                    BackgroundSettingsReader.validateAngleExposures(existingBackgroundSettings, finalExposures, 0.1);
+            
+            return new BackgroundCollectionResult(modality, objective, finalExposures, outputPath, settingsMatchExisting);
             
         } catch (Exception e) {
             logger.error("Error creating result", e);

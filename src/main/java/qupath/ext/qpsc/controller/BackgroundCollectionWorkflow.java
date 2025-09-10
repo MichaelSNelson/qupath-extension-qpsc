@@ -16,6 +16,10 @@ import qupath.ext.qpsc.utilities.MicroscopeConfigManager;
 import qupath.fx.dialogs.Dialogs;
 
 import java.io.IOException;
+import java.io.FileWriter;
+import java.io.PrintWriter;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -66,7 +70,7 @@ public class BackgroundCollectionWorkflow {
                             
                             // Execute background acquisition
                             executeBackgroundAcquisition(result.modality(), result.objective(), result.angleExposures(), 
-                                    result.outputPath());
+                                    result.outputPath(), result.settingsMatchExisting());
                         } else {
                             logger.info("Background collection cancelled by user");
                         }
@@ -93,12 +97,19 @@ public class BackgroundCollectionWorkflow {
      * @param objective The selected objective
      * @param angleExposures List of angle-exposure pairs
      * @param outputPath Base output path for background images
+     * @param settingsMatchExisting Whether the settings match existing background images
      */
     private static void executeBackgroundAcquisition(String modality, String objective, List<AngleExposure> angleExposures, 
-            String outputPath) {
+            String outputPath, boolean settingsMatchExisting) {
         
         logger.info("Executing background acquisition for modality '{}' with {} angles", 
                 modality, angleExposures.size());
+        
+        if (settingsMatchExisting) {
+            logger.info("Settings match existing background images - future acquisitions will use background correction");
+        } else {
+            logger.warn("Settings do NOT match existing background images - background correction will be disabled for incompatible settings");
+        }
         
         // Create progress counter and show progress bar
         AtomicInteger progressCounter = new AtomicInteger(0);
@@ -203,6 +214,16 @@ public class BackgroundCollectionWorkflow {
                 // Check final state
                 if (finalState == MicroscopeSocketClient.AcquisitionState.COMPLETED) {
                     logger.info("Background acquisition completed successfully");
+                    
+                    // Save background collection defaults to text file
+                    try {
+                        saveBackgroundDefaults(finalOutputPath, modality, objective, detector, angleExposures);
+                        logger.info("Background collection defaults saved to file");
+                    } catch (Exception e) {
+                        logger.error("Failed to save background collection defaults", e);
+                        // Don't fail the whole workflow if defaults save fails
+                    }
+                    
                     Platform.runLater(() -> {
                         if (progressHandle != null) progressHandle.close();
                         Dialogs.showInfoNotification("Background Collection Complete", 
@@ -251,9 +272,91 @@ public class BackgroundCollectionWorkflow {
             String modality,
             String objective,
             List<AngleExposure> angleExposures,
-            String outputPath
+            String outputPath,
+            boolean settingsMatchExisting
     ) {}
     
+    /**
+     * Save background collection defaults to a text file for future reference.
+     * This file contains all the settings used for background acquisition, which is important
+     * for ensuring consistent background correction parameters.
+     * 
+     * @param outputPath The directory where background images were saved
+     * @param modality The modality used (e.g., "ppm")
+     * @param objective The objective ID used
+     * @param detector The detector ID used
+     * @param angleExposures The angle-exposure pairs used
+     * @throws IOException if file writing fails
+     */
+    private static void saveBackgroundDefaults(String outputPath, String modality, String objective, 
+            String detector, List<AngleExposure> angleExposures) throws IOException {
+        
+        // Create settings file in the same directory as the background images
+        java.io.File settingsFile = new java.io.File(outputPath, "background_settings.txt");
+        
+        logger.info("Saving background collection settings to: {}", settingsFile.getAbsolutePath());
+        
+        try (PrintWriter writer = new PrintWriter(new FileWriter(settingsFile))) {
+            // Header with timestamp
+            writer.println("# QPSC Background Collection Settings");
+            writer.println("# Generated: " + LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME));
+            writer.println("# This file contains the settings used for background image acquisition.");
+            writer.println("# Keep this file with the background images for reference.");
+            writer.println();
+            
+            // Hardware configuration
+            writer.println("# Hardware Configuration");
+            writer.println("modality=" + modality);
+            writer.println("objective=" + (objective != null ? objective : "unknown"));
+            writer.println("detector=" + (detector != null ? detector : "unknown"));
+            writer.println("magnification=" + extractMagnificationFromObjective(objective));
+            writer.println();
+            
+            // Acquisition settings
+            writer.println("# Acquisition Settings");
+            writer.println("total_angles=" + angleExposures.size());
+            writer.println();
+            
+            // Angle and exposure details
+            writer.println("# Angle and Exposure Details");
+            writer.println("# Format: angle_degrees=exposure_ms");
+            for (AngleExposure ae : angleExposures) {
+                writer.printf("angle_%.1f=%.1f%n", ae.ticks(), ae.exposureMs());
+            }
+            writer.println();
+            
+            // Summary for easy reference
+            writer.println("# Summary");
+            writer.print("angles=(");
+            writer.print(angleExposures.stream()
+                    .map(ae -> String.format("%.1f", ae.ticks()))
+                    .collect(java.util.stream.Collectors.joining(",")));
+            writer.println(")");
+            
+            writer.print("exposures_ms=(");
+            writer.print(angleExposures.stream()
+                    .map(ae -> String.format("%.1f", ae.exposureMs()))
+                    .collect(java.util.stream.Collectors.joining(",")));
+            writer.println(")");
+            writer.println();
+            
+            // File structure note
+            writer.println("# Background Image File Structure");
+            writer.println("# Images are saved in this directory with the naming convention:");
+            writer.println("# background_<angle>deg_<timestamp>.tiff");
+            writer.println("# Example: background_0.0deg_20250110_143052.tiff");
+            writer.println();
+            
+            // Usage notes
+            writer.println("# Usage Notes");
+            writer.println("# - Use these exact settings for background correction to work properly");
+            writer.println("# - If exposure times are changed, new background images must be acquired");
+            writer.println("# - This file should be included when sharing background image sets");
+        }
+        
+        logger.info("Background collection settings saved successfully");
+    }
+
     /**
      * Extract magnification from objective identifier.
      * Examples:
