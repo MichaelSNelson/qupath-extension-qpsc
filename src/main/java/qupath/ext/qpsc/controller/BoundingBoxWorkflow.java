@@ -436,7 +436,16 @@ public class BoundingBoxWorkflow {
                                                     finalDialog.updateStatus("Initializing stitching operation...");
                                                 }
 
-                                                String matchingPattern = angleExposures.size() > 1 ? "." : boundsMode;
+                                                String matchingPattern;
+                                                if (angleExposures.size() > 1) {
+                                                    // Multi-angle: use "." to match all angle directories
+                                                    matchingPattern = ".";
+                                                } else {
+                                                    // Single-angle: use the specific angle directory name
+                                                    double angle = angleExposures.keySet().iterator().next();
+                                                    matchingPattern = String.valueOf(angle);
+                                                    logger.info("Single-angle acquisition: using matching pattern '{}' for angle {}", matchingPattern, angle);
+                                                }
 
                                                 if (finalDialog != null) {
                                                     finalDialog.updateStatus(angleExposures.size() > 1 
