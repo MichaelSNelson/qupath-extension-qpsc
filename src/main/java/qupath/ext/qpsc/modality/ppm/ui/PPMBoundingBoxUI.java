@@ -35,7 +35,7 @@ public class PPMBoundingBoxUI implements ModalityHandler.BoundingBoxUI {
         double defaultPlus = 5.0;
         double defaultMinus = -5.0;
 
-        java.util.List<?> angles = mgr.getList("exposures", "ppm_angles");
+        java.util.List<?> angles = mgr.getList("modalities", "ppm", "rotation_angles");
         if (angles != null) {
             for (Object angleObj : angles) {
                 if (angleObj instanceof java.util.Map<?, ?> angle) {
