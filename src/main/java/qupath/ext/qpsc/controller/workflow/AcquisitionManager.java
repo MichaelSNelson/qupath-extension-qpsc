@@ -388,6 +388,11 @@ public class AcquisitionManager {
                     processingSteps.add("background_correction");
                 }
 
+                // Get white balance setting from config for this profile
+                boolean whiteBalanceEnabled = configManager.isWhiteBalanceEnabled(baseModality, objective, detector);
+                logger.debug("White balance enabled for {}/{}/{}: {}",
+                        baseModality, objective, detector, whiteBalanceEnabled);
+
                 // Build enhanced acquisition command
                 AcquisitionCommandBuilder acquisitionBuilder = AcquisitionCommandBuilder.builder()
                         .yamlPath(configFile)
@@ -398,7 +403,8 @@ public class AcquisitionManager {
                         .angleExposures(angleExposures)
                         .hardware(objective, detector, pixelSize)
                         .autofocus(afTiles, afSteps, afRange)
-                        .processingPipeline(processingSteps);
+                        .processingPipeline(processingSteps)
+                        .whiteBalance(whiteBalanceEnabled);
 
                 // Only add background correction if enabled and configured
                 if (bgEnabled && bgMethod != null && bgFolder != null) {

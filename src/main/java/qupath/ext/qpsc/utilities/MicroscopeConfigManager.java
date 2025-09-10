@@ -1281,7 +1281,45 @@ public class MicroscopeConfigManager {
                      detectors.size(), modalityName, objectiveId, detectors);
         return detectors;
     }
+    /**
+     * Check if white balance is enabled for a specific modality/objective/detector combination.
+     *
+     * @param modality The modality name
+     * @param objective The objective ID
+     * @param detector The detector ID
+     * @return true if white balance is enabled, false otherwise
+     */
+    public boolean isWhiteBalanceEnabled(String modality, String objective, String detector) {
+        Object wbSetting = getProfileSetting(modality, objective, detector, "white_balance", "enabled");
 
+        if (wbSetting instanceof Boolean) {
+            return (Boolean) wbSetting;
+        }
+
+        // Default to true for backward compatibility
+        logger.debug("No white balance setting found for {}/{}/{}, defaulting to enabled",
+                modality, objective, detector);
+        return true;
+    }
+
+    /**
+     * Get white balance gains for a specific modality/objective/detector combination.
+     *
+     * @param modality The modality name
+     * @param objective The objective ID
+     * @param detector The detector ID
+     * @return Map of angle to RGB gains, or null if not found
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Map<String, Double>> getWhiteBalanceGains(String modality, String objective, String detector) {
+        Object wbGains = getProfileSetting(modality, objective, detector, "white_balance", "gains");
+
+        if (wbGains instanceof Map<?, ?>) {
+            return (Map<String, Map<String, Double>>) wbGains;
+        }
+
+        return null;
+    }
     /**
      * Get friendly names for objectives from the resources file.
      * 

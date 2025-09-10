@@ -273,6 +273,10 @@ public class BoundingBoxWorkflow {
                                         if (bgEnabled && bgFolder != null) {
                                             processingSteps.add("background_correction");
                                         }
+                                        // Get white balance setting from config for this profile
+                                        boolean whiteBalanceEnabled = configManager.isWhiteBalanceEnabled(baseModality, objective, detector);
+                                        logger.debug("White balance enabled for {}/{}/{}: {}",
+                                                baseModality, objective, detector, whiteBalanceEnabled);
 
                                         // Build enhanced acquisition command
                                         AcquisitionCommandBuilder acquisitionBuilder = AcquisitionCommandBuilder.builder()
@@ -284,7 +288,8 @@ public class BoundingBoxWorkflow {
                                                 .angleExposures(angleExposures)
                                                 .hardware(objective, detector, pixelSizeForAcq)
                                                 .autofocus(afTiles, afSteps, afRange)
-                                                .processingPipeline(processingSteps);
+                                                .processingPipeline(processingSteps)
+                                                .whiteBalance(whiteBalanceEnabled);
 
                                         // Only add background correction if enabled and configured
                                         if (bgEnabled && bgMethod != null && bgFolder != null) {
