@@ -244,10 +244,11 @@ public class PPMAngleSelectionController {
             BooleanBinding valid = Bindings.createBooleanBinding(() -> {
                 boolean any = minusCheck.isSelected() || zeroCheck.isSelected() || plusCheck.isSelected() || uncrossedCheck.isSelected();
                 if(!any) return false;
-                if(minusCheck.isSelected() && !isValidPosDouble(minusExposure.getText())) return false;
-                if(zeroCheck.isSelected() && !isValidPosDouble(zeroExposure.getText())) return false;
-                if(plusCheck.isSelected() && !isValidPosDouble(plusExposure.getText())) return false;
                 if(uncrossedCheck.isSelected() && !isValidPosDouble(uncrossedExposure.getText())) return false;
+                if(plusCheck.isSelected() && !isValidPosDouble(plusExposure.getText())) return false;
+                if(zeroCheck.isSelected() && !isValidPosDouble(zeroExposure.getText())) return false;
+                if(minusCheck.isSelected() && !isValidPosDouble(minusExposure.getText())) return false;
+
                 return true;
             }, minusCheck.selectedProperty(), zeroCheck.selectedProperty(), plusCheck.selectedProperty(), uncrossedCheck.selectedProperty(),
             minusExposure.textProperty(), zeroExposure.textProperty(), plusExposure.textProperty(), uncrossedExposure.textProperty());
@@ -256,10 +257,13 @@ public class PPMAngleSelectionController {
             dialog.setResultConverter(button -> {
                 if(button==okType){
                     List<AngleExposure> list = new ArrayList<>();
-                    if(minusCheck.isSelected()) list.add(new AngleExposure(minusAngle,Double.parseDouble(minusExposure.getText())));
-                    if(zeroCheck.isSelected()) list.add(new AngleExposure(0.0,Double.parseDouble(zeroExposure.getText())));
-                    if(plusCheck.isSelected()) list.add(new AngleExposure(plusAngle,Double.parseDouble(plusExposure.getText())));
                     if(uncrossedCheck.isSelected()) list.add(new AngleExposure(uncrossedAngle,Double.parseDouble(uncrossedExposure.getText())));
+                    if(plusCheck.isSelected()) list.add(new AngleExposure(plusAngle,Double.parseDouble(plusExposure.getText())));
+                    if(zeroCheck.isSelected()) list.add(new AngleExposure(0.0,Double.parseDouble(zeroExposure.getText())));
+                    if(minusCheck.isSelected()) list.add(new AngleExposure(minusAngle,Double.parseDouble(minusExposure.getText())));
+
+
+
                     logger.info("PPM angles and exposures selected: {}", list);
                     return new AngleExposureResult(list);
                 }
