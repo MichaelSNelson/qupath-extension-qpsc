@@ -442,7 +442,7 @@ public class BoundingBoxWorkflow {
                                                     matchingPattern = ".";
                                                 } else {
                                                     // Single-angle: use the specific angle directory name
-                                                    double angle = angleExposures.keySet().iterator().next();
+                                                    double angle = angleExposures.get(0).ticks();
                                                     matchingPattern = String.valueOf(angle);
                                                     logger.info("Single-angle acquisition: using matching pattern '{}' for angle {}", matchingPattern, angle);
                                                 }
