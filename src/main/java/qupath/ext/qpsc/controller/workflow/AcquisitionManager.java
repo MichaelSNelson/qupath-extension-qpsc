@@ -14,6 +14,7 @@ import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.service.AcquisitionCommandBuilder;
 import qupath.ext.qpsc.service.microscope.MicroscopeSocketClient;
 import qupath.ext.qpsc.ui.AnnotationAcquisitionDialog;
+import qupath.ext.qpsc.ui.DualProgressDialog;
 import qupath.ext.qpsc.ui.UIFunctions;
 import qupath.ext.qpsc.utilities.MicroscopeConfigManager;
 import qupath.ext.qpsc.utilities.MinorFunctions;
@@ -73,6 +74,7 @@ public class AcquisitionManager {
 
     private final QuPathGUI gui;
     private final WorkflowState state;
+    private DualProgressDialog dualProgressDialog;
 
     /**
      * Creates a new acquisition manager.
@@ -262,6 +264,18 @@ public class AcquisitionManager {
 
         // Show initial progress notification
         showAcquisitionStartNotification(angleExposures);
+        
+        // Create and show dual progress dialog
+        dualProgressDialog = new DualProgressDialog(state.annotations.size(), true);
+        dualProgressDialog.setCancelCallback(v -> {
+            logger.info("User requested workflow cancellation via dual progress dialog");
+            try {
+                MicroscopeController.getInstance().getSocketClient().cancelAcquisition();
+            } catch (IOException e) {
+                logger.error("Failed to send cancel command", e);
+            }
+        });
+        dualProgressDialog.show();
 
         // Process each annotation sequentially
         CompletableFuture<Boolean> acquisitionChain = CompletableFuture.completedFuture(true);
@@ -284,15 +298,34 @@ public class AcquisitionManager {
                 return performSingleAnnotationAcquisition(annotation, angleExposures)
                         .thenApply(success -> {
                             if (success) {
+                                // Mark annotation complete in dual progress dialog
+                                if (dualProgressDialog != null) {
+                                    dualProgressDialog.completeCurrentAnnotation();
+                                }
                                 // Launch stitching asynchronously after successful acquisition
                                 launchStitching(annotation, angleExposures);
+                            } else {
+                                // Show error in dual progress dialog
+                                if (dualProgressDialog != null) {
+                                    dualProgressDialog.showError("Failed to acquire " + annotation.getName());
+                                }
                             }
                             return success;
                         });
             });
         }
 
-        return acquisitionChain;
+        return acquisitionChain.whenComplete((result, error) -> {
+            // Close dual progress dialog when workflow completes or fails
+            if (dualProgressDialog != null) {
+                if (error != null) {
+                    dualProgressDialog.showError("Workflow failed: " + error.getMessage());
+                } else if (!result) {
+                    dualProgressDialog.showError("Workflow was cancelled");
+                }
+                // Dialog will auto-close after completion or error display
+            }
+        });
     }
 
     /**
@@ -484,34 +517,23 @@ public class AcquisitionManager {
 
         // Create progress counter
         AtomicInteger progressCounter = new AtomicInteger(0);
-
-        // Show progress bar with cancel support
-        UIFunctions.ProgressHandle progressHandle = null;
-        if (expectedFiles > 0) {
-            progressHandle = UIFunctions.showProgressBarAsync(
-                    progressCounter,
-                    expectedFiles,
-                    ACQUISITION_TIMEOUT_MS,
-                    true // Show cancel button
-            );
-
-            // Set up cancel callback
-            final UIFunctions.ProgressHandle finalHandle = progressHandle;
-            progressHandle.setCancelCallback(v -> {
-                logger.info("User requested acquisition cancellation");
-                try {
-                    socketClient.cancelAcquisition();
-                } catch (IOException e) {
-                    logger.error("Failed to send cancel command", e);
-                }
-            });
+        
+        // Start tracking this annotation in the dual progress dialog
+        if (dualProgressDialog != null && !dualProgressDialog.isCancelled()) {
+            dualProgressDialog.startAnnotation(annotation.getName(), expectedFiles);
         }
 
         try {
             // Monitor acquisition with regular status updates
             MicroscopeSocketClient.AcquisitionState finalState =
                     socketClient.monitorAcquisition(
-                            progress -> progressCounter.set(progress.current),
+                            progress -> {
+                                progressCounter.set(progress.current);
+                                // Update dual progress dialog
+                                if (dualProgressDialog != null && !dualProgressDialog.isCancelled()) {
+                                    dualProgressDialog.updateCurrentAnnotationProgress(progress.current);
+                                }
+                            },
                             500,    // Poll every 500ms for responsive UI
                             ACQUISITION_TIMEOUT_MS
                     );
@@ -525,6 +547,10 @@ public class AcquisitionManager {
                 case CANCELLED:
                     logger.warn("Acquisition was cancelled for {}", annotation.getName());
                     showCancellationNotification();
+                    // Check if cancellation came from dual progress dialog
+                    if (dualProgressDialog != null && dualProgressDialog.isCancelled()) {
+                        logger.info("Cancellation was initiated via dual progress dialog");
+                    }
                     return false;
 
                 case FAILED:
@@ -539,9 +565,7 @@ public class AcquisitionManager {
             logger.error("Acquisition monitoring interrupted", e);
             throw new RuntimeException(e);
         } finally {
-            if (progressHandle != null) {
-                progressHandle.close();
-            }
+            // No individual progress handle to close - dual dialog manages its own lifecycle
         }
     }
 
