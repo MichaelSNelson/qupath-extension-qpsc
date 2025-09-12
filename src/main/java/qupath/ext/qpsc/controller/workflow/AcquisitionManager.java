@@ -267,11 +267,11 @@ public class AcquisitionManager {
         showAcquisitionStartNotification(angleExposures);
         
         // Create and show dual progress dialog on JavaFX Application Thread
-        CompletableFuture<Void> dialogSetup = new CompletableFuture<>();
+        CompletableFuture<DualProgressDialog> dialogSetup = new CompletableFuture<>();
         Platform.runLater(() -> {
             try {
-                dualProgressDialog = new DualProgressDialog(state.annotations.size(), true);
-                dualProgressDialog.setCancelCallback(v -> {
+                DualProgressDialog dialog = new DualProgressDialog(state.annotations.size(), true);
+                dialog.setCancelCallback(v -> {
                     logger.info("User requested workflow cancellation via dual progress dialog");
                     try {
                         MicroscopeController.getInstance().getSocketClient().cancelAcquisition();
@@ -279,22 +279,22 @@ public class AcquisitionManager {
                         logger.error("Failed to send cancel command", e);
                     }
                 });
-                dualProgressDialog.show();
-                dialogSetup.complete(null);
+                dialog.show();
+                dualProgressDialog = dialog; // Set field for other method access
+                dialogSetup.complete(dialog);
             } catch (Exception e) {
                 dialogSetup.completeExceptionally(e);
             }
         });
         
-        // Wait for dialog setup to complete
+        // Wait for dialog setup to complete and get final reference
+        final DualProgressDialog progressDialog;
         try {
-            dialogSetup.get(5, TimeUnit.SECONDS);
+            progressDialog = dialogSetup.get(5, TimeUnit.SECONDS);
         } catch (Exception e) {
             logger.error("Failed to setup dual progress dialog", e);
+            return CompletableFuture.completedFuture(false);
         }
-
-        // Create final reference to dialog for lambda access
-        final DualProgressDialog progressDialog = dualProgressDialog;
 
         // Process each annotation sequentially
         CompletableFuture<Boolean> acquisitionChain = CompletableFuture.completedFuture(true);
@@ -314,7 +314,7 @@ public class AcquisitionManager {
 
                 showProgressNotification(index, total, annotation.getName());
 
-                return performSingleAnnotationAcquisition(annotation, angleExposures)
+                return performSingleAnnotationAcquisition(annotation, angleExposures, progressDialog)
                         .thenApply(success -> {
                             if (success) {
                                 // Mark annotation complete in dual progress dialog
@@ -363,7 +363,8 @@ public class AcquisitionManager {
      */
     private CompletableFuture<Boolean> performSingleAnnotationAcquisition(
             PathObject annotation,
-            List<AngleExposure> angleExposures) {
+            List<AngleExposure> angleExposures,
+            DualProgressDialog progressDialog) {
 
         return CompletableFuture.supplyAsync(() -> {
             try {
@@ -536,9 +537,6 @@ public class AcquisitionManager {
 
         // Create progress counter
         AtomicInteger progressCounter = new AtomicInteger(0);
-        
-        // Create final reference for lambda access
-        final DualProgressDialog progressDialog = dualProgressDialog;
         
         // Start tracking this annotation in the dual progress dialog
         if (progressDialog != null && !progressDialog.isCancelled()) {
