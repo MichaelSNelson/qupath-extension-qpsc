@@ -53,6 +53,9 @@ public class MicroscopeSocketClient implements AutoCloseable {
     private final AtomicBoolean connected = new AtomicBoolean(false);
     private final AtomicBoolean shuttingDown = new AtomicBoolean(false);
     private final AtomicLong lastActivityTime = new AtomicLong(System.currentTimeMillis());
+    
+    // Acquisition error tracking
+    private volatile String lastFailureMessage = null;
 
     // Reconnection handling
     private final ScheduledExecutorService reconnectExecutor = Executors.newSingleThreadScheduledExecutor(
@@ -752,15 +755,29 @@ public class MicroscopeSocketClient implements AutoCloseable {
         // Check if this is actually a SUCCESS or FAILED message from background acquisition
         if (stateStr.startsWith("SUCCESS:")) {
             logger.info("Received SUCCESS message during status check: {}", stateStr.trim());
+            lastFailureMessage = null; // Clear any previous failure message
             return AcquisitionState.COMPLETED;
         } else if (stateStr.startsWith("FAILED:")) {
-            logger.info("Received FAILED message during status check: {}", stateStr.trim());
+            String failureDetails = stateStr.substring("FAILED:".length()).trim();
+            lastFailureMessage = failureDetails.isEmpty() ? "Unknown server error" : failureDetails;
+            logger.error("Received FAILED message during status check: {} - Details: {}", 
+                    stateStr.trim(), lastFailureMessage);
             return AcquisitionState.FAILED;
         }
         
         AcquisitionState state = AcquisitionState.fromString(stateStr);
         logger.debug("Acquisition status: {}", state);
         return state;
+    }
+
+    /**
+     * Gets the last failure message received from the server.
+     * This provides detailed information about why an acquisition failed.
+     * 
+     * @return The last failure message, or null if no failure occurred or message is unavailable
+     */
+    public String getLastFailureMessage() {
+        return lastFailureMessage;
     }
 
     /**

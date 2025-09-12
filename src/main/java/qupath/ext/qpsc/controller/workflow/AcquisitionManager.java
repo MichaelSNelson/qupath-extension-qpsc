@@ -573,7 +573,11 @@ public class AcquisitionManager {
                     return false;
 
                 case FAILED:
-                    throw new RuntimeException("Acquisition failed on server");
+                    // Get detailed failure message from server
+                    String failureMessage = socketClient.getLastFailureMessage();
+                    String errorDetails = failureMessage != null ? failureMessage : "Unknown server error";
+                    logger.error("Server acquisition failed: {}", errorDetails);
+                    throw new RuntimeException("Acquisition failed on server: " + errorDetails);
 
                 default:
                     logger.warn("Unexpected acquisition state: {}", finalState);

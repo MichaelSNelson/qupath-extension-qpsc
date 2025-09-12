@@ -10,6 +10,7 @@ import qupath.ext.qpsc.ui.SampleSetupController;
 import qupath.ext.qpsc.ui.UIFunctions;
 import qupath.ext.qpsc.utilities.MacroImageUtility;
 import qupath.ext.qpsc.utilities.MinorFunctions;
+import qupath.ext.qpsc.utilities.ObjectiveUtils;
 import qupath.ext.qpsc.utilities.QPProjectFunctions;
 import qupath.lib.gui.QuPathGUI;
 import qupath.lib.projects.ProjectImageEntry;
@@ -122,11 +123,18 @@ public class ProjectHelper {
 
                 if (gui.getProject() == null) {
                     logger.info("Creating new project");
+                    
+                    // Use enhanced modality name for consistent folder structure
+                    String enhancedModality = ObjectiveUtils.createEnhancedFolderName(
+                            sample.modality(), sample.objective());
+                    logger.info("Using enhanced modality for project: {} -> {}", 
+                            sample.modality(), enhancedModality);
+                    
                     projectDetails = QPProjectFunctions.createAndOpenQuPathProject(
                             gui,
                             sample.projectsFolder().getAbsolutePath(),
                             sample.sampleName(),
-                            sample.modality(),
+                            enhancedModality,
                             flippedX,
                             flippedY
                     );
@@ -139,10 +147,17 @@ public class ProjectHelper {
                     }
                 } else {
                     logger.info("Using existing project");
+                    
+                    // Use enhanced modality name for consistent folder structure  
+                    String enhancedModality = ObjectiveUtils.createEnhancedFolderName(
+                            sample.modality(), sample.objective());
+                    logger.info("Using enhanced modality for existing project: {} -> {}", 
+                            sample.modality(), enhancedModality);
+                    
                     projectDetails = QPProjectFunctions.getCurrentProjectInformation(
                             sample.projectsFolder().getAbsolutePath(),
                             sample.sampleName(),
-                            sample.modality()
+                            enhancedModality
                     );
 
                     // Handle image import if needed
