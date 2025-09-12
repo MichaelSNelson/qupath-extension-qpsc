@@ -65,7 +65,7 @@ public class QPProjectFunctions {
      * @param qupathGUI           the QuPath GUI instance
      * @param projectsFolderPath  root folder for all projects
      * @param sampleLabel         subfolder / project name
-     * @param sampleModality      imaging modality
+     * @param enhancedModality      enhanced imaging modality (includes magnification)
      * @param isSlideFlippedX     flip X on import?
      * @param isSlideFlippedY     flip Y on import?
      * @return a Map containing project details
@@ -74,14 +74,14 @@ public class QPProjectFunctions {
             QuPathGUI qupathGUI,
             String projectsFolderPath,
             String sampleLabel,
-            String sampleModality,
+            String enhancedModality,
             boolean isSlideFlippedX,
             boolean isSlideFlippedY) throws IOException {
 
         logger.info("Creating/opening project: {} in {}", sampleLabel, projectsFolderPath);
 
         // 1) Prepare folders and preferences
-        ProjectSetup setup = prepareProjectFolders(projectsFolderPath, sampleLabel, sampleModality);
+        ProjectSetup setup = prepareProjectFolders(projectsFolderPath, sampleLabel, enhancedModality);
 
         // 2) Create or load the actual QuPath project file
         Project<BufferedImage> project = createOrLoadProject(projectsFolderPath, sampleLabel);
@@ -326,13 +326,14 @@ public class QPProjectFunctions {
     private static ProjectSetup prepareProjectFolders(
             String projectsFolderPath,
             String sampleLabel,
-            String modality) {
+            String enhancedModality) {
 
-        // e.g. "4x_bf" → "4x_bf_1", "4x_bf_2", ...
+        // Enhanced modality already includes magnification (e.g. "ppm_10x")
+        // Apply unique folder naming to get indexed version (e.g. "ppm_10x_1", "ppm_10x_2", ...)
         String imagingModeWithIndex = MinorFunctions.getUniqueFolderName(
-                Paths.get(projectsFolderPath, sampleLabel, modality).toString());
+                Paths.get(projectsFolderPath, sampleLabel, enhancedModality).toString());
 
-        // full path: /…/projectsFolder/sampleLabel/4x_bf_1
+        // full path: /…/projectsFolder/sampleLabel/ppm_10x_1
         String tempTileDirectory = Paths.get(
                         projectsFolderPath, sampleLabel, imagingModeWithIndex)
                 .toString();
@@ -352,14 +353,21 @@ public class QPProjectFunctions {
 
     /**
      * Returns project info for an already open project.
+     * 
+     * @param projectsFolderPath the root folder for all projects
+     * @param sampleLabel the sample label/name
+     * @param enhancedModality the enhanced imaging mode/modality name (includes magnification)
+     * @return map containing project info including "tempTileDirectory" and "imagingModeWithIndex"
      */
     public static Map<String,Object> getCurrentProjectInformation(
             String projectsFolderPath,
             String sampleLabel,
-            String imagingModality) {
+            String enhancedModality) {
         Project<?> project = QP.getProject();
+        // Enhanced modality already includes magnification (e.g. "ppm_10x")
+        // Apply unique folder naming to get indexed version (e.g. "ppm_10x_1", "ppm_10x_2", ...)
         String imagingModeWithIndex = MinorFunctions.getUniqueFolderName(
-                projectsFolderPath + File.separator + sampleLabel + File.separator + imagingModality);
+                projectsFolderPath + File.separator + sampleLabel + File.separator + enhancedModality);
         String tempTileDirectory = projectsFolderPath + File.separator + sampleLabel + File.separator + imagingModeWithIndex;
         ProjectImageEntry<?> matchingImage = QP.getProjectEntry();
 
