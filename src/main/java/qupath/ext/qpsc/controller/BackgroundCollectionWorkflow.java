@@ -20,6 +20,11 @@ import java.io.FileWriter;
 import java.io.PrintWriter;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.ArrayList;
+import org.yaml.snakeyaml.Yaml;
+import org.yaml.snakeyaml.DumperOptions;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -277,7 +282,7 @@ public class BackgroundCollectionWorkflow {
     ) {}
     
     /**
-     * Save background collection defaults to a text file for future reference.
+     * Save background collection defaults to a YAML file for future reference.
      * This file contains all the settings used for background acquisition, which is important
      * for ensuring consistent background correction parameters.
      * 
@@ -292,69 +297,83 @@ public class BackgroundCollectionWorkflow {
             String detector, List<AngleExposure> angleExposures) throws IOException {
         
         // Create settings file in the same directory as the background images
-        java.io.File settingsFile = new java.io.File(outputPath, "background_settings.txt");
+        java.io.File settingsFile = new java.io.File(outputPath, "background_settings.yml");
         
         logger.info("Saving background collection settings to: {}", settingsFile.getAbsolutePath());
         
-        try (PrintWriter writer = new PrintWriter(new FileWriter(settingsFile))) {
-            // Header with timestamp
-            writer.println("# QPSC Background Collection Settings");
-            writer.println("# Generated: " + LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME));
-            writer.println("# This file contains the settings used for background image acquisition.");
-            writer.println("# Keep this file with the background images for reference.");
-            writer.println();
+        // Configure YAML output format
+        DumperOptions options = new DumperOptions();
+        options.setIndent(2);
+        options.setPrettyFlow(true);
+        options.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK);
+        Yaml yaml = new Yaml(options);
+        
+        // Build YAML structure using LinkedHashMap to preserve order
+        Map<String, Object> yamlData = new LinkedHashMap<>();
+        
+        // Add header comment (will be written separately)
+        String timestamp = LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME);
+        
+        // Metadata section
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("generated", timestamp);
+        metadata.put("version", "1.0");
+        metadata.put("description", "QPSC Background Collection Settings - Contains settings used for background image acquisition");
+        yamlData.put("metadata", metadata);
+        
+        // Hardware configuration
+        Map<String, Object> hardware = new LinkedHashMap<>();
+        hardware.put("modality", modality);
+        hardware.put("objective", objective != null ? objective : "unknown");
+        hardware.put("detector", detector != null ? detector : "unknown");
+        hardware.put("magnification", extractMagnificationFromObjective(objective));
+        yamlData.put("hardware", hardware);
+        
+        // Acquisition settings
+        Map<String, Object> acquisition = new LinkedHashMap<>();
+        acquisition.put("total_angles", angleExposures.size());
+        
+        // Extract angles and exposures as separate arrays
+        List<Double> angles = new ArrayList<>();
+        List<Double> exposures = new ArrayList<>();
+        for (AngleExposure ae : angleExposures) {
+            angles.add(ae.ticks());
+            exposures.add(ae.exposureMs());
+        }
+        acquisition.put("angles_degrees", angles);
+        acquisition.put("exposures_ms", exposures);
+        yamlData.put("acquisition", acquisition);
+        
+        // Detailed angle-exposure pairs
+        List<Map<String, Double>> angleExposureList = new ArrayList<>();
+        for (AngleExposure ae : angleExposures) {
+            Map<String, Double> pair = new LinkedHashMap<>();
+            pair.put("angle", ae.ticks());
+            pair.put("exposure", ae.exposureMs());
+            angleExposureList.add(pair);
+        }
+        yamlData.put("angle_exposures", angleExposureList);
+        
+        // Usage notes
+        List<String> notes = new ArrayList<>();
+        notes.add("Use these exact settings for background correction to work properly");
+        notes.add("If exposure times are changed, new background images must be acquired");
+        notes.add("This file should be included when sharing background image sets");
+        notes.add("Images are saved as: <angle>.tif (e.g., 0.0.tif, 90.0.tif)");
+        yamlData.put("notes", notes);
+        
+        // Write YAML file with header comment
+        try (FileWriter writer = new FileWriter(settingsFile)) {
+            // Write header comment
+            writer.write("# QPSC Background Collection Settings\n");
+            writer.write("# Generated: " + timestamp + "\n");
+            writer.write("# Keep this file with the background images for reference\n\n");
             
-            // Hardware configuration
-            writer.println("# Hardware Configuration");
-            writer.println("modality=" + modality);
-            writer.println("objective=" + (objective != null ? objective : "unknown"));
-            writer.println("detector=" + (detector != null ? detector : "unknown"));
-            writer.println("magnification=" + extractMagnificationFromObjective(objective));
-            writer.println();
-            
-            // Acquisition settings
-            writer.println("# Acquisition Settings");
-            writer.println("total_angles=" + angleExposures.size());
-            writer.println();
-            
-            // Angle and exposure details
-            writer.println("# Angle and Exposure Details");
-            writer.println("# Format: angle_degrees=exposure_ms");
-            for (AngleExposure ae : angleExposures) {
-                writer.printf("angle_%.1f=%.1f%n", ae.ticks(), ae.exposureMs());
-            }
-            writer.println();
-            
-            // Summary for easy reference
-            writer.println("# Summary");
-            writer.print("angles=(");
-            writer.print(angleExposures.stream()
-                    .map(ae -> String.format("%.1f", ae.ticks()))
-                    .collect(java.util.stream.Collectors.joining(",")));
-            writer.println(")");
-            
-            writer.print("exposures_ms=(");
-            writer.print(angleExposures.stream()
-                    .map(ae -> String.format("%.1f", ae.exposureMs()))
-                    .collect(java.util.stream.Collectors.joining(",")));
-            writer.println(")");
-            writer.println();
-            
-            // File structure note
-            writer.println("# Background Image File Structure");
-            writer.println("# Images are saved in this directory with the naming convention:");
-            writer.println("# background_<angle>deg_<timestamp>.tiff");
-            writer.println("# Example: background_0.0deg_20250110_143052.tiff");
-            writer.println();
-            
-            // Usage notes
-            writer.println("# Usage Notes");
-            writer.println("# - Use these exact settings for background correction to work properly");
-            writer.println("# - If exposure times are changed, new background images must be acquired");
-            writer.println("# - This file should be included when sharing background image sets");
+            // Write YAML data
+            yaml.dump(yamlData, writer);
         }
         
-        logger.info("Background collection settings saved successfully");
+        logger.info("Background collection settings saved successfully as YAML");
     }
 
     /**

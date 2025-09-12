@@ -10,13 +10,15 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import org.yaml.snakeyaml.Yaml;
 
 /**
  * BackgroundSettingsReader - Utility for reading background collection settings files
  * 
- * <p>This class reads the background_settings.txt files created during background collection
+ * <p>This class reads the background_settings.yml files created during background collection
  * and provides access to the stored acquisition parameters. This enables validation and
  * autofilling of background correction settings to ensure consistency.</p>
  */
@@ -73,9 +75,9 @@ public class BackgroundSettingsReader {
             // Extract magnification from objective
             String magnification = extractMagnificationFromObjective(objective);
             
-            // Construct expected path: baseFolder/detector/modality/magnification/background_settings.txt
+            // Construct expected path: baseFolder/detector/modality/magnification/background_settings.yml
             File settingsFile = new File(baseBackgroundFolder, 
-                    detector + File.separator + modality + File.separator + magnification + File.separator + "background_settings.txt");
+                    detector + File.separator + modality + File.separator + magnification + File.separator + "background_settings.yml");
             
             logger.debug("Looking for background settings at: {}", settingsFile.getAbsolutePath());
             
@@ -95,60 +97,40 @@ public class BackgroundSettingsReader {
     /**
      * Read background settings from a specific file.
      * 
-     * @param settingsFile The background_settings.txt file to read
+     * @param settingsFile The background_settings.yml file to read
      * @return BackgroundSettings if valid, null otherwise
      */
     public static BackgroundSettings readBackgroundSettings(File settingsFile) {
         logger.info("Reading background settings from: {}", settingsFile.getAbsolutePath());
         
-        try (BufferedReader reader = new BufferedReader(new FileReader(settingsFile))) {
-            String modality = null;
-            String objective = null;
-            String detector = null;
-            String magnification = null;
+        try (FileReader reader = new FileReader(settingsFile)) {
+            Yaml yaml = new Yaml();
+            Map<String, Object> yamlData = yaml.load(reader);
+            
+            if (yamlData == null) {
+                logger.warn("YAML file is empty or invalid: {}", settingsFile.getAbsolutePath());
+                return null;
+            }
+            
+            // Extract hardware configuration
+            Map<String, Object> hardware = getMap(yamlData, "hardware");
+            String modality = getString(hardware, "modality");
+            String objective = getString(hardware, "objective");
+            String detector = getString(hardware, "detector");
+            String magnification = getString(hardware, "magnification");
+            
+            // Extract angle-exposure pairs from the structured list
             List<AngleExposure> angleExposures = new ArrayList<>();
+            List<Map<String, Object>> angleExposureList = getMapList(yamlData, "angle_exposures");
             
-            // Pattern for angle_<degrees>=<exposure> lines
-            Pattern anglePattern = Pattern.compile("angle_([+-]?\\d+\\.\\d+)=([+-]?\\d+\\.\\d+)");
-            
-            String line;
-            while ((line = reader.readLine()) != null) {
-                line = line.trim();
-                
-                // Skip comments and empty lines
-                if (line.isEmpty() || line.startsWith("#")) {
-                    continue;
-                }
-                
-                // Parse key=value pairs
-                if (line.contains("=")) {
-                    String[] parts = line.split("=", 2);
-                    String key = parts[0].trim();
-                    String value = parts[1].trim();
+            if (angleExposureList != null) {
+                for (Map<String, Object> pair : angleExposureList) {
+                    Double angle = getDouble(pair, "angle");
+                    Double exposure = getDouble(pair, "exposure");
                     
-                    switch (key) {
-                        case "modality":
-                            modality = value;
-                            break;
-                        case "objective":
-                            objective = value;
-                            break;
-                        case "detector":
-                            detector = value;
-                            break;
-                        case "magnification":
-                            magnification = value;
-                            break;
-                        default:
-                            // Check if this is an angle_<degrees>=<exposure> line
-                            Matcher angleMatcher = anglePattern.matcher(line);
-                            if (angleMatcher.matches()) {
-                                double angle = Double.parseDouble(angleMatcher.group(1));
-                                double exposure = Double.parseDouble(angleMatcher.group(2));
-                                angleExposures.add(new AngleExposure(angle, exposure));
-                                logger.debug("Parsed angle exposure: {}° = {}ms", angle, exposure);
-                            }
-                            break;
+                    if (angle != null && exposure != null) {
+                        angleExposures.add(new AngleExposure(angle, exposure));
+                        logger.debug("Parsed angle exposure: {}° = {}ms", angle, exposure);
                     }
                 }
             }
@@ -168,8 +150,8 @@ public class BackgroundSettingsReader {
         } catch (IOException e) {
             logger.error("Failed to read background settings file: {}", settingsFile.getAbsolutePath(), e);
             return null;
-        } catch (NumberFormatException e) {
-            logger.error("Invalid number format in background settings file: {}", settingsFile.getAbsolutePath(), e);
+        } catch (Exception e) {
+            logger.error("Error parsing YAML background settings file: {}", settingsFile.getAbsolutePath(), e);
             return null;
         }
     }
@@ -243,5 +225,63 @@ public class BackgroundSettingsReader {
         
         // Fallback: return "unknown" if pattern not found
         return "unknown";
+    }
+    
+    /**
+     * Safely extract a Map from YAML data
+     */
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> getMap(Map<String, Object> data, String key) {
+        if (data == null || key == null) return null;
+        Object value = data.get(key);
+        return (value instanceof Map) ? (Map<String, Object>) value : null;
+    }
+    
+    /**
+     * Safely extract a String from YAML data
+     */
+    private static String getString(Map<String, Object> data, String key) {
+        if (data == null || key == null) return null;
+        Object value = data.get(key);
+        return (value != null) ? value.toString() : null;
+    }
+    
+    /**
+     * Safely extract a Double from YAML data
+     */
+    private static Double getDouble(Map<String, Object> data, String key) {
+        if (data == null || key == null) return null;
+        Object value = data.get(key);
+        if (value instanceof Number) {
+            return ((Number) value).doubleValue();
+        }
+        if (value instanceof String) {
+            try {
+                return Double.parseDouble((String) value);
+            } catch (NumberFormatException e) {
+                return null;
+            }
+        }
+        return null;
+    }
+    
+    /**
+     * Safely extract a List of Maps from YAML data
+     */
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> getMapList(Map<String, Object> data, String key) {
+        if (data == null || key == null) return null;
+        Object value = data.get(key);
+        if (value instanceof List) {
+            List<?> list = (List<?>) value;
+            List<Map<String, Object>> result = new ArrayList<>();
+            for (Object item : list) {
+                if (item instanceof Map) {
+                    result.add((Map<String, Object>) item);
+                }
+            }
+            return result;
+        }
+        return null;
     }
 }
