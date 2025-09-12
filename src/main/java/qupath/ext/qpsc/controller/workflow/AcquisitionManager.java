@@ -288,11 +288,10 @@ public class AcquisitionManager {
         });
         
         // Wait for dialog setup to complete and get final reference
-        final DualProgressDialog progressDialog;
-        try {
-            progressDialog = dialogSetup.get(5, TimeUnit.SECONDS);
-        } catch (Exception e) {
-            logger.error("Failed to setup dual progress dialog", e);
+        final DualProgressDialog progressDialog = getDialogSafely(dialogSetup);
+        
+        // If dialog creation failed, return early
+        if (progressDialog == null) {
             return CompletableFuture.completedFuture(false);
         }
 
@@ -687,6 +686,18 @@ public class AcquisitionManager {
                     current, total, annotationName);
             Dialogs.showInfoNotification("Acquisition Progress", message);
         });
+    }
+
+    /**
+     * Safely retrieves the dialog from the CompletableFuture with timeout handling.
+     */
+    private DualProgressDialog getDialogSafely(CompletableFuture<DualProgressDialog> dialogSetup) {
+        try {
+            return dialogSetup.get(5, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            logger.error("Failed to setup dual progress dialog", e);
+            return null;
+        }
     }
 
     /**
