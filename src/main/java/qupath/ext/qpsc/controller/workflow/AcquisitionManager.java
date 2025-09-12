@@ -36,6 +36,7 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
@@ -266,18 +267,31 @@ public class AcquisitionManager {
         showAcquisitionStartNotification(angleExposures);
         
         // Create and show dual progress dialog on JavaFX Application Thread
+        CompletableFuture<Void> dialogSetup = new CompletableFuture<>();
         Platform.runLater(() -> {
-            dualProgressDialog = new DualProgressDialog(state.annotations.size(), true);
-            dualProgressDialog.setCancelCallback(v -> {
-                logger.info("User requested workflow cancellation via dual progress dialog");
-                try {
-                    MicroscopeController.getInstance().getSocketClient().cancelAcquisition();
-                } catch (IOException e) {
-                    logger.error("Failed to send cancel command", e);
-                }
-            });
-            dualProgressDialog.show();
+            try {
+                dualProgressDialog = new DualProgressDialog(state.annotations.size(), true);
+                dualProgressDialog.setCancelCallback(v -> {
+                    logger.info("User requested workflow cancellation via dual progress dialog");
+                    try {
+                        MicroscopeController.getInstance().getSocketClient().cancelAcquisition();
+                    } catch (IOException e) {
+                        logger.error("Failed to send cancel command", e);
+                    }
+                });
+                dualProgressDialog.show();
+                dialogSetup.complete(null);
+            } catch (Exception e) {
+                dialogSetup.completeExceptionally(e);
+            }
         });
+        
+        // Wait for dialog setup to complete
+        try {
+            dialogSetup.get(5, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            logger.error("Failed to setup dual progress dialog", e);
+        }
 
         // Process each annotation sequentially
         CompletableFuture<Boolean> acquisitionChain = CompletableFuture.completedFuture(true);
