@@ -265,17 +265,19 @@ public class AcquisitionManager {
         // Show initial progress notification
         showAcquisitionStartNotification(angleExposures);
         
-        // Create and show dual progress dialog
-        dualProgressDialog = new DualProgressDialog(state.annotations.size(), true);
-        dualProgressDialog.setCancelCallback(v -> {
-            logger.info("User requested workflow cancellation via dual progress dialog");
-            try {
-                MicroscopeController.getInstance().getSocketClient().cancelAcquisition();
-            } catch (IOException e) {
-                logger.error("Failed to send cancel command", e);
-            }
+        // Create and show dual progress dialog on JavaFX Application Thread
+        Platform.runLater(() -> {
+            dualProgressDialog = new DualProgressDialog(state.annotations.size(), true);
+            dualProgressDialog.setCancelCallback(v -> {
+                logger.info("User requested workflow cancellation via dual progress dialog");
+                try {
+                    MicroscopeController.getInstance().getSocketClient().cancelAcquisition();
+                } catch (IOException e) {
+                    logger.error("Failed to send cancel command", e);
+                }
+            });
+            dualProgressDialog.show();
         });
-        dualProgressDialog.show();
 
         // Process each annotation sequentially
         CompletableFuture<Boolean> acquisitionChain = CompletableFuture.completedFuture(true);
@@ -300,14 +302,14 @@ public class AcquisitionManager {
                             if (success) {
                                 // Mark annotation complete in dual progress dialog
                                 if (dualProgressDialog != null) {
-                                    dualProgressDialog.completeCurrentAnnotation();
+                                    Platform.runLater(() -> dualProgressDialog.completeCurrentAnnotation());
                                 }
                                 // Launch stitching asynchronously after successful acquisition
                                 launchStitching(annotation, angleExposures);
                             } else {
                                 // Show error in dual progress dialog
                                 if (dualProgressDialog != null) {
-                                    dualProgressDialog.showError("Failed to acquire " + annotation.getName());
+                                    Platform.runLater(() -> dualProgressDialog.showError("Failed to acquire " + annotation.getName()));
                                 }
                             }
                             return success;
@@ -319,9 +321,9 @@ public class AcquisitionManager {
             // Close dual progress dialog when workflow completes or fails
             if (dualProgressDialog != null) {
                 if (error != null) {
-                    dualProgressDialog.showError("Workflow failed: " + error.getMessage());
+                    Platform.runLater(() -> dualProgressDialog.showError("Workflow failed: " + error.getMessage()));
                 } else if (!result) {
-                    dualProgressDialog.showError("Workflow was cancelled");
+                    Platform.runLater(() -> dualProgressDialog.showError("Workflow was cancelled"));
                 }
                 // Dialog will auto-close after completion or error display
             }
@@ -520,7 +522,7 @@ public class AcquisitionManager {
         
         // Start tracking this annotation in the dual progress dialog
         if (dualProgressDialog != null && !dualProgressDialog.isCancelled()) {
-            dualProgressDialog.startAnnotation(annotation.getName(), expectedFiles);
+            Platform.runLater(() -> dualProgressDialog.startAnnotation(annotation.getName(), expectedFiles));
         }
 
         try {
@@ -531,7 +533,7 @@ public class AcquisitionManager {
                                 progressCounter.set(progress.current);
                                 // Update dual progress dialog
                                 if (dualProgressDialog != null && !dualProgressDialog.isCancelled()) {
-                                    dualProgressDialog.updateCurrentAnnotationProgress(progress.current);
+                                    Platform.runLater(() -> dualProgressDialog.updateCurrentAnnotationProgress(progress.current));
                                 }
                             },
                             500,    // Poll every 500ms for responsive UI
