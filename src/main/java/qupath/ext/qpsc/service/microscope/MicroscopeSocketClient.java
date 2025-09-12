@@ -748,6 +748,16 @@ public class MicroscopeSocketClient implements AutoCloseable {
     public AcquisitionState getAcquisitionStatus() throws IOException {
         byte[] response = executeCommand(Command.STATUS, null, 16);
         String stateStr = new String(response, StandardCharsets.UTF_8);
+        
+        // Check if this is actually a SUCCESS or FAILED message from background acquisition
+        if (stateStr.startsWith("SUCCESS:")) {
+            logger.info("Received SUCCESS message during status check: {}", stateStr.trim());
+            return AcquisitionState.COMPLETED;
+        } else if (stateStr.startsWith("FAILED:")) {
+            logger.info("Received FAILED message during status check: {}", stateStr.trim());
+            return AcquisitionState.FAILED;
+        }
+        
         AcquisitionState state = AcquisitionState.fromString(stateStr);
         logger.debug("Acquisition status: {}", state);
         return state;
