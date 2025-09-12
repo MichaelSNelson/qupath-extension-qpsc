@@ -458,8 +458,16 @@ public class MicroscopeSocketClient implements AutoCloseable {
 
         synchronized (socketLock) {
             ensureConnected();
-
+            
+            // Temporarily increase socket timeout for background acquisition
+            // Background acquisition can take 10-15 seconds depending on angles/exposures
+            int originalTimeout = readTimeout;
             try {
+                if (socket != null) {
+                    socket.setSoTimeout(20000); // 20 seconds for background acquisition
+                    logger.debug("Increased socket timeout to 20s for background acquisition");
+                }
+
                 // Send BGACQUIRE command (8 bytes)
                 output.write(Command.BGACQUIRE.getValue());
                 output.flush();
@@ -479,9 +487,44 @@ public class MicroscopeSocketClient implements AutoCloseable {
                 lastActivityTime.set(System.currentTimeMillis());
                 logger.info("Background acquisition command sent successfully");
 
+                // Wait for immediate acknowledgment from server to confirm command was received
+                try {
+                    // Read the STARTED acknowledgment (variable length)
+                    byte[] buffer = new byte[1024];
+                    int bytesRead = input.read(buffer);
+                    if (bytesRead > 0) {
+                        String response = new String(buffer, 0, bytesRead, StandardCharsets.UTF_8);
+                        logger.info("Received server response: {}", response);
+                        
+                        if (response.startsWith("STARTED:")) {
+                            logger.info("Background acquisition started successfully on server");
+                        } else if (response.startsWith("FAILED:")) {
+                            throw new IOException("Server rejected background acquisition: " + response);
+                        } else {
+                            logger.warn("Unexpected server response: {}", response);
+                        }
+                    } else {
+                        logger.warn("No acknowledgment received from server");
+                    }
+                    lastActivityTime.set(System.currentTimeMillis());
+                } catch (IOException e) {
+                    logger.error("Failed to receive server acknowledgment", e);
+                    throw new IOException("Failed to receive server acknowledgment for background acquisition", e);
+                }
+
             } catch (IOException | InterruptedException e) {
                 handleIOException(new IOException("Failed to send background acquisition command", e));
                 throw new IOException("Failed to send background acquisition command", e);
+            } finally {
+                // Restore original timeout
+                if (socket != null) {
+                    try {
+                        socket.setSoTimeout(originalTimeout);
+                        logger.debug("Restored socket timeout to {}ms", originalTimeout);
+                    } catch (IOException e) {
+                        logger.warn("Failed to restore original socket timeout", e);
+                    }
+                }
             }
         }
     }
@@ -787,16 +830,30 @@ public class MicroscopeSocketClient implements AutoCloseable {
                 if (currentState == AcquisitionState.RUNNING && progressCallback != null) {
                     try {
                         AcquisitionProgress progress = getAcquisitionProgress();
-                        progressCallback.accept(progress);
+                        
+                        // For background acquisition, progress might start at -1/-1, which is normal
+                        // Only report valid progress values
+                        if (progress != null && progress.current >= 0 && progress.total >= 0) {
+                            progressCallback.accept(progress);
 
-                        // Check if progress was actually made
-                        if (progress != null && progress.current > lastProgressCount) {
+                            // Check if progress was actually made
+                            if (progress.current > lastProgressCount) {
+                                lastProgressTime = System.currentTimeMillis();
+                                lastProgressCount = progress.current;
+                                logger.debug("Progress updated: {}/{} files, resetting timeout", progress.current, progress.total);
+                            }
+                        } else {
+                            // Invalid progress (-1/-1), but still reset timeout if we got a response
                             lastProgressTime = System.currentTimeMillis();
-                            lastProgressCount = progress.current;
-                            logger.debug("Progress updated: {} files, resetting timeout", progress.current);
+                            logger.debug("Received progress response (server still working): {}/{}", 
+                                    progress != null ? progress.current : "null", 
+                                    progress != null ? progress.total : "null");
                         }
                     } catch (IOException e) {
-                        logger.debug("Failed to get progress: {}", e.getMessage());
+                        logger.debug("Failed to get progress (expected during background acquisition): {}", e.getMessage());
+                        // For background acquisition, progress queries might fail, so don't treat as error
+                        // Just reset timeout to show server is still responsive
+                        lastProgressTime = System.currentTimeMillis();
                     }
                 }
 
