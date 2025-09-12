@@ -487,7 +487,7 @@ public class AcquisitionManager {
                 MicroscopeController.getInstance().startAcquisition(acquisitionBuilder);
 
                 // Monitor progress
-                return monitorAcquisition(annotation, angleExposures);
+                return monitorAcquisition(annotation, angleExposures, progressDialog);
 
             } catch (Exception e) {
                 logger.error("Acquisition failed for {}", annotation.getName(), e);
@@ -513,7 +513,8 @@ public class AcquisitionManager {
      * @throws IOException if communication with microscope fails
      */
     private boolean monitorAcquisition(PathObject annotation,
-                                       List<AngleExposure> angleExposures) throws IOException {
+                                       List<AngleExposure> angleExposures,
+                                       DualProgressDialog progressDialog) throws IOException {
 
         MicroscopeSocketClient socketClient = MicroscopeController.getInstance().getSocketClient();
 
@@ -526,10 +527,9 @@ public class AcquisitionManager {
         ).toString();
 
         int tilesPerAngle = MinorFunctions.countTifEntriesInTileConfig(List.of(tileDirPath));
-        int expectedFiles = tilesPerAngle;
-        if (angleExposures != null && !angleExposures.isEmpty()) {
-            expectedFiles *= angleExposures.size();
-        }
+        final int expectedFiles = angleExposures != null && !angleExposures.isEmpty() 
+            ? tilesPerAngle * angleExposures.size() 
+            : tilesPerAngle;
 
         logger.info("Expected files: {} ({}x{} angles)", expectedFiles, tilesPerAngle,
                 angleExposures != null ? angleExposures.size() : 1);
