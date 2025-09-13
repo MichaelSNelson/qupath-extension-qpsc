@@ -210,8 +210,7 @@ public class BoundingBoxWorkflow {
                                         .collect(Collectors.toList());
                                 logger.info("Rotation angles for {}: {}", sample.modality(), rotationAngles);
 
-                                // Prepare acquisition arguments
-                                String configFileLocation = QPPreferenceDialog.getMicroscopeConfigFileProperty();
+                                // Prepare acquisition arguments (using configFileLocation from above)
                                 String boundsMode = "bounds";
 
                                 // ========== SOCKET-BASED ACQUISITION ==========

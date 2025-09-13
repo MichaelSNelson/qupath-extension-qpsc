@@ -447,7 +447,7 @@ public class AcquisitionManager {
 
                 // Build enhanced acquisition command
                 AcquisitionCommandBuilder acquisitionBuilder = AcquisitionCommandBuilder.builder()
-                        .yamlPath(configFile)
+                        .yamlPath(configFileLocation)
                         .projectsFolder(state.sample.projectsFolder().getAbsolutePath())
                         .sampleLabel(state.sample.sampleName())
                         .scanType(modalityWithIndex)
