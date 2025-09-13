@@ -76,7 +76,7 @@ public class QPPreferenceDialog {
     private static final StringProperty tileHandlingMethodProperty =
             PathPrefs.createPersistentPreference("tileHandlingProperty", "None");
     private static final DoubleProperty tileOverlapPercentProperty =
-            PathPrefs.createPersistentPreference("tileOverlapPercentProperty", 0.0);
+            PathPrefs.createPersistentPreference("tileOverlapPercentProperty", 10.0);
     private static final ObjectProperty<OMEPyramidWriter.CompressionType> compressionTypeProperty =
             PathPrefs.createPersistentPreference(
                     "compressionType",

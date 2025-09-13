@@ -521,8 +521,11 @@ public class StitchingHelper {
             QuPathGUI gui,
             Project<BufferedImage> project) {
         
-        // Get parent entry (the current open image) 
-        ProjectImageEntry<BufferedImage> parentEntry = project.getEntry(gui.getImageData());
+        // Get parent entry (the current open image) - may be null in BoundingBox workflow
+        ProjectImageEntry<BufferedImage> parentEntry = null;
+        if (gui.getImageData() != null) {
+            parentEntry = project.getEntry(gui.getImageData());
+        }
         
         // For BoundingBox workflow, we don't have actual annotation coordinates
         // The offset should be 0,0 since it's a full-slide acquisition
