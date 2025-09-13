@@ -223,77 +223,17 @@ public class BoundingBoxWorkflow {
 
                                         // Use the existing configManager and configFileLocation from above
 
-                                        // Use explicit hardware selections from sample setup
-                                        String objective = sample.objective();
-                                        String detector = sample.detector();
-                                        double WSI_pixelSize_um_forAcq = finalWSI_pixelSize_um; // Already calculated above
-
-                                        // Get the modality base (without index)
-                                        String baseModality = sample.modality();
-
-                                        // Get background correction settings
-                                        boolean bgEnabled = configManager.getBoolean("modalities", baseModality, "background_correction", "enabled");
-                                        String bgMethod = configManager.getString("modalities", baseModality, "background_correction", "method");
-                                        String bgBaseFolder = configManager.getString("modalities", baseModality, "background_correction", "base_folder");
-                                        
-                                        // Construct detector-specific background folder path
-                                        String bgFolder = null;
-                                        if (bgEnabled && bgBaseFolder != null) {
-                                            // Extract magnification from objective (e.g., "LOCI_OBJECTIVE_OLYMPUS_20X_POL_001" -> "20x")
-                                            String magnification = extractMagnificationFromObjective(objective);
-                                            // Build path: base_folder/detector/modality/magnification
-                                            bgFolder = Paths.get(bgBaseFolder, detector, baseModality, magnification).toString();
-                                            logger.info("Constructed background folder path: {}", bgFolder);
-                                        }
-
-                                        // Get autofocus parameters
-                                        Map<String, Object> afParams = configManager.getAutofocusParams(objective);
-                                        int afTiles = 5;    // defaults
-                                        int afSteps = 11;
-                                        double afRange = 50.0;
-
-                                        if (afParams != null) {
-                                            if (afParams.get("n_tiles") instanceof Number) {
-                                                afTiles = ((Number) afParams.get("n_tiles")).intValue();
-                                            }
-                                            if (afParams.get("n_steps") instanceof Number) {
-                                                afSteps = ((Number) afParams.get("n_steps")).intValue();
-                                            }
-                                            if (afParams.get("search_range_um") instanceof Number) {
-                                                afRange = ((Number) afParams.get("search_range_um")).doubleValue();
-                                            }
-                                        }
-
-                                        // Determine processing pipeline based on detector properties
-                                        List<String> processingSteps = new ArrayList<>();
-                                        if (configManager.detectorRequiresDebayering(detector)) {
-                                            processingSteps.add("debayer");
-                                        }
-                                        if (bgEnabled && bgFolder != null) {
-                                            processingSteps.add("background_correction");
-                                        }
-                                        // Get white balance setting from config for this profile
-                                        boolean whiteBalanceEnabled = configManager.isWhiteBalanceEnabled(baseModality, objective, detector);
-                                        logger.debug("White balance enabled for {}/{}/{}: {}",
-                                                baseModality, objective, detector, whiteBalanceEnabled);
-
-                                        // Build enhanced acquisition command
-                                        AcquisitionCommandBuilder acquisitionBuilder = AcquisitionCommandBuilder.builder()
-                                                .yamlPath(configFileLocation)
-                                                .projectsFolder(projectsFolder)
-                                                .sampleLabel(sample.sampleName())
-                                                .scanType(modeWithIndex)
-                                                .regionName(boundsMode)
-                                                .angleExposures(angleExposures)
-                                                .hardware(objective, detector, WSI_pixelSize_um_forAcq)
-                                                .autofocus(afTiles, afSteps, afRange)
-                                                .processingPipeline(processingSteps)
-                                                .whiteBalance(whiteBalanceEnabled);
-
-                                        // Only add background correction if enabled and configured
-                                        if (bgEnabled && bgMethod != null && bgFolder != null) {
-                                            acquisitionBuilder.backgroundCorrection(true, bgMethod, bgFolder);
-                                        }
+                                        // Build acquisition configuration using shared builder
+                                        AcquisitionConfigurationBuilder.AcquisitionConfiguration config = 
+                                            AcquisitionConfigurationBuilder.buildConfiguration(
+                                                sample, 
+                                                configFileLocation, 
+                                                modeWithIndex, 
+                                                boundsMode, 
+                                                angleExposures, 
+                                                projectsFolder, 
+                                                finalWSI_pixelSize_um
+                                            );
 
                                         logger.info("Starting acquisition with parameters:");
                                         logger.info("  Config: {}", configFileLocation);
@@ -301,11 +241,11 @@ public class BoundingBoxWorkflow {
                                         logger.info("  Sample: {}", sample.sampleName());
                                         logger.info("  Mode: {}", modeWithIndex);
                                         logger.info("  Region: {}", boundsMode);
-                                        logger.info("  Hardware: obj={}, det={}, px={}µm", objective, detector, WSI_pixelSize_um_forAcq);
-                                        logger.info("  Autofocus: {} tiles, {} steps, {}µm range", afTiles, afSteps, afRange);
-                                        logger.info("  Processing: {}", processingSteps);
+                                        logger.info("  Hardware: obj={}, det={}, px={}µm", config.objective(), config.detector(), config.WSI_pixelSize_um());
+                                        logger.info("  Autofocus: {} tiles, {} steps, {}µm range", config.afTiles(), config.afSteps(), config.afRange());
+                                        logger.info("  Processing: {}", config.processingSteps());
                                         logger.info("  Angle-Exposure pairs: {}", angleExposures);
-                                        String commandString = acquisitionBuilder.buildSocketMessage();
+                                        String commandString = config.commandBuilder().buildSocketMessage();
                                         MinorFunctions.saveAcquisitionCommand(
                                                 commandString,
                                                 projectsFolder,
@@ -314,7 +254,7 @@ public class BoundingBoxWorkflow {
                                                 boundsMode
                                         );
                                         // Start acquisition via socket
-                                        MicroscopeController.getInstance().startAcquisition(acquisitionBuilder);
+                                        MicroscopeController.getInstance().startAcquisition(config.commandBuilder());
 
                                         logger.info("Socket acquisition command sent successfully");
 
@@ -529,25 +469,4 @@ public class BoundingBoxWorkflow {
                 }); // This closes the thenAccept from the dialog chain
     }
 
-    /**
-     * Extract magnification from objective identifier.
-     * Examples:
-     * - "LOCI_OBJECTIVE_OLYMPUS_10X_001" -> "10x"
-     * - "LOCI_OBJECTIVE_OLYMPUS_20X_POL_001" -> "20x"
-     * - "LOCI_OBJECTIVE_OLYMPUS_40X_POL_001" -> "40x"
-     */
-    private static String extractMagnificationFromObjective(String objective) {
-        if (objective == null) return "unknown";
-        
-        // Look for pattern like "10X", "20X", "40X"
-        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("(\\d+)X", java.util.regex.Pattern.CASE_INSENSITIVE);
-        java.util.regex.Matcher matcher = pattern.matcher(objective);
-        
-        if (matcher.find()) {
-            return matcher.group(1).toLowerCase() + "x";  // "20X" -> "20x"
-        }
-        
-        // Fallback: return "unknown" if pattern not found
-        return "unknown";
-    }
 }

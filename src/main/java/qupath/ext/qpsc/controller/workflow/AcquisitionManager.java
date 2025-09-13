@@ -16,6 +16,7 @@ import qupath.ext.qpsc.service.microscope.MicroscopeSocketClient;
 import qupath.ext.qpsc.ui.AnnotationAcquisitionDialog;
 import qupath.ext.qpsc.ui.DualProgressDialog;
 import qupath.ext.qpsc.ui.UIFunctions;
+import qupath.ext.qpsc.utilities.AcquisitionConfigurationBuilder;
 import qupath.ext.qpsc.utilities.MicroscopeConfigManager;
 import qupath.ext.qpsc.utilities.MinorFunctions;
 import qupath.ext.qpsc.utilities.TransformationFunctions;
@@ -29,9 +30,7 @@ import qupath.lib.scripting.QP;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.nio.file.Paths;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -377,105 +376,42 @@ public class AcquisitionManager {
                 String modalityWithIndex = state.projectInfo.getImagingModeWithIndex();
                 String baseModality = state.sample.modality();
 
-                // Use explicit hardware selections from sample setup
-                String objective = state.sample.objective();
-                String detector = state.sample.detector();
-                
                 // Get WSI pixel size using explicit hardware configuration
                 double WSI_pixelSize_um;
                 try {
-                    WSI_pixelSize_um = configManager.getModalityPixelSize(baseModality, objective, detector);
+                    WSI_pixelSize_um = configManager.getModalityPixelSize(baseModality, state.sample.objective(), state.sample.detector());
                     logger.debug("Using explicit hardware config: obj={}, det={}, px={}",
-                            objective, detector, WSI_pixelSize_um);
+                            state.sample.objective(), state.sample.detector(), WSI_pixelSize_um);
                 } catch (IllegalArgumentException e) {
                     throw new RuntimeException("Failed to get pixel size for selected hardware configuration: " + 
-                            baseModality + "/" + objective + "/" + detector + " - " + e.getMessage());
+                            baseModality + "/" + state.sample.objective() + "/" + state.sample.detector() + " - " + e.getMessage());
                 }
 
-                // Get background correction settings
-                boolean bgEnabled = configManager.getBoolean("modalities", baseModality,
-                        "background_correction", "enabled");
-                String bgMethod = configManager.getString("modalities", baseModality,
-                        "background_correction", "method");
-                String bgBaseFolder = configManager.getString("modalities", baseModality,
-                        "background_correction", "base_folder");
-                
-                // Construct detector-specific background folder path
-                String bgFolder = null;
-                if (bgEnabled && bgBaseFolder != null) {
-                    // Extract magnification from objective (e.g., "LOCI_OBJECTIVE_OLYMPUS_20X_POL_001" -> "20x")
-                    String magnification = extractMagnificationFromObjective(objective);
-                    // Build path: base_folder/detector/modality/magnification
-                    bgFolder = Paths.get(bgBaseFolder, detector, baseModality, magnification).toString();
-                    logger.info("Constructed background folder path: {}", bgFolder);
-                }
-
-                // Get autofocus parameters for this objective
-                //TODO hardcoded values are bad! need to fix
-                Map<String, Object> afParams = configManager.getAutofocusParams(objective);
-                int afTiles = 5;    // defaults
-                int afSteps = 11;
-                double afRange = 50.0;
-
-                if (afParams != null) {
-                    if (afParams.get("n_tiles") instanceof Number) {
-                        afTiles = ((Number) afParams.get("n_tiles")).intValue();
-                    }
-                    if (afParams.get("n_steps") instanceof Number) {
-                        afSteps = ((Number) afParams.get("n_steps")).intValue();
-                    }
-                    if (afParams.get("search_range_um") instanceof Number) {
-                        afRange = ((Number) afParams.get("search_range_um")).doubleValue();
-                    }
-                }
-
-                // Determine processing pipeline dynamically
-                List<String> processingSteps = new ArrayList<>();
-
-                if (configManager.detectorRequiresDebayering(detector)) {
-                    processingSteps.add("debayer");
-                }
-
-                if (bgEnabled && bgFolder != null) {
-                    processingSteps.add("background_correction");
-                }
-
-                // Get white balance setting from config for this profile
-                boolean whiteBalanceEnabled = configManager.isWhiteBalanceEnabled(baseModality, objective, detector);
-                logger.debug("White balance enabled for {}/{}/{}: {}",
-                        baseModality, objective, detector, whiteBalanceEnabled);
-
-                // Build enhanced acquisition command
-                AcquisitionCommandBuilder acquisitionBuilder = AcquisitionCommandBuilder.builder()
-                        .yamlPath(configFileLocation)
-                        .projectsFolder(state.sample.projectsFolder().getAbsolutePath())
-                        .sampleLabel(state.sample.sampleName())
-                        .scanType(modalityWithIndex)
-                        .regionName(annotation.getName())
-                        .angleExposures(angleExposures)
-                        .hardware(objective, detector, WSI_pixelSize_um)
-                        .autofocus(afTiles, afSteps, afRange)
-                        .processingPipeline(processingSteps)
-                        .whiteBalance(whiteBalanceEnabled);
-
-                // Only add background correction if enabled and configured
-                if (bgEnabled && bgMethod != null && bgFolder != null) {
-                    acquisitionBuilder.backgroundCorrection(true, bgMethod, bgFolder);
-                }
+                // Build acquisition configuration using shared builder
+                AcquisitionConfigurationBuilder.AcquisitionConfiguration config = 
+                    AcquisitionConfigurationBuilder.buildConfiguration(
+                        state.sample, 
+                        configFileLocation, 
+                        modalityWithIndex, 
+                        annotation.getName(), 
+                        angleExposures, 
+                        state.sample.projectsFolder().getAbsolutePath(), 
+                        WSI_pixelSize_um
+                    );
 
                 logger.info("Acquisition parameters for {}:", annotation.getName());
                 logger.info("  Config: {}", configFileLocation);
                 logger.info("  Sample: {}", state.sample.sampleName());
-                logger.info("  Hardware: {} / {} @ {} µm/px", objective, detector, WSI_pixelSize_um);
-                logger.info("  Autofocus: {} tiles, {} steps, {} µm range", afTiles, afSteps, afRange);
-                logger.info("  Processing: {}", processingSteps);
-                if (bgEnabled) {
-                    logger.info("  Background correction: {} method from {}", bgMethod, bgFolder);
+                logger.info("  Hardware: {} / {} @ {} µm/px", config.objective(), config.detector(), config.WSI_pixelSize_um());
+                logger.info("  Autofocus: {} tiles, {} steps, {} µm range", config.afTiles(), config.afSteps(), config.afRange());
+                logger.info("  Processing: {}", config.processingSteps());
+                if (config.bgEnabled()) {
+                    logger.info("  Background correction: {} method from {}", config.bgMethod(), config.bgFolder());
                 }
                 if (angleExposures != null && !angleExposures.isEmpty()) {
                     logger.info("  Angles: {}", angleExposures);
                 }
-                String commandString = acquisitionBuilder.buildSocketMessage();
+                String commandString = config.commandBuilder().buildSocketMessage();
                 MinorFunctions.saveAcquisitionCommand(
                         commandString,
                         state.sample.projectsFolder().getAbsolutePath(),
@@ -484,7 +420,7 @@ public class AcquisitionManager {
                         annotation.getName()
                 );
                 // Start acquisition
-                MicroscopeController.getInstance().startAcquisition(acquisitionBuilder);
+                MicroscopeController.getInstance().startAcquisition(config.commandBuilder());
 
                 // Monitor progress
                 return monitorAcquisition(annotation, angleExposures, progressDialog);
@@ -733,25 +669,4 @@ public class AcquisitionManager {
         );
     }
 
-    /**
-     * Extract magnification from objective identifier.
-     * Examples:
-     * - "LOCI_OBJECTIVE_OLYMPUS_10X_001" -> "10x"
-     * - "LOCI_OBJECTIVE_OLYMPUS_20X_POL_001" -> "20x"
-     * - "LOCI_OBJECTIVE_OLYMPUS_40X_POL_001" -> "40x"
-     */
-    private static String extractMagnificationFromObjective(String objective) {
-        if (objective == null) return "unknown";
-        
-        // Look for pattern like "10X", "20X", "40X"
-        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("(\\d+)X", java.util.regex.Pattern.CASE_INSENSITIVE);
-        java.util.regex.Matcher matcher = pattern.matcher(objective);
-        
-        if (matcher.find()) {
-            return matcher.group(1).toLowerCase() + "x";  // "20X" -> "20x"
-        }
-        
-        // Fallback: return "unknown" if pattern not found
-        return "unknown";
-    }
 }
