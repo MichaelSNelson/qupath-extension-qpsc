@@ -370,8 +370,8 @@ public class AcquisitionManager {
                 logger.info("Starting acquisition for annotation: {}", annotation.getName());
 
                 // Get configuration file path
-                String configFile = QPPreferenceDialog.getMicroscopeConfigFileProperty();
-                MicroscopeConfigManager configManager = MicroscopeConfigManager.getInstance(configFile);
+                String configFileLocation = QPPreferenceDialog.getMicroscopeConfigFileProperty();
+                MicroscopeConfigManager configManager = MicroscopeConfigManager.getInstance(configFileLocation);
 
                 // Extract modality base name
                 String modalityWithIndex = state.projectInfo.getImagingModeWithIndex();
@@ -381,12 +381,12 @@ public class AcquisitionManager {
                 String objective = state.sample.objective();
                 String detector = state.sample.detector();
                 
-                // Get pixel size using explicit hardware configuration
-                double pixelSize;
+                // Get WSI pixel size using explicit hardware configuration
+                double WSI_pixelSize_um;
                 try {
-                    pixelSize = configManager.getModalityPixelSize(baseModality, objective, detector);
+                    WSI_pixelSize_um = configManager.getModalityPixelSize(baseModality, objective, detector);
                     logger.debug("Using explicit hardware config: obj={}, det={}, px={}",
-                            objective, detector, pixelSize);
+                            objective, detector, WSI_pixelSize_um);
                 } catch (IllegalArgumentException e) {
                     throw new RuntimeException("Failed to get pixel size for selected hardware configuration: " + 
                             baseModality + "/" + objective + "/" + detector + " - " + e.getMessage());
@@ -453,7 +453,7 @@ public class AcquisitionManager {
                         .scanType(modalityWithIndex)
                         .regionName(annotation.getName())
                         .angleExposures(angleExposures)
-                        .hardware(objective, detector, pixelSize)
+                        .hardware(objective, detector, WSI_pixelSize_um)
                         .autofocus(afTiles, afSteps, afRange)
                         .processingPipeline(processingSteps)
                         .whiteBalance(whiteBalanceEnabled);
@@ -464,9 +464,9 @@ public class AcquisitionManager {
                 }
 
                 logger.info("Acquisition parameters for {}:", annotation.getName());
-                logger.info("  Config: {}", configFile);
+                logger.info("  Config: {}", configFileLocation);
                 logger.info("  Sample: {}", state.sample.sampleName());
-                logger.info("  Hardware: {} / {} @ {} µm/px", objective, detector, pixelSize);
+                logger.info("  Hardware: {} / {} @ {} µm/px", objective, detector, WSI_pixelSize_um);
                 logger.info("  Autofocus: {} tiles, {} steps, {} µm range", afTiles, afSteps, afRange);
                 logger.info("  Processing: {}", processingSteps);
                 if (bgEnabled) {
@@ -609,19 +609,19 @@ public class AcquisitionManager {
                                  List<AngleExposure> angleExposures) {
 
         // Get required parameters for stitching
-        String configFile = QPPreferenceDialog.getMicroscopeConfigFileProperty();
-        MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(configFile);
+        String configFileLocation = QPPreferenceDialog.getMicroscopeConfigFileProperty();
+        MicroscopeConfigManager configManager = MicroscopeConfigManager.getInstance(configFileLocation);
 
         // Use the same hardware-specific pixel size calculation as was used for acquisition
         String baseModality = state.sample.modality().replaceAll("(_\\d+)$", "");
         String objective = state.sample.objective();
         String detector = state.sample.detector();
         
-        double pixelSize;
+        double WSI_pixelSize_um;
         try {
-            pixelSize = mgr.getModalityPixelSize(baseModality, objective, detector);
-            logger.info("Using stitching pixel size for {}/{}/{}: {} µm", 
-                    baseModality, objective, detector, pixelSize);
+            WSI_pixelSize_um = configManager.getModalityPixelSize(baseModality, objective, detector);
+            logger.info("Using stitching WSI pixel size for {}/{}/{}: {} µm", 
+                    baseModality, objective, detector, WSI_pixelSize_um);
         } catch (IllegalArgumentException e) {
             logger.error("Failed to determine pixel size for stitching: {}", e.getMessage());
             Platform.runLater(() ->
@@ -650,7 +650,7 @@ public class AcquisitionManager {
                 state.sample,
                 state.projectInfo.getImagingModeWithIndex(),
                 angleExposures,
-                pixelSize,
+                WSI_pixelSize_um,
                 gui,
                 project,
                 STITCH_EXECUTOR,

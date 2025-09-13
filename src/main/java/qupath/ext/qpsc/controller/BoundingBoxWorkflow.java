@@ -121,12 +121,12 @@ public class BoundingBoxWorkflow {
                             sample.modality(), sample.objective(), sample.detector());
 
                     // Get configuration manager instance
-                    MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(
-                            QPPreferenceDialog.getMicroscopeConfigFileProperty());
+                    String configFileLocation = QPPreferenceDialog.getMicroscopeConfigFileProperty();
+                    MicroscopeConfigManager configManager = MicroscopeConfigManager.getInstance(configFileLocation);
 
                     double frameWidthMicrons, frameHeightMicrons;
                     try {
-                        double[] fov = mgr.getModalityFOV(sample.modality(), sample.objective(), sample.detector());
+                        double[] fov = configManager.getModalityFOV(sample.modality(), sample.objective(), sample.detector());
                         if (fov == null) {
                             throw new IOException("Could not calculate FOV for the selected hardware configuration");
                         }
@@ -145,12 +145,12 @@ public class BoundingBoxWorkflow {
                         return; // Exit the workflow
                     }
 
-                    // Get pixel size for stitching metadata using explicit selections
-                    double pixelSize;
+                    // Get WSI pixel size for stitching metadata using explicit selections
+                    double WSI_pixelSize_um;
                     try {
-                        pixelSize = mgr.getModalityPixelSize(sample.modality(), sample.objective(), sample.detector());
-                        logger.info("Pixel size for {}/{}/{}: {} µm", 
-                                sample.modality(), sample.objective(), sample.detector(), pixelSize);
+                        WSI_pixelSize_um = configManager.getModalityPixelSize(sample.modality(), sample.objective(), sample.detector());
+                        logger.info("WSI pixel size for {}/{}/{}: {} µm", 
+                                sample.modality(), sample.objective(), sample.detector(), WSI_pixelSize_um);
                     } catch (IllegalArgumentException e) {
                         UIFunctions.notifyUserOfError(
                                 "Failed to get pixel size for the selected hardware configuration: " + e.getMessage(),
@@ -195,7 +195,7 @@ public class BoundingBoxWorkflow {
                         }
                     }
 
-                    double finalPixelSize = pixelSize;
+                    double finalWSI_pixelSize_um = WSI_pixelSize_um;
                     modalityHandler.getRotationAngles(sample.modality())
                             .thenApply(angleExposures -> {
                                 if (bb.angleOverrides() != null && !bb.angleOverrides().isEmpty()) {
@@ -222,13 +222,12 @@ public class BoundingBoxWorkflow {
                                     try {
                                         logger.info("Building acquisition command for socket communication");
 
-                                        // Get configuration manager
-                                        MicroscopeConfigManager configManager = MicroscopeConfigManager.getInstance(configFileLocation);
+                                        // Use the existing configManager and configFileLocation from above
 
                                         // Use explicit hardware selections from sample setup
                                         String objective = sample.objective();
                                         String detector = sample.detector();
-                                        double pixelSizeForAcq = finalPixelSize; // Already calculated above
+                                        double WSI_pixelSize_um_forAcq = finalWSI_pixelSize_um; // Already calculated above
 
                                         // Get the modality base (without index)
                                         String baseModality = sample.modality();
@@ -287,7 +286,7 @@ public class BoundingBoxWorkflow {
                                                 .scanType(modeWithIndex)
                                                 .regionName(boundsMode)
                                                 .angleExposures(angleExposures)
-                                                .hardware(objective, detector, pixelSizeForAcq)
+                                                .hardware(objective, detector, WSI_pixelSize_um_forAcq)
                                                 .autofocus(afTiles, afSteps, afRange)
                                                 .processingPipeline(processingSteps)
                                                 .whiteBalance(whiteBalanceEnabled);
@@ -303,7 +302,7 @@ public class BoundingBoxWorkflow {
                                         logger.info("  Sample: {}", sample.sampleName());
                                         logger.info("  Mode: {}", modeWithIndex);
                                         logger.info("  Region: {}", boundsMode);
-                                        logger.info("  Hardware: obj={}, det={}, px={}µm", objective, detector, pixelSizeForAcq);
+                                        logger.info("  Hardware: obj={}, det={}, px={}µm", objective, detector, WSI_pixelSize_um_forAcq);
                                         logger.info("  Autofocus: {} tiles, {} steps, {}µm range", afTiles, afSteps, afRange);
                                         logger.info("  Processing: {}", processingSteps);
                                         logger.info("  Angle-Exposure pairs: {}", angleExposures);
@@ -462,7 +461,7 @@ public class BoundingBoxWorkflow {
                                                         qupathGUI,
                                                         project,
                                                         String.valueOf(QPPreferenceDialog.getCompressionTypeProperty()),
-                                                        finalPixelSize,
+                                                        finalWSI_pixelSize_um,
                                                         1,
                                                         modalityHandler,
                                                         null
