@@ -612,17 +612,22 @@ public class AcquisitionManager {
         String configFile = QPPreferenceDialog.getMicroscopeConfigFileProperty();
         MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(configFile);
 
+        // Use the same hardware-specific pixel size calculation as was used for acquisition
+        String baseModality = state.sample.modality().replaceAll("(_\\d+)$", "");
+        String objective = state.sample.objective();
+        String detector = state.sample.detector();
+        
         double pixelSize;
         try {
-            pixelSize = mgr.getPixelSizeForModality(state.sample.modality());
-
-            // Continue with stitching using the determined pixel size...
+            pixelSize = mgr.getModalityPixelSize(baseModality, objective, detector);
+            logger.info("Using stitching pixel size for {}/{}/{}: {} µm", 
+                    baseModality, objective, detector, pixelSize);
         } catch (IllegalArgumentException e) {
             logger.error("Failed to determine pixel size for stitching: {}", e.getMessage());
             Platform.runLater(() ->
                     UIFunctions.notifyUserOfError(
-                            "Cannot determine pixel size for modality: " + state.sample.modality() +
-                                    "\n\nPlease check acquisition profile configuration.",
+                            "Cannot determine pixel size for hardware: " + baseModality + "/" + objective + "/" + detector +
+                                    "\n\nPlease check configuration. This should match the acquisition hardware settings.",
                             "Configuration Error"
                     )
             );
