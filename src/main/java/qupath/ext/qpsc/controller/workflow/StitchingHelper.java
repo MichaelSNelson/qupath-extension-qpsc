@@ -523,8 +523,15 @@ public class StitchingHelper {
         
         // Get parent entry (the current open image) - may be null in BoundingBox workflow
         ProjectImageEntry<BufferedImage> parentEntry = null;
-        if (gui.getImageData() != null) {
-            parentEntry = project.getEntry(gui.getImageData());
+        // In BoundingBox workflow, there's typically no current image open
+        // Use QuPath's proper method to check for open image
+        if (gui.getViewer().hasServer() && gui.getImageData() != null) {
+            try {
+                parentEntry = project.getEntry(gui.getImageData());
+            } catch (Exception e) {
+                logger.warn("Could not get parent entry from project: {}", e.getMessage());
+                parentEntry = null;
+            }
         }
         
         // For BoundingBox workflow, we don't have actual annotation coordinates
@@ -562,7 +569,10 @@ public class StitchingHelper {
             AffineTransform fullResToStage) {
 
         // Get parent entry (the current open image)
-        ProjectImageEntry<BufferedImage> parentEntry = project.getEntry(gui.getImageData());
+        ProjectImageEntry<BufferedImage> parentEntry = null;
+        if (gui.getViewer().hasServer() && gui.getImageData() != null) {
+            parentEntry = project.getEntry(gui.getImageData());
+        }
 
         // Calculate offset from slide corner
         double[] offset = TransformationFunctions.calculateAnnotationOffsetFromSlideCorner(
