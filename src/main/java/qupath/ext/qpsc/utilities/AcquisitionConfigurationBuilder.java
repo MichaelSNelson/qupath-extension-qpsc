@@ -49,7 +49,7 @@ public class AcquisitionConfigurationBuilder {
             String projectsFolder,
             double explicitPixelSize) {
         
-        MicroscopeConfigManager configManager = MicroscopeConfigManager.getInstance();
+        MicroscopeConfigManager configManager = MicroscopeConfigManager.getInstance(configFileLocation);
         
         // Use explicit hardware selections from sample setup
         String objective = sample.objective();
