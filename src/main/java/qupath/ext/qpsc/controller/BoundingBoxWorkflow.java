@@ -7,8 +7,8 @@ import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.service.AcquisitionCommandBuilder;
 import qupath.ext.qpsc.service.microscope.MicroscopeSocketClient;
 import qupath.ext.qpsc.ui.UIFunctions;
-import qupath.ext.qpsc.ui.StitchingBlockingDialog;
 import qupath.ext.qpsc.utilities.*;
+import qupath.ext.qpsc.controller.workflow.StitchingHelper;
 import qupath.ext.qpsc.ui.BoundingBoxController;
 import qupath.ext.qpsc.ui.SampleSetupController;
 import qupath.lib.gui.QuPathGUI;
@@ -351,89 +351,36 @@ public class BoundingBoxWorkflow {
                                     // Check if acquisition was cancelled
                                     if (ignored == null) {
                                         // Normal completion - proceed with stitching
-                                        // Show blocking dialog before starting stitching
-                                        StitchingBlockingDialog blockingDialog = null;
-                                        try {
-                                            // Must create blocking dialog on JavaFX thread
-                                            final StitchingBlockingDialog[] dialogRef = {null};
-                                            Platform.runLater(() -> {
-                                                dialogRef[0] = StitchingBlockingDialog.show(sample.sampleName());
-                                            });
-                                            // Wait briefly for dialog creation
-                                            Thread.sleep(100);
-                                            blockingDialog = dialogRef[0];
-                                        } catch (Exception e) {
-                                            logger.warn("Failed to create stitching blocking dialog", e);
-                                        }
+                                        // Use StitchingHelper for unified stitching approach
+                                        // StitchingHelper manages its own dialog, so no need to create one manually
                                         
-                                        final StitchingBlockingDialog finalDialog = blockingDialog;
-                                        
-                                        CompletableFuture<Void> stitchFuture = CompletableFuture.runAsync(() -> {
-                                            try {
-                                                if (finalDialog != null) {
-                                                    finalDialog.updateStatus("Initializing stitching operation...");
-                                                }
-
-                                                String matchingPattern;
-                                                if (angleExposures.size() > 1) {
-                                                    // Multi-angle: use "." to match all angle directories
-                                                    matchingPattern = ".";
-                                                } else {
-                                                    // Single-angle: use the specific angle directory name
-                                                    double angle = angleExposures.get(0).ticks();
-                                                    matchingPattern = String.valueOf(angle);
-                                                    logger.info("Single-angle acquisition: using matching pattern '{}' for angle {}", matchingPattern, angle);
-                                                }
-
-                                                if (finalDialog != null) {
-                                                    finalDialog.updateStatus(angleExposures.size() > 1 
-                                                            ? "Stitching " + sample.sampleName() + " for all angles..."
-                                                            : "Stitching " + sample.sampleName() + "...");
-                                                }
-
-                                                String outPath = TileProcessingUtilities.stitchImagesAndUpdateProject(
-                                                        projectsFolder,
-                                                        sample.sampleName(),
-                                                        modeWithIndex,
-                                                        boundsMode,
-                                                        matchingPattern,
-                                                        qupathGUI,
-                                                        project,
-                                                        String.valueOf(QPPreferenceDialog.getCompressionTypeProperty()),
-                                                        finalWSI_pixelSize_um,
-                                                        1,
-                                                        modalityHandler,
-                                                        null
-                                                );
-
-                                                logger.info("Stitching completed. Last output path: {}", outPath);
-
-                                                // Close blocking dialog and show completion notification
-                                                if (finalDialog != null) {
-                                                    finalDialog.close();
-                                                }
-                                                
-                                                Platform.runLater(() ->
-                                                        qupath.fx.dialogs.Dialogs.showInfoNotification(
-                                                                "Stitching complete",
-                                                                angleExposures.size() > 1
-                                                                        ? "All angles stitched successfully"
-                                                                        : "Stitching complete"));
-
-                                            } catch (Exception e) {
-                                                logger.error("Stitching failed", e);
-                                                
-                                                // Close blocking dialog with error
-                                                if (finalDialog != null) {
-                                                    finalDialog.closeWithError(e.getMessage());
-                                                } else {
-                                                    Platform.runLater(() ->
-                                                            UIFunctions.notifyUserOfError(
-                                                                    "Stitching failed:\n" + e.getMessage(),
-                                                                    "Stitching Error"));
-                                                }
-                                            }
-                                        }, STITCH_EXECUTOR);
+                                        CompletableFuture<Void> stitchFuture = StitchingHelper.performRegionStitching(
+                                                boundsMode,
+                                                sample,
+                                                modeWithIndex,
+                                                angleExposures,
+                                                finalWSI_pixelSize_um,
+                                                qupathGUI,
+                                                project,
+                                                STITCH_EXECUTOR,
+                                                modalityHandler
+                                        ).thenRun(() -> {
+                                            // Show completion notification when stitching is done
+                                            Platform.runLater(() ->
+                                                    qupath.fx.dialogs.Dialogs.showInfoNotification(
+                                                            "Stitching complete",
+                                                            angleExposures.size() > 1
+                                                                    ? "All angles stitched successfully"
+                                                                    : "Stitching complete"));
+                                        }).exceptionally(ex -> {
+                                            // Handle stitching errors
+                                            logger.error("Stitching failed", ex);
+                                            Platform.runLater(() ->
+                                                    UIFunctions.notifyUserOfError(
+                                                            "Stitching failed:\n" + ex.getMessage(),
+                                                            "Stitching Error"));
+                                            return null;
+                                        });
 
                                         // After stitching completes, handle cleanup
                                         stitchFuture.thenRun(() -> {
