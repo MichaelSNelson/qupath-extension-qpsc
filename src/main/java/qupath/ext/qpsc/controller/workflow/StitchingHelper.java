@@ -21,6 +21,10 @@ import qupath.lib.projects.ProjectImageEntry;
 
 import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -401,11 +405,11 @@ public class StitchingHelper {
                         blockingDialog.updateStatus("Processing " + angleExposures.size() + " angles for " + regionName + "...");
                     }
 
-                    // Process each angle directory individually to avoid processing .biref directories
-                    // This prevents the stitching plugin from processing birefringence analysis results
-                    logger.info("Processing {} angle directories individually to exclude .biref directories", angleExposures.size());
+                    // Process each angle directory individually and handle birefringence images
+                    logger.info("Processing {} angle directories individually", angleExposures.size());
                     
-                    String lastOutputPath = null;
+                    List<String> stitchedImages = new ArrayList<>();
+                    
                     for (AngleExposure angleExposure : angleExposures) {
                         String angleStr = String.valueOf(angleExposure.ticks());
                         logger.info("Processing angle directory: {}", angleStr);
@@ -429,15 +433,62 @@ public class StitchingHelper {
                                     handler,
                                     stitchParams  // Pass metadata in parameters
                             );
-                            lastOutputPath = outPath;
-                            logger.info("Successfully processed angle {} - output: {}", angleStr, outPath);
+                            if (outPath != null) {
+                                stitchedImages.add(outPath);
+                                logger.info("Successfully processed angle {} - output: {}", angleStr, outPath);
+                            }
                         } catch (Exception e) {
                             logger.error("Failed to stitch angle {}: {}", angleStr, e.getMessage(), e);
                             // Continue with next angle rather than failing completely
                         }
                     }
                     
-                    String outPath = lastOutputPath;
+                    // Process birefringence image if it exists
+                    if (blockingDialog != null) {
+                        blockingDialog.updateStatus("Checking for birefringence results for " + regionName + "...");
+                    }
+                    
+                    Path birefPath = Paths.get(sample.projectsFolder().getAbsolutePath(), 
+                                              sample.sampleName(), 
+                                              modeWithIndex, 
+                                              regionName,
+                                              angleExposures.get(0).ticks() + ".biref");
+                    
+                    if (Files.exists(birefPath)) {
+                        logger.info("Found birefringence directory: {}", birefPath);
+                        
+                        if (blockingDialog != null) {
+                            blockingDialog.updateStatus("Processing birefringence image for " + regionName + "...");
+                        }
+                        
+                        try {
+                            String birefOutPath = TileProcessingUtilities.stitchImagesAndUpdateProject(
+                                    sample.projectsFolder().getAbsolutePath(),
+                                    sample.sampleName(),
+                                    modeWithIndex,
+                                    regionName,
+                                    angleExposures.get(0).ticks() + ".biref",  // Process birefringence directory
+                                    gui,
+                                    project,
+                                    compression,
+                                    pixelSize,
+                                    stitchingConfig.downsampleFactor(),
+                                    handler,
+                                    stitchParams  // Pass metadata in parameters
+                            );
+                            if (birefOutPath != null) {
+                                stitchedImages.add(birefOutPath);
+                                logger.info("Successfully processed birefringence image - output: {}", birefOutPath);
+                            }
+                        } catch (Exception e) {
+                            logger.error("Failed to stitch birefringence image: {}", e.getMessage(), e);
+                        }
+                    } else {
+                        logger.info("No birefringence directory found at: {}", birefPath);
+                    }
+                    
+                    // Return path of last successfully processed image
+                    String outPath = stitchedImages.isEmpty() ? null : stitchedImages.get(stitchedImages.size() - 1);
 
                     logger.info("Batch stitching completed for {}, output: {}",
                             regionName, outPath);

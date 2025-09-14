@@ -303,12 +303,30 @@ public class TileProcessingUtilities {
             // Check if this is angle-based stitching (matching string is different from annotation)
             if (!matchingString.equals(annotationName)) {
                 String angleSuffix = matchingString;
-                if (modalityHandler != null) {
+                
+                // Handle birefringence images specially
+                if (matchingString.contains(".biref")) {
+                    // Extract base angle and add birefringence indicator
+                    String baseAngle = matchingString.replace(".biref", "");
+                    if (modalityHandler != null) {
+                        try {
+                            String baseAngleSuffix = modalityHandler.getAngleSuffix(Double.parseDouble(baseAngle));
+                            angleSuffix = baseAngleSuffix + "_biref";
+                        } catch (NumberFormatException ignored) {
+                            // Keep original if parsing fails
+                            angleSuffix = matchingString.replace(".", "_");
+                        }
+                    } else {
+                        angleSuffix = matchingString.replace(".", "_");
+                    }
+                } else if (modalityHandler != null) {
                     try {
                         angleSuffix = modalityHandler.getAngleSuffix(Double.parseDouble(matchingString));
                     } catch (NumberFormatException ignored) {
+                        // Keep original string if not a valid number
                     }
                 }
+                
                 // This is angle-based stitching - include both annotation AND angle
                 // Format: sampleLabel_modality_annotation_angle.ome.tif
                 baseName = sampleLabel + "_" + imagingModeWithIndex + "_" +
