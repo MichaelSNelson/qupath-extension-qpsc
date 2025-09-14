@@ -277,13 +277,20 @@ public class StitchingHelper {
                         blockingDialog.updateStatus("Processing single acquisition for " + annotationName + "...");
                     }
 
-                    // For non-angle acquisitions, use annotation name as matching string
+                    // Check if we have exactly one angle (tiles are in angle subfolder)
+                    String matchingString = annotationName;
+                    if (angleExposures != null && angleExposures.size() == 1) {
+                        // Single angle case - tiles are in angle subfolder (e.g., "5.0")
+                        matchingString = String.valueOf(angleExposures.get(0).ticks());
+                        logger.info("Single angle acquisition - looking in subfolder: {}", matchingString);
+                    }
+                    
                     String outPath = TileProcessingUtilities.stitchImagesAndUpdateProject(
                             sample.projectsFolder().getAbsolutePath(),
                             sample.sampleName(),
                             modeWithIndex,
                             annotationName,
-                            annotationName,  // Use annotation name as matching string
+                            matchingString,  // Use angle folder name as matching string for single-angle acquisitions
                             gui,
                             project,
                             compression,
