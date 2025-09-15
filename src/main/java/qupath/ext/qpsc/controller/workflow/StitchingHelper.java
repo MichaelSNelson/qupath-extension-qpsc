@@ -415,16 +415,34 @@ public class StitchingHelper {
                     Path tileBaseDir = Paths.get(sample.projectsFolder().getAbsolutePath(), 
                                                sample.sampleName(), modeWithIndex, regionName);
                     
-                    for (AngleExposure angleExposure : angleExposures) {
+                    logger.info("Starting multi-angle processing for {} angles in directory: {}", angleExposures.size(), tileBaseDir);
+                    
+                    // Log initial directory state
+                    try {
+                        if (Files.exists(tileBaseDir)) {
+                            logger.info("Initial tile base directory contents:");
+                            Files.list(tileBaseDir)
+                                 .filter(Files::isDirectory)
+                                 .forEach(path -> logger.info("  - {}", path.getFileName()));
+                        } else {
+                            logger.warn("Tile base directory does not exist: {}", tileBaseDir);
+                        }
+                    } catch (IOException e) {
+                        logger.warn("Could not list initial tile base directory: {}", e.getMessage());
+                    }
+                    
+                    for (int i = 0; i < angleExposures.size(); i++) {
+                        AngleExposure angleExposure = angleExposures.get(i);
                         String angleStr = String.valueOf(angleExposure.ticks());
-                        logger.info("Processing angle directory: {}", angleStr);
+                        logger.info("Processing angle {} of {} - angle directory: {}", i + 1, angleExposures.size(), angleStr);
                         
                         if (blockingDialog != null) {
-                            blockingDialog.updateStatus("Processing angle " + angleStr + " for " + regionName + "...");
+                            blockingDialog.updateStatus("Processing angle " + angleStr + " (" + (i + 1) + "/" + angleExposures.size() + ") for " + regionName + "...");
                         }
                         
                         try {
                             // Temporarily isolate this angle directory for processing
+                            logger.info("Starting isolation processing for angle: {}", angleStr);
                             String outPath = processAngleWithIsolation(
                                     tileBaseDir, angleStr, sample, modeWithIndex, regionName,
                                     compression, pixelSize, stitchingConfig.downsampleFactor(),
@@ -433,13 +451,29 @@ public class StitchingHelper {
                             
                             if (outPath != null) {
                                 stitchedImages.add(outPath);
-                                logger.info("Successfully processed angle {} - output: {}", angleStr, outPath);
+                                logger.info("Successfully processed angle {} ({}/{}) - output: {}", angleStr, i + 1, angleExposures.size(), outPath);
+                            } else {
+                                logger.error("Angle processing returned null output path for angle: {}", angleStr);
                             }
                         } catch (Exception e) {
-                            logger.error("Failed to stitch angle {}: {}", angleStr, e.getMessage(), e);
+                            logger.error("Failed to stitch angle {} ({}/{}): {}", angleStr, i + 1, angleExposures.size(), e.getMessage(), e);
                             // Continue with next angle rather than failing completely
                         }
+                        
+                        // Log directory state after each angle
+                        try {
+                            if (Files.exists(tileBaseDir)) {
+                                logger.info("Directory state after processing angle {}:", angleStr);
+                                Files.list(tileBaseDir)
+                                     .filter(Files::isDirectory)
+                                     .forEach(path -> logger.info("  - {}", path.getFileName()));
+                            }
+                        } catch (IOException e) {
+                            logger.warn("Could not list directory after processing angle {}: {}", angleStr, e.getMessage());
+                        }
                     }
+                    
+                    logger.info("Completed processing {} angles. Successfully stitched {} images.", angleExposures.size(), stitchedImages.size());
                     
                     // Process birefringence image if it exists
                     if (blockingDialog != null) {
@@ -449,14 +483,26 @@ public class StitchingHelper {
                     String birefAngleStr = angleExposures.get(0).ticks() + ".biref";
                     Path birefPath = tileBaseDir.resolve(birefAngleStr);
                     
+                    logger.info("Checking for birefringence directory at: {}", birefPath);
+                    logger.info("Birefringence directory exists: {}", Files.exists(birefPath));
+                    
                     if (Files.exists(birefPath)) {
                         logger.info("Found birefringence directory: {}", birefPath);
+                        
+                        // Log directory contents to understand what's inside
+                        try {
+                            logger.info("Birefringence directory contents:");
+                            Files.list(birefPath).forEach(path -> logger.info("  - {}", path));
+                        } catch (IOException e) {
+                            logger.warn("Could not list birefringence directory contents: {}", e.getMessage());
+                        }
                         
                         if (blockingDialog != null) {
                             blockingDialog.updateStatus("Processing birefringence image for " + regionName + "...");
                         }
                         
                         try {
+                            logger.info("Starting birefringence isolation processing for angle string: {}", birefAngleStr);
                             String birefOutPath = processAngleWithIsolation(
                                     tileBaseDir, birefAngleStr, sample, modeWithIndex, regionName,
                                     compression, pixelSize, stitchingConfig.downsampleFactor(),
@@ -466,12 +512,28 @@ public class StitchingHelper {
                             if (birefOutPath != null) {
                                 stitchedImages.add(birefOutPath);
                                 logger.info("Successfully processed birefringence image - output: {}", birefOutPath);
+                            } else {
+                                logger.error("Birefringence processing returned null output path");
                             }
                         } catch (Exception e) {
-                            logger.error("Failed to stitch birefringence image: {}", e.getMessage(), e);
+                            logger.error("Failed to stitch birefringence image for angle {}: {}", birefAngleStr, e.getMessage(), e);
                         }
                     } else {
                         logger.info("No birefringence directory found at: {}", birefPath);
+                        
+                        // Log what directories DO exist to help debug
+                        try {
+                            logger.info("Available directories in tile base ({}):)", tileBaseDir);
+                            if (Files.exists(tileBaseDir)) {
+                                Files.list(tileBaseDir)
+                                     .filter(Files::isDirectory)
+                                     .forEach(path -> logger.info("  - {}", path.getFileName()));
+                            } else {
+                                logger.warn("Tile base directory does not exist: {}", tileBaseDir);
+                            }
+                        } catch (IOException e) {
+                            logger.warn("Could not list tile base directory: {}", e.getMessage());
+                        }
                     }
                     
                     // Return path of last successfully processed image
@@ -654,7 +716,8 @@ public class StitchingHelper {
             QuPathGUI gui, Project<BufferedImage> project, 
             ModalityHandler handler, Map<String, Object> stitchParams) throws IOException {
         
-        logger.info("Processing angle {} with directory isolation", angleStr);
+        logger.info("Processing angle {} with directory isolation for region {}", angleStr, regionName);
+        logger.info("Tile base directory: {}", tileBaseDir);
         
         Path angleDir = tileBaseDir.resolve(angleStr);
         if (!Files.exists(angleDir)) {
@@ -663,8 +726,12 @@ public class StitchingHelper {
         }
         
         // Create a temporary isolation directory
-        Path tempIsolationDir = tileBaseDir.resolve("_temp_" + angleStr.replace("-", "neg").replace(".", "_"));
+        String tempDirName = "_temp_" + angleStr.replace("-", "neg").replace(".", "_");
+        Path tempIsolationDir = tileBaseDir.resolve(tempDirName);
         Path tempAngleDir = tempIsolationDir.resolve(angleStr);
+        
+        logger.info("Temporary isolation directory: {}", tempIsolationDir);
+        logger.info("Target angle directory: {}", angleDir);
         
         try {
             // Create temporary structure and move angle directory
@@ -675,13 +742,15 @@ public class StitchingHelper {
             Files.move(angleDir, tempAngleDir);
             logger.info("Moved {} to isolation: {}", angleDir, tempAngleDir);
             
-            // Process the isolated directory
+            // CRITICAL FIX: Pass the temp directory name as the region, but keep original region context
+            // The stitching method will look in: projects/sample/mode/[tempDirName]/
+            // which now contains only the single angle directory we want to process
             String outPath = TileProcessingUtilities.stitchImagesAndUpdateProject(
                     sample.projectsFolder().getAbsolutePath(),
                     sample.sampleName(),
                     modeWithIndex,
-                    "_temp_" + angleStr.replace("-", "neg").replace(".", "_"), // Use temp dir as region
-                    angleStr, // Now this will only match the single directory
+                    tempDirName, // FIXED: Use temp directory name as region so path resolves correctly
+                    angleStr, // Now this will only match the single directory in isolation
                     gui,
                     project,
                     compression,
@@ -692,21 +761,33 @@ public class StitchingHelper {
             );
             
             logger.info("Isolation processing completed for angle {}, output: {}", angleStr, outPath);
+            logger.info("Final stitched file path: {}", outPath);
             return outPath;
             
         } finally {
             // Always restore the directory structure
+            logger.info("Starting cleanup - restoring directory structure for angle {}", angleStr);
             try {
                 if (Files.exists(tempAngleDir)) {
+                    logger.info("Restoring directory from {} to {}", tempAngleDir, angleDir);
                     Files.move(tempAngleDir, angleDir);
-                    logger.info("Restored {} from isolation", angleStr);
+                    logger.info("Successfully restored {} from isolation", angleStr);
+                } else {
+                    logger.warn("Temporary angle directory no longer exists: {}", tempAngleDir);
                 }
                 if (Files.exists(tempIsolationDir)) {
+                    logger.info("Cleaning up temporary isolation directory: {}", tempIsolationDir);
                     Files.delete(tempIsolationDir);
-                    logger.info("Cleaned up temporary isolation directory");
+                    logger.info("Successfully cleaned up temporary isolation directory");
+                } else {
+                    logger.warn("Temporary isolation directory no longer exists: {}", tempIsolationDir);
                 }
+                logger.info("Directory structure restoration completed for angle {}", angleStr);
             } catch (IOException e) {
-                logger.error("Failed to restore directory structure after isolation: {}", e.getMessage());
+                logger.error("Failed to restore directory structure after isolation for angle {}: {}", angleStr, e.getMessage(), e);
+                // Log the current state for debugging
+                logger.error("Current state - tempAngleDir exists: {}, tempIsolationDir exists: {}, originalAngleDir exists: {}", 
+                    Files.exists(tempAngleDir), Files.exists(tempIsolationDir), Files.exists(angleDir));
             }
         }
     }
