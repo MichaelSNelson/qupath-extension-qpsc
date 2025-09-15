@@ -24,10 +24,13 @@ import java.awt.image.BufferedImage;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 
@@ -405,10 +408,12 @@ public class StitchingHelper {
                         blockingDialog.updateStatus("Processing " + angleExposures.size() + " angles for " + regionName + "...");
                     }
 
-                    // Process each angle directory individually and handle birefringence images
-                    logger.info("Processing {} angle directories individually", angleExposures.size());
+                    // Process each angle individually using directory isolation to prevent cross-matching
+                    logger.info("Processing {} angle directories using isolation approach", angleExposures.size());
                     
                     List<String> stitchedImages = new ArrayList<>();
+                    Path tileBaseDir = Paths.get(sample.projectsFolder().getAbsolutePath(), 
+                                               sample.sampleName(), modeWithIndex, regionName);
                     
                     for (AngleExposure angleExposure : angleExposures) {
                         String angleStr = String.valueOf(angleExposure.ticks());
@@ -419,20 +424,13 @@ public class StitchingHelper {
                         }
                         
                         try {
-                            String outPath = TileProcessingUtilities.stitchImagesAndUpdateProject(
-                                    sample.projectsFolder().getAbsolutePath(),
-                                    sample.sampleName(),
-                                    modeWithIndex,
-                                    regionName,
-                                    angleStr,  // Process one angle at a time
-                                    gui,
-                                    project,
-                                    compression,
-                                    pixelSize,
-                                    stitchingConfig.downsampleFactor(),
-                                    handler,
-                                    stitchParams  // Pass metadata in parameters
+                            // Temporarily isolate this angle directory for processing
+                            String outPath = processAngleWithIsolation(
+                                    tileBaseDir, angleStr, sample, modeWithIndex, regionName,
+                                    compression, pixelSize, stitchingConfig.downsampleFactor(),
+                                    gui, project, handler, stitchParams
                             );
+                            
                             if (outPath != null) {
                                 stitchedImages.add(outPath);
                                 logger.info("Successfully processed angle {} - output: {}", angleStr, outPath);
@@ -448,11 +446,8 @@ public class StitchingHelper {
                         blockingDialog.updateStatus("Checking for birefringence results for " + regionName + "...");
                     }
                     
-                    Path birefPath = Paths.get(sample.projectsFolder().getAbsolutePath(), 
-                                              sample.sampleName(), 
-                                              modeWithIndex, 
-                                              regionName,
-                                              angleExposures.get(0).ticks() + ".biref");
+                    String birefAngleStr = angleExposures.get(0).ticks() + ".biref";
+                    Path birefPath = tileBaseDir.resolve(birefAngleStr);
                     
                     if (Files.exists(birefPath)) {
                         logger.info("Found birefringence directory: {}", birefPath);
@@ -462,20 +457,12 @@ public class StitchingHelper {
                         }
                         
                         try {
-                            String birefOutPath = TileProcessingUtilities.stitchImagesAndUpdateProject(
-                                    sample.projectsFolder().getAbsolutePath(),
-                                    sample.sampleName(),
-                                    modeWithIndex,
-                                    regionName,
-                                    angleExposures.get(0).ticks() + ".biref",  // Process birefringence directory
-                                    gui,
-                                    project,
-                                    compression,
-                                    pixelSize,
-                                    stitchingConfig.downsampleFactor(),
-                                    handler,
-                                    stitchParams  // Pass metadata in parameters
+                            String birefOutPath = processAngleWithIsolation(
+                                    tileBaseDir, birefAngleStr, sample, modeWithIndex, regionName,
+                                    compression, pixelSize, stitchingConfig.downsampleFactor(),
+                                    gui, project, handler, stitchParams
                             );
+                            
                             if (birefOutPath != null) {
                                 stitchedImages.add(birefOutPath);
                                 logger.info("Successfully processed birefringence image - output: {}", birefOutPath);
@@ -653,5 +640,74 @@ public class StitchingHelper {
                 isFlipped,
                 sample.sampleName()
         );
+    }
+
+    /**
+     * Processes a single angle directory in isolation to prevent cross-matching issues
+     * with the TileConfigurationTxtStrategy contains() logic.
+     */
+    private static String processAngleWithIsolation(
+            Path tileBaseDir, String angleStr, 
+            SampleSetupController.SampleSetupResult sample,
+            String modeWithIndex, String regionName,
+            String compression, double pixelSize, int downsampleFactor,
+            QuPathGUI gui, Project<BufferedImage> project, 
+            ModalityHandler handler, Map<String, Object> stitchParams) throws IOException {
+        
+        logger.info("Processing angle {} with directory isolation", angleStr);
+        
+        Path angleDir = tileBaseDir.resolve(angleStr);
+        if (!Files.exists(angleDir)) {
+            logger.warn("Angle directory does not exist: {}", angleDir);
+            return null;
+        }
+        
+        // Create a temporary isolation directory
+        Path tempIsolationDir = tileBaseDir.resolve("_temp_" + angleStr.replace("-", "neg").replace(".", "_"));
+        Path tempAngleDir = tempIsolationDir.resolve(angleStr);
+        
+        try {
+            // Create temporary structure and move angle directory
+            Files.createDirectories(tempIsolationDir);
+            logger.info("Created temporary isolation directory: {}", tempIsolationDir);
+            
+            // Move the target angle directory to isolation
+            Files.move(angleDir, tempAngleDir);
+            logger.info("Moved {} to isolation: {}", angleDir, tempAngleDir);
+            
+            // Process the isolated directory
+            String outPath = TileProcessingUtilities.stitchImagesAndUpdateProject(
+                    sample.projectsFolder().getAbsolutePath(),
+                    sample.sampleName(),
+                    modeWithIndex,
+                    "_temp_" + angleStr.replace("-", "neg").replace(".", "_"), // Use temp dir as region
+                    angleStr, // Now this will only match the single directory
+                    gui,
+                    project,
+                    compression,
+                    pixelSize,
+                    downsampleFactor,
+                    handler,
+                    stitchParams
+            );
+            
+            logger.info("Isolation processing completed for angle {}, output: {}", angleStr, outPath);
+            return outPath;
+            
+        } finally {
+            // Always restore the directory structure
+            try {
+                if (Files.exists(tempAngleDir)) {
+                    Files.move(tempAngleDir, angleDir);
+                    logger.info("Restored {} from isolation", angleStr);
+                }
+                if (Files.exists(tempIsolationDir)) {
+                    Files.delete(tempIsolationDir);
+                    logger.info("Cleaned up temporary isolation directory");
+                }
+            } catch (IOException e) {
+                logger.error("Failed to restore directory structure after isolation: {}", e.getMessage());
+            }
+        }
     }
 }
