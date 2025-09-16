@@ -51,6 +51,24 @@ public class AnnotationAcquisitionDialog {
             dialog.initModality(Modality.NONE); // Non-modal as requested
             dialog.setTitle("Annotation Acquisition");
             dialog.setHeaderText(null);
+            
+            // Make dialog always on top
+            if (dialog.getDialogPane().getScene() != null) {
+                javafx.stage.Window window = dialog.getDialogPane().getScene().getWindow();
+                if (window instanceof javafx.stage.Stage stage) {
+                    stage.setAlwaysOnTop(true);
+                }
+            } else {
+                // Set up listener for when scene is available
+                dialog.getDialogPane().sceneProperty().addListener((obs, oldScene, newScene) -> {
+                    if (newScene != null) {
+                        javafx.stage.Window window = newScene.getWindow();
+                        if (window instanceof javafx.stage.Stage stage) {
+                            stage.setAlwaysOnTop(true);
+                        }
+                    }
+                });
+            }
 
             // Create observable list for selected classes
             ObservableList<String> selectedClasses = FXCollections.observableArrayList(preselectedClasses);

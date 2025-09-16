@@ -197,6 +197,20 @@ public class AcquisitionManager {
             logger.info("Preparing for acquisition with {} angles",
                     angleExposures != null ? angleExposures.size() : 1);
 
+            // Save project entry state before acquisition starts
+            try {
+                var imageData = QP.getCurrentImageData();
+                var entry = QP.getProjectEntry();
+                if (imageData != null && entry != null) {
+                    entry.saveImageData(imageData);
+                    logger.info("Saved project entry state before acquisition");
+                } else {
+                    logger.warn("Could not save project entry state - imageData or entry is null");
+                }
+            } catch (Exception e) {
+                logger.error("Failed to save project entry state before acquisition", e);
+            }
+
             // Get current annotations
             List<PathObject> currentAnnotations = AnnotationHelper.getCurrentValidAnnotations(
                     state.selectedAnnotationClasses
