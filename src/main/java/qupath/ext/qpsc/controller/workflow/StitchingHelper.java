@@ -195,43 +195,136 @@ public class StitchingHelper {
                         blockingDialog.updateStatus("Processing " + angleExposures.size() + " angles for " + annotationName + "...");
                     }
 
-                    // Process each angle directory individually to avoid processing .biref directories
-                    // This prevents the stitching plugin from processing birefringence analysis results
-                    logger.info("Processing {} angle directories individually to exclude .biref directories", angleExposures.size());
+                    // Process each angle individually using directory isolation to prevent cross-matching
+                    logger.info("Processing {} angle directories using isolation approach", angleExposures.size());
                     
-                    String lastOutputPath = null;
-                    for (AngleExposure angleExposure : angleExposures) {
+                    List<String> stitchedImages = new ArrayList<>();
+                    Path tileBaseDir = Paths.get(sample.projectsFolder().getAbsolutePath(), 
+                                               sample.sampleName(), modeWithIndex, annotationName);
+                    
+                    logger.info("Starting multi-angle processing for {} angles in directory: {}", angleExposures.size(), tileBaseDir);
+                    
+                    // Log initial directory state
+                    try {
+                        if (Files.exists(tileBaseDir)) {
+                            logger.info("Initial tile base directory contents:");
+                            Files.list(tileBaseDir)
+                                 .filter(Files::isDirectory)
+                                 .forEach(path -> logger.info("  - {}", path.getFileName()));
+                        } else {
+                            logger.warn("Tile base directory does not exist: {}", tileBaseDir);
+                        }
+                    } catch (IOException e) {
+                        logger.warn("Could not list initial tile base directory: {}", e.getMessage());
+                    }
+                    
+                    for (int i = 0; i < angleExposures.size(); i++) {
+                        AngleExposure angleExposure = angleExposures.get(i);
                         String angleStr = String.valueOf(angleExposure.ticks());
-                        logger.info("Processing angle directory: {}", angleStr);
+                        logger.info("Processing angle {} of {} - angle directory: {}", i + 1, angleExposures.size(), angleStr);
                         
                         if (blockingDialog != null) {
-                            blockingDialog.updateStatus("Processing angle " + angleStr + " for " + annotationName + "...");
+                            blockingDialog.updateStatus("Processing angle " + angleStr + " (" + (i + 1) + "/" + angleExposures.size() + ") for " + annotationName + "...");
                         }
                         
                         try {
-                            String outPath = TileProcessingUtilities.stitchImagesAndUpdateProject(
-                                    sample.projectsFolder().getAbsolutePath(),
-                                    sample.sampleName(),
-                                    modeWithIndex,
-                                    annotationName,
-                                    angleStr,  // Process one angle at a time
-                                    gui,
-                                    project,
-                                    compression,
-                                    pixelSize,
-                                    stitchingConfig.downsampleFactor(),
-                                    handler,
-                                    stitchParams  // Pass metadata in parameters
+                            // Temporarily isolate this angle directory for processing
+                            logger.info("Starting isolation processing for angle: {}", angleStr);
+                            String outPath = processAngleWithIsolation(
+                                    tileBaseDir, angleStr, sample, modeWithIndex, annotationName,
+                                    compression, pixelSize, stitchingConfig.downsampleFactor(),
+                                    gui, project, handler, stitchParams
                             );
-                            lastOutputPath = outPath;
-                            logger.info("Successfully processed angle {} - output: {}", angleStr, outPath);
+                            
+                            if (outPath != null) {
+                                stitchedImages.add(outPath);
+                                logger.info("Successfully processed angle {} ({}/{}) - output: {}", angleStr, i + 1, angleExposures.size(), outPath);
+                            } else {
+                                logger.error("Angle processing returned null output path for angle: {}", angleStr);
+                            }
                         } catch (Exception e) {
-                            logger.error("Failed to stitch angle {}: {}", angleStr, e.getMessage(), e);
+                            logger.error("Failed to stitch angle {} ({}/{}): {}", angleStr, i + 1, angleExposures.size(), e.getMessage(), e);
                             // Continue with next angle rather than failing completely
+                        }
+                        
+                        // Log directory state after each angle
+                        try {
+                            if (Files.exists(tileBaseDir)) {
+                                logger.info("Directory state after processing angle {}:", angleStr);
+                                Files.list(tileBaseDir)
+                                     .filter(Files::isDirectory)
+                                     .forEach(path -> logger.info("  - {}", path.getFileName()));
+                            }
+                        } catch (IOException e) {
+                            logger.warn("Could not list directory after processing angle {}: {}", angleStr, e.getMessage());
                         }
                     }
                     
-                    String outPath = lastOutputPath;
+                    logger.info("Completed processing {} angles. Successfully stitched {} images.", angleExposures.size(), stitchedImages.size());
+                    
+                    // Process birefringence image if it exists
+                    if (blockingDialog != null) {
+                        blockingDialog.updateStatus("Checking for birefringence results for " + annotationName + "...");
+                    }
+                    
+                    String birefAngleStr = angleExposures.get(0).ticks() + ".biref";
+                    Path birefPath = tileBaseDir.resolve(birefAngleStr);
+                    
+                    logger.info("Checking for birefringence directory at: {}", birefPath);
+                    logger.info("Birefringence directory exists: {}", Files.exists(birefPath));
+                    
+                    if (Files.exists(birefPath)) {
+                        logger.info("Found birefringence directory: {}", birefPath);
+                        
+                        // Log directory contents to understand what's inside
+                        try {
+                            logger.info("Birefringence directory contents:");
+                            Files.list(birefPath).forEach(path -> logger.info("  - {}", path));
+                        } catch (IOException e) {
+                            logger.warn("Could not list birefringence directory contents: {}", e.getMessage());
+                        }
+                        
+                        if (blockingDialog != null) {
+                            blockingDialog.updateStatus("Processing birefringence image for " + annotationName + "...");
+                        }
+                        
+                        try {
+                            logger.info("Starting birefringence isolation processing for angle string: {}", birefAngleStr);
+                            String birefOutPath = processAngleWithIsolation(
+                                    tileBaseDir, birefAngleStr, sample, modeWithIndex, annotationName,
+                                    compression, pixelSize, stitchingConfig.downsampleFactor(),
+                                    gui, project, handler, stitchParams
+                            );
+                            
+                            if (birefOutPath != null) {
+                                stitchedImages.add(birefOutPath);
+                                logger.info("Successfully processed birefringence image - output: {}", birefOutPath);
+                            } else {
+                                logger.error("Birefringence processing returned null output path");
+                            }
+                        } catch (Exception e) {
+                            logger.error("Failed to stitch birefringence image for angle {}: {}", birefAngleStr, e.getMessage(), e);
+                        }
+                    } else {
+                        logger.info("No birefringence directory found at: {}", birefPath);
+                        
+                        // Log what directories DO exist to help debug
+                        try {
+                            logger.info("Available directories in tile base ({}):)", tileBaseDir);
+                            if (Files.exists(tileBaseDir)) {
+                                Files.list(tileBaseDir)
+                                     .filter(Files::isDirectory)
+                                     .forEach(path -> logger.info("  - {}", path.getFileName()));
+                            } else {
+                                logger.warn("Tile base directory does not exist: {}", tileBaseDir);
+                            }
+                        } catch (IOException e) {
+                            logger.warn("Could not list tile base directory: {}", e.getMessage());
+                        }
+                    }
+                    
+                    // Return path of last successfully processed image
+                    String outPath = stitchedImages.isEmpty() ? null : stitchedImages.get(stitchedImages.size() - 1);
 
                     logger.info("Batch stitching completed for {}, output: {}",
                             annotationName, outPath);
