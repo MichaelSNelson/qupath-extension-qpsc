@@ -835,14 +835,15 @@ public class StitchingHelper {
             Files.move(angleDir, tempAngleDir);
             logger.info("Moved {} to isolation: {}", angleDir, tempAngleDir);
             
-            // CRITICAL FIX: Pass the temp directory name as the region, but keep original region context
-            // The stitching method will look in: projects/sample/mode/[tempDirName]/
+            // CRITICAL FIX: Pass the combined region path that includes both region and temp directory
+            // The stitching method will look in: projects/sample/mode/[regionName/tempDirName]/
             // which now contains only the single angle directory we want to process
+            String combinedRegion = regionName + File.separator + tempDirName;
             String outPath = TileProcessingUtilities.stitchImagesAndUpdateProject(
                     sample.projectsFolder().getAbsolutePath(),
                     sample.sampleName(),
                     modeWithIndex,
-                    tempDirName, // FIXED: Use temp directory name as region so path resolves correctly
+                    combinedRegion, // FIXED: Use combined region path so path resolves correctly
                     angleStr, // Now this will only match the single directory in isolation
                     gui,
                     project,
