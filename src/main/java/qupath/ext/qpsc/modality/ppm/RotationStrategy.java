@@ -52,15 +52,24 @@ class PPMRotationStrategy implements RotationStrategy {
     private final AngleExposure minusAngleExposure;
     private final AngleExposure zeroAngleExposure;
     private final AngleExposure uncrossedAngleExposure;
+    private final String modality;
+    private final String objective;
+    private final String detector;
 
     public PPMRotationStrategy(AngleExposure plusAngleExposure,
                                AngleExposure minusAngleExposure,
                                AngleExposure zeroAngleExposure,
-                               AngleExposure uncrossedAngleExposure) {
+                               AngleExposure uncrossedAngleExposure,
+                               String modality,
+                               String objective,
+                               String detector) {
         this.plusAngleExposure = plusAngleExposure;
         this.minusAngleExposure = minusAngleExposure;
         this.zeroAngleExposure = zeroAngleExposure;
         this.uncrossedAngleExposure = uncrossedAngleExposure;
+        this.modality = modality;
+        this.objective = objective;
+        this.detector = detector;
     }
 
     @Override
@@ -71,7 +80,8 @@ class PPMRotationStrategy implements RotationStrategy {
     @Override
     public CompletableFuture<List<Double>> getRotationTicks() {
         // Show dialog for angle selection with exposure times
-        return PPMAngleSelectionController.showDialog(plusAngleExposure.ticks(), minusAngleExposure.ticks(), uncrossedAngleExposure.ticks())
+        return PPMAngleSelectionController.showDialog(plusAngleExposure.ticks(), minusAngleExposure.ticks(), uncrossedAngleExposure.ticks(), 
+                modality, objective, detector)
                 .thenApply(result -> {
                     if (result == null) {
                         return new ArrayList<>();
@@ -83,7 +93,8 @@ class PPMRotationStrategy implements RotationStrategy {
     @Override
     public CompletableFuture<List<AngleExposure>> getRotationTicksWithExposure() {
         // Show dialog for angle selection with exposure times
-        return PPMAngleSelectionController.showDialog(plusAngleExposure.ticks(), minusAngleExposure.ticks(), uncrossedAngleExposure.ticks())
+        return PPMAngleSelectionController.showDialog(plusAngleExposure.ticks(), minusAngleExposure.ticks(), uncrossedAngleExposure.ticks(), 
+                modality, objective, detector)
                 .thenApply(result -> {
                     if (result == null) {
                         return new ArrayList<>();

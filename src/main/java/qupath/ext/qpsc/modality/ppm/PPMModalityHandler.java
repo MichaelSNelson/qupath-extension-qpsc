@@ -47,11 +47,13 @@ public class PPMModalityHandler implements ModalityHandler {
      * values and precise decimal exposure times for each polarizer position.</p>
      * 
      * @param modalityName the PPM modality identifier (e.g., "ppm_20x", "ppm_40x")
+     * @param objective the objective ID for hardware-specific parameter lookup
+     * @param detector the detector ID for hardware-specific parameter lookup
      * @return a future containing the angle-exposure pairs for this PPM configuration
      */
     @Override
-    public CompletableFuture<List<AngleExposure>> getRotationAngles(String modalityName) {
-        RotationManager rotationManager = new RotationManager(modalityName);
+    public CompletableFuture<List<AngleExposure>> getRotationAngles(String modalityName, String objective, String detector) {
+        RotationManager rotationManager = new RotationManager(modalityName, objective, detector);
         return rotationManager.getRotationTicksWithExposure(modalityName);
     }
 

@@ -79,16 +79,17 @@ public interface ModalityHandler {
      * @param modalityName the full modality identifier from the configuration (e.g., "ppm_20x", "bf_40x").
      *                     Must not be null. Used to lookup modality-specific parameters like objective 
      *                     magnification and angle sets
+     * @param objective the objective ID for hardware-specific parameter lookup (may be null)
+     * @param detector the detector ID for hardware-specific parameter lookup (may be null)
      * @return a {@code CompletableFuture} containing an immutable list of {@link AngleExposure} pairs 
      *         representing the rotation sequence. Returns empty list if no rotations are required.
      *         Never returns null
-     * @implNote Implementations should handle null modalityName gracefully by returning a completed 
-     *           future with an empty list. Consider caching results for repeated calls with the same 
-     *           modalityName to improve performance
+     * @implNote Implementations should handle null parameters gracefully by falling back to defaults.
+     *           Consider caching results for repeated calls with the same parameters to improve performance
      * @see AngleExposure
      * @see ModalityRegistry#getHandler(String)
      */
-    CompletableFuture<List<AngleExposure>> getRotationAngles(String modalityName);
+    CompletableFuture<List<AngleExposure>> getRotationAngles(String modalityName, String objective, String detector);
 
     /**
      * Creates an optional JavaFX UI component for modality-specific parameter controls.

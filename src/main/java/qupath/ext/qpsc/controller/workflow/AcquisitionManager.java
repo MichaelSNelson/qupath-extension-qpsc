@@ -171,9 +171,10 @@ public class AcquisitionManager {
      */
     private CompletableFuture<List<AngleExposure>> getRotationAngles() {
         ModalityHandler handler = ModalityRegistry.getHandler(state.sample.modality());
-        logger.info("Getting rotation angles for modality: {}", state.sample.modality());
+        logger.info("Getting rotation angles for modality: {} with hardware: obj={}, det={}", 
+                state.sample.modality(), state.sample.objective(), state.sample.detector());
 
-        return handler.getRotationAngles(state.sample.modality());
+        return handler.getRotationAngles(state.sample.modality(), state.sample.objective(), state.sample.detector());
     }
 
     /**

@@ -11,11 +11,18 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 import javafx.stage.Modality;
 import qupath.ext.qpsc.modality.ppm.PPMPreferences;
+import qupath.ext.qpsc.utilities.BackgroundSettingsReader;
+import qupath.ext.qpsc.utilities.MicroscopeConfigManager;
+import qupath.lib.scripting.QP;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
@@ -120,8 +127,8 @@ public class PPMAngleSelectionController {
      * presents four angle options with checkboxes and exposure time input fields.</p>
      * 
      * <p>The exposure time input fields support decimal values (e.g., 1.2, 0.5, 15.8) and
-     * are validated to ensure positive values. User selections are automatically saved to
-     * preferences via {@link PPMPreferences}.</p>
+     * are validated to ensure positive values. Default exposure times are determined using
+     * priority order: background image settings → config file → persistent preferences.</p>
      * 
      * <p>The dialog includes convenience buttons for \"Select All\" and \"Select None\" to
      * quickly configure common acquisition patterns.</p>
@@ -129,11 +136,15 @@ public class PPMAngleSelectionController {
      * @param plusAngle the positive polarizer angle value in degrees (typically +5.0)
      * @param minusAngle the negative polarizer angle value in degrees (typically -5.0)
      * @param uncrossedAngle the uncrossed polarizer angle in degrees (typically 45.0)
+     * @param modality the modality name (e.g., "ppm") for config lookup
+     * @param objective the objective ID for config lookup
+     * @param detector the detector ID for config lookup
      * @return a {@code CompletableFuture} that completes with the user's selections, or
      *         is cancelled if the user cancels the dialog
      * @since 1.0
      */
-    public static CompletableFuture<AngleExposureResult> showDialog(double plusAngle, double minusAngle, double uncrossedAngle) {
+    public static CompletableFuture<AngleExposureResult> showDialog(double plusAngle, double minusAngle, double uncrossedAngle,
+                                                                   String modality, String objective, String detector) {
         CompletableFuture<AngleExposureResult> future = new CompletableFuture<>();
         Platform.runLater(() -> {
             Dialog<AngleExposureResult> dialog = new Dialog<>();
@@ -161,7 +172,7 @@ public class PPMAngleSelectionController {
 
             CheckBox minusCheck = new CheckBox(String.format("%.1f 'degrees'", minusAngle));
             minusCheck.setSelected(PPMPreferences.getMinusSelected());
-            TextField minusExposure = new TextField(String.valueOf(PPMPreferences.getMinusExposureMs()));
+            TextField minusExposure = new TextField(String.valueOf(getDefaultExposureTime(minusAngle, modality, objective, detector)));
             minusExposure.setTextFormatter(new TextFormatter<>(doubleFilter));
             minusExposure.setPrefWidth(80);
             minusExposure.setDisable(!minusCheck.isSelected());
@@ -170,7 +181,7 @@ public class PPMAngleSelectionController {
 
             CheckBox zeroCheck = new CheckBox("0 'degrees'");
             zeroCheck.setSelected(PPMPreferences.getZeroSelected());
-            TextField zeroExposure = new TextField(String.valueOf(PPMPreferences.getZeroExposureMs()));
+            TextField zeroExposure = new TextField(String.valueOf(getDefaultExposureTime(0.0, modality, objective, detector)));
             zeroExposure.setTextFormatter(new TextFormatter<>(doubleFilter));
             zeroExposure.setPrefWidth(80);
             zeroExposure.setDisable(!zeroCheck.isSelected());
@@ -179,7 +190,7 @@ public class PPMAngleSelectionController {
 
             CheckBox plusCheck = new CheckBox(String.format("%.1f 'degrees'", plusAngle));
             plusCheck.setSelected(PPMPreferences.getPlusSelected());
-            TextField plusExposure = new TextField(String.valueOf(PPMPreferences.getPlusExposureMs()));
+            TextField plusExposure = new TextField(String.valueOf(getDefaultExposureTime(plusAngle, modality, objective, detector)));
             plusExposure.setTextFormatter(new TextFormatter<>(doubleFilter));
             plusExposure.setPrefWidth(80);
             plusExposure.setDisable(!plusCheck.isSelected());
@@ -188,7 +199,7 @@ public class PPMAngleSelectionController {
 
             CheckBox uncrossedCheck = new CheckBox(String.format("%.1f 'degrees' (uncrossed)", uncrossedAngle));
             uncrossedCheck.setSelected(PPMPreferences.getUncrossedSelected());
-            TextField uncrossedExposure = new TextField(String.valueOf(PPMPreferences.getUncrossedExposureMs()));
+            TextField uncrossedExposure = new TextField(String.valueOf(getDefaultExposureTime(uncrossedAngle, modality, objective, detector)));
             uncrossedExposure.setTextFormatter(new TextFormatter<>(doubleFilter));
             uncrossedExposure.setPrefWidth(80);
             uncrossedExposure.setDisable(!uncrossedCheck.isSelected());
@@ -232,7 +243,15 @@ public class PPMAngleSelectionController {
             selectNone.setOnAction(e->{minusCheck.setSelected(false);zeroCheck.setSelected(false);plusCheck.setSelected(false);uncrossedCheck.setSelected(false);});
             HBox quickButtons = new HBox(10, selectAll, selectNone);
 
-            VBox content = new VBox(10, info, grid, new Separator(), quickButtons);
+            // Check for missing background images and add warning if needed
+            Node backgroundWarning = createBackgroundWarningIfNeeded(modality, objective, detector);
+            
+            VBox content = new VBox(10);
+            content.getChildren().add(info);
+            if (backgroundWarning != null) {
+                content.getChildren().add(backgroundWarning);
+            }
+            content.getChildren().addAll(grid, new Separator(), quickButtons);
             content.setPadding(new Insets(20));
             dialog.getDialogPane().setContent(content);
 
@@ -262,9 +281,11 @@ public class PPMAngleSelectionController {
                     if(zeroCheck.isSelected()) list.add(new AngleExposure(0.0,Double.parseDouble(zeroExposure.getText())));
                     if(minusCheck.isSelected()) list.add(new AngleExposure(minusAngle,Double.parseDouble(minusExposure.getText())));
 
-
-
                     logger.info("PPM angles and exposures selected: {}", list);
+                    
+                    // Validate against background settings if available
+                    validateAgainstBackgroundSettings(list, modality, objective, detector);
+                    
                     return new AngleExposureResult(list);
                 }
                 return null;
@@ -273,6 +294,435 @@ public class PPMAngleSelectionController {
             dialog.showAndWait().ifPresentOrElse(future::complete, ()->future.cancel(true));
         });
         return future;
+    }
+
+
+    /**
+     * Gets default exposure time for a given angle following priority order:
+     * 1. Background image exposure times per angle
+     * 2. Config file for the current microscope
+     * 3. Persistent preferences
+     * 
+     * @param angle the angle in degrees
+     * @param modality the modality name (e.g., "ppm")
+     * @param objective the objective ID
+     * @param detector the detector ID
+     * @return default exposure time in ms, or fallback value if not found
+     */
+    private static double getDefaultExposureTime(double angle, String modality, String objective, String detector) {
+        logger.debug("Getting default exposure time for angle {} with modality={}, objective={}, detector={}", 
+                angle, modality, objective, detector);
+        
+        // If any parameters are null, skip to persistent preferences
+        if (modality == null || objective == null || detector == null) {
+            logger.debug("Missing hardware parameters, skipping to persistent preferences");
+            double preferencesValue = getPersistentPreferenceExposure(angle);
+            logger.info("Using persistent preferences exposure time for angle {}: {}ms", angle, preferencesValue);
+            return preferencesValue;
+        }
+        
+        // Priority 1: Check background image exposure times per angle
+        try {
+            MicroscopeConfigManager configManager = MicroscopeConfigManager.getInstance();
+            String backgroundFolder = configManager.getBackgroundCorrectionFolder();
+            
+            if (backgroundFolder != null) {
+                BackgroundSettingsReader.BackgroundSettings backgroundSettings = 
+                        BackgroundSettingsReader.findBackgroundSettings(backgroundFolder, modality, objective, detector);
+                
+                if (backgroundSettings != null && backgroundSettings.angleExposures != null) {
+                    // Find matching angle in background settings
+                    for (qupath.ext.qpsc.modality.AngleExposure ae : backgroundSettings.angleExposures) {
+                        if (Math.abs(ae.ticks() - angle) < 0.001) { // Match with small tolerance
+                            logger.info("Using background image exposure time for angle {}: {}ms", angle, ae.exposureMs());
+                            return ae.exposureMs();
+                        }
+                    }
+                    logger.debug("No matching angle found in background settings for angle {}", angle);
+                }
+            }
+        } catch (Exception e) {
+            logger.debug("Failed to read background settings for exposure time", e);
+        }
+        
+        // Priority 2: Check config file for current microscope
+        try {
+            MicroscopeConfigManager configManager = MicroscopeConfigManager.getInstance();
+            Map<String, Object> exposures = configManager.getModalityExposures(modality, objective, detector);
+            
+            if (exposures != null) {
+                // Look for angle-specific exposure or general exposure
+                String angleKey = String.valueOf(angle);
+                if (exposures.containsKey(angleKey)) {
+                    Object exposureValue = exposures.get(angleKey);
+                    if (exposureValue instanceof Number) {
+                        double configExposure = ((Number) exposureValue).doubleValue();
+                        logger.info("Using config file exposure time for angle {}: {}ms", angle, configExposure);
+                        return configExposure;
+                    }
+                }
+                
+                // Try common angle names
+                String[] angleNames = getAngleNames(angle);
+                for (String angleName : angleNames) {
+                    if (exposures.containsKey(angleName)) {
+                        Object exposureValue = exposures.get(angleName);
+                        if (exposureValue instanceof Number) {
+                            double configExposure = ((Number) exposureValue).doubleValue();
+                            logger.info("Using config file exposure time for angle {} (key={}): {}ms", 
+                                    angle, angleName, configExposure);
+                            return configExposure;
+                        }
+                    }
+                }
+                logger.debug("No exposure setting found in config for angle {}", angle);
+            }
+        } catch (Exception e) {
+            logger.debug("Failed to read config file exposure settings", e);
+        }
+        
+        // Priority 3: Fallback to persistent preferences
+        double preferencesValue = getPersistentPreferenceExposure(angle);
+        logger.info("Using persistent preferences exposure time for angle {}: {}ms", angle, preferencesValue);
+        return preferencesValue;
+    }
+    
+    /**
+     * Get common names for an angle that might be used in config files.
+     */
+    private static String[] getAngleNames(double angle) {
+        if (Math.abs(angle - 0.0) < 0.001) {
+            return new String[]{"0", "zero", "0.0"};
+        } else if (angle > 0 && angle < 20) {
+            return new String[]{"plus", "positive", String.valueOf(angle)};
+        } else if (angle < 0 && angle > -20) {
+            return new String[]{"minus", "negative", String.valueOf(angle)};
+        } else if (angle >= 40 && angle <= 50) {
+            return new String[]{"uncrossed", "45", "45.0", String.valueOf(angle)};
+        }
+        return new String[]{String.valueOf(angle)};
+    }
+    
+    /**
+     * Get exposure time from persistent preferences for a given angle.
+     */
+    private static double getPersistentPreferenceExposure(double angle) {
+        if (Math.abs(angle - 0.0) < 0.001) {
+            return PPMPreferences.getZeroExposureMs();
+        } else if (angle > 0 && angle < 20) {
+            return PPMPreferences.getPlusExposureMs();
+        } else if (angle < 0 && angle > -20) {
+            return PPMPreferences.getMinusExposureMs();
+        } else if (angle >= 40 && angle <= 50) {
+            return PPMPreferences.getUncrossedExposureMs();
+        }
+        
+        // Default fallback
+        return 1.0;
+    }
+
+    /**
+     * Validates the selected angle-exposure pairs against existing background settings.
+     * Shows a warning dialog if the settings don't match.
+     * 
+     * @param selectedAngles the user's selected angle-exposure pairs
+     * @param modality the modality name 
+     * @param objective the objective ID
+     * @param detector the detector ID
+     */
+    private static void validateAgainstBackgroundSettings(List<AngleExposure> selectedAngles, 
+                                                          String modality, String objective, String detector) {
+        // Skip validation if hardware parameters are missing
+        if (modality == null || objective == null || detector == null) {
+            logger.debug("Skipping background validation - missing hardware parameters");
+            return;
+        }
+        
+        try {
+            MicroscopeConfigManager configManager = MicroscopeConfigManager.getInstance();
+            String backgroundFolder = configManager.getBackgroundCorrectionFolder();
+            
+            if (backgroundFolder == null) {
+                logger.debug("No background correction folder configured - skipping validation");
+                return;
+            }
+            
+            BackgroundSettingsReader.BackgroundSettings backgroundSettings = 
+                    BackgroundSettingsReader.findBackgroundSettings(backgroundFolder, modality, objective, detector);
+            
+            if (backgroundSettings == null) {
+                logger.debug("No background settings found for {}/{}/{} - skipping validation", 
+                        modality, objective, detector);
+                return;
+            }
+            
+            // Convert UI angle-exposure pairs to the format expected by validator
+            List<qupath.ext.qpsc.modality.AngleExposure> currentAngles = new ArrayList<>();
+            for (AngleExposure ae : selectedAngles) {
+                currentAngles.add(new qupath.ext.qpsc.modality.AngleExposure(ae.angle, ae.exposureMs));
+            }
+            
+            // Validate with a tolerance of 0.1ms
+            double tolerance = 0.1;
+            boolean matches = BackgroundSettingsReader.validateAngleExposures(
+                    backgroundSettings, currentAngles, tolerance);
+            
+            if (!matches) {
+                logger.warn("Selected exposure settings do not match existing background settings");
+                showBackgroundMismatchWarning(backgroundSettings, selectedAngles);
+            } else {
+                logger.info("Selected exposure settings match existing background settings");
+            }
+            
+        } catch (Exception e) {
+            logger.error("Error validating against background settings", e);
+        }
+    }
+    
+    /**
+     * Shows a warning dialog when user's exposure settings don't match background settings.
+     * 
+     * @param backgroundSettings the existing background settings
+     * @param selectedAngles the user's selected angle-exposure pairs
+     */
+    private static void showBackgroundMismatchWarning(BackgroundSettingsReader.BackgroundSettings backgroundSettings,
+                                                     List<AngleExposure> selectedAngles) {
+        Platform.runLater(() -> {
+            Alert warning = new Alert(Alert.AlertType.WARNING);
+            warning.setTitle("Background Settings Mismatch");
+            warning.setHeaderText("Exposure settings don't match existing background correction");
+            
+            StringBuilder message = new StringBuilder();
+            message.append("Your selected exposure times do not match the existing background correction settings.\n\n");
+            message.append("This may affect image quality and analysis accuracy.\n\n");
+            
+            message.append("Background settings (from ").append(backgroundSettings.settingsFilePath).append("):\n");
+            for (qupath.ext.qpsc.modality.AngleExposure bgAe : backgroundSettings.angleExposures) {
+                message.append(String.format("  %.1f° = %.1f ms\n", bgAe.ticks(), bgAe.exposureMs()));
+            }
+            
+            message.append("\nYour selected settings:\n");
+            for (AngleExposure userAe : selectedAngles) {
+                message.append(String.format("  %.1f° = %.1f ms\n", userAe.angle, userAe.exposureMs));
+            }
+            
+            message.append("\nDetailed differences:\n");
+            message.append(getDetailedMismatchInfo(backgroundSettings, selectedAngles));
+            
+            message.append("\nRecommendation: Use the background settings exposure times for optimal results,");
+            message.append(" or collect new background images with your selected exposure times.");
+            
+            warning.setContentText(message.toString());
+            warning.setResizable(true);
+            
+            // Make dialog larger to accommodate content
+            warning.getDialogPane().setPrefWidth(600);
+            warning.getDialogPane().setPrefHeight(400);
+            
+            warning.showAndWait();
+        });
+    }
+    
+    /**
+     * Gets detailed mismatch information between background settings and user selections.
+     * 
+     * @param backgroundSettings the existing background settings
+     * @param selectedAngles the user's selected angle-exposure pairs
+     * @return formatted string describing the differences
+     */
+    private static String getDetailedMismatchInfo(BackgroundSettingsReader.BackgroundSettings backgroundSettings,
+                                                 List<AngleExposure> selectedAngles) {
+        StringBuilder info = new StringBuilder();
+        
+        // Convert user angles to the format used by background settings
+        Map<Double, Double> userAngleMap = new HashMap<>();
+        for (AngleExposure userAe : selectedAngles) {
+            userAngleMap.put(userAe.angle, userAe.exposureMs);
+        }
+        
+        Map<Double, Double> bgAngleMap = new HashMap<>();
+        for (qupath.ext.qpsc.modality.AngleExposure bgAe : backgroundSettings.angleExposures) {
+            bgAngleMap.put(bgAe.ticks(), bgAe.exposureMs());
+        }
+        
+        // Check for missing angles
+        Set<Double> missingFromUser = new HashSet<>(bgAngleMap.keySet());
+        missingFromUser.removeAll(userAngleMap.keySet());
+        
+        Set<Double> extraInUser = new HashSet<>(userAngleMap.keySet());
+        extraInUser.removeAll(bgAngleMap.keySet());
+        
+        if (!missingFromUser.isEmpty()) {
+            info.append("  Missing angles: ");
+            missingFromUser.forEach(angle -> info.append(String.format("%.1f° ", angle)));
+            info.append("\n");
+        }
+        
+        if (!extraInUser.isEmpty()) {
+            info.append("  Extra angles: ");
+            extraInUser.forEach(angle -> info.append(String.format("%.1f° ", angle)));
+            info.append("\n");
+        }
+        
+        // Check for exposure time differences
+        double tolerance = 0.1;
+        for (Double angle : userAngleMap.keySet()) {
+            if (bgAngleMap.containsKey(angle)) {
+                double userExposure = userAngleMap.get(angle);
+                double bgExposure = bgAngleMap.get(angle);
+                double diff = Math.abs(userExposure - bgExposure);
+                
+                if (diff > tolerance) {
+                    info.append(String.format("  %.1f°: %.1f ms vs %.1f ms (diff: %.1f ms)\n", 
+                            angle, userExposure, bgExposure, diff));
+                }
+            }
+        }
+        
+        if (info.length() == 0) {
+            info.append("  Different number of angles selected");
+        }
+        
+        return info.toString();
+    }
+    
+    /**
+     * Creates a prominent warning UI component if background images are missing.
+     * 
+     * @param modality the modality name
+     * @param objective the objective ID  
+     * @param detector the detector ID
+     * @return warning Node or null if background images are available
+     */
+    private static Node createBackgroundWarningIfNeeded(String modality, String objective, String detector) {
+        // Skip if hardware parameters are missing
+        if (modality == null || objective == null || detector == null) {
+            return null;
+        }
+        
+        try {
+            MicroscopeConfigManager configManager = MicroscopeConfigManager.getInstance();
+            
+            // Check if background correction is enabled
+            boolean bgEnabled = configManager.isBackgroundCorrectionEnabled(modality);
+            if (!bgEnabled) {
+                // Background correction is disabled, no warning needed
+                return null;
+            }
+            
+            String backgroundFolder = configManager.getBackgroundCorrectionFolder(modality);
+            if (backgroundFolder == null) {
+                return createBackgroundWarning(
+                    "⚠️ BACKGROUND CORRECTION ISSUE",
+                    "Background correction is enabled but no background folder is configured.",
+                    "Configure background folder or disable background correction.",
+                    true
+                );
+            }
+            
+            // Check if background settings/images exist for this hardware combination
+            BackgroundSettingsReader.BackgroundSettings backgroundSettings = 
+                    BackgroundSettingsReader.findBackgroundSettings(backgroundFolder, modality, objective, detector);
+            
+            if (backgroundSettings == null) {
+                return createBackgroundWarning(
+                    "⚠️ MISSING BACKGROUND IMAGES",
+                    String.format("No background images found for %s + %s + %s", 
+                            modality, getObjectiveDisplayName(objective), getDetectorDisplayName(detector)),
+                    "Collect background images before acquisition for optimal image quality.",
+                    true
+                );
+            }
+            
+            // Background images found - no warning needed
+            logger.debug("Background images found for {}/{}/{}", modality, objective, detector);
+            return null;
+            
+        } catch (Exception e) {
+            logger.error("Error checking background image availability", e);
+            return createBackgroundWarning(
+                "⚠️ BACKGROUND VALIDATION ERROR", 
+                "Could not verify background image availability: " + e.getMessage(),
+                "Check background correction configuration.",
+                false
+            );
+        }
+    }
+    
+    /**
+     * Creates a visual warning component with consistent styling.
+     */
+    private static Node createBackgroundWarning(String title, String message, String recommendation, boolean isError) {
+        VBox warningBox = new VBox(5);
+        warningBox.setPadding(new Insets(10));
+        warningBox.setStyle(
+            "-fx-background-color: " + (isError ? "#ffebee" : "#fff3e0") + ";" +
+            "-fx-border-color: " + (isError ? "#f44336" : "#ff9800") + ";" +
+            "-fx-border-width: 2;" +
+            "-fx-border-radius: 5;" +
+            "-fx-background-radius: 5;"
+        );
+        
+        // Title
+        Label titleLabel = new Label(title);
+        titleLabel.setStyle(
+            "-fx-font-weight: bold;" +
+            "-fx-font-size: 14px;" +
+            "-fx-text-fill: " + (isError ? "#d32f2f" : "#e65100") + ";"
+        );
+        
+        // Message
+        Label messageLabel = new Label(message);
+        messageLabel.setWrapText(true);
+        messageLabel.setMaxWidth(500);
+        messageLabel.setStyle("-fx-font-size: 12px;");
+        
+        // Recommendation
+        Label recommendationLabel = new Label("→ " + recommendation);
+        recommendationLabel.setWrapText(true);
+        recommendationLabel.setMaxWidth(500);
+        recommendationLabel.setStyle(
+            "-fx-font-style: italic;" +
+            "-fx-font-size: 11px;" +
+            "-fx-text-fill: " + (isError ? "#d32f2f" : "#e65100") + ";"
+        );
+        
+        warningBox.getChildren().addAll(titleLabel, messageLabel, recommendationLabel);
+        return warningBox;
+    }
+    
+    /**
+     * Gets a user-friendly display name for an objective.
+     */
+    private static String getObjectiveDisplayName(String objective) {
+        if (objective == null) return "Unknown Objective";
+        
+        // Extract magnification and meaningful parts
+        if (objective.contains("OLYMPUS")) {
+            if (objective.contains("10X")) return "10x Olympus";
+            if (objective.contains("20X")) return "20x Olympus"; 
+            if (objective.contains("40X")) return "40x Olympus";
+        }
+        
+        // Fallback to extracting magnification
+        if (objective.contains("10X") || objective.contains("10x")) return "10x";
+        if (objective.contains("20X") || objective.contains("20x")) return "20x";
+        if (objective.contains("40X") || objective.contains("40x")) return "40x";
+        
+        return objective; // Return full name if no pattern matches
+    }
+    
+    /**
+     * Gets a user-friendly display name for a detector.
+     */
+    private static String getDetectorDisplayName(String detector) {
+        if (detector == null) return "Unknown Camera";
+        
+        if (detector.contains("JAI")) return "JAI Camera";
+        if (detector.contains("FLIR")) return "FLIR Camera";
+        if (detector.contains("BASLER")) return "Basler Camera";
+        
+        return detector; // Return full name if no pattern matches
     }
 
     /**

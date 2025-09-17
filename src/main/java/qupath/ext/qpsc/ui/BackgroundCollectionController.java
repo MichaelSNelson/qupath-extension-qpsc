@@ -290,7 +290,22 @@ public class BackgroundCollectionController {
         
         // Get default angles and exposures
         logger.debug("Requesting rotation angles for modality: {}", modality);
-        handler.getRotationAngles(modality).thenAccept(defaultExposures -> {
+        
+        // Get detector for hardware-specific lookup
+        String detector = null;
+        try {
+            String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
+            MicroscopeConfigManager configManager = MicroscopeConfigManager.getInstance(configPath);
+            Set<String> detectors = configManager.getAvailableDetectorsForModalityObjective(modality, objective);
+            if (!detectors.isEmpty()) {
+                detector = detectors.iterator().next();
+            }
+        } catch (Exception e) {
+            logger.debug("Could not determine detector for hardware-specific lookup", e);
+        }
+        
+        final String finalDetector = detector;
+        handler.getRotationAngles(modality, objective, finalDetector).thenAccept(defaultExposures -> {
             Platform.runLater(() -> {
                 logger.debug("Creating exposure controls for {} angles", defaultExposures.size());
                 

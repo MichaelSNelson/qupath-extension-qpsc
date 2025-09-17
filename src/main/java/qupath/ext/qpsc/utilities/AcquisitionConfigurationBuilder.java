@@ -85,6 +85,15 @@ public class AcquisitionConfigurationBuilder {
             if (afParams.get("search_range_um") instanceof Number) {
                 afRange = ((Number) afParams.get("search_range_um")).doubleValue();
             }
+            logger.info("Using objective-specific autofocus parameters for {}: tiles={}, steps={}, range={}μm", 
+                    objective, afTiles, afSteps, afRange);
+        } else {
+            logger.warn("No autofocus parameters found for objective {}. Using generic defaults: tiles={}, steps={}, range={}μm. " +
+                    "This may result in suboptimal focus quality. Consider adding autofocus configuration for this objective.", 
+                    objective, afTiles, afSteps, afRange);
+            
+            // Show user warning for missing autofocus configuration
+            showAutofocusConfigurationWarning(objective, afTiles, afSteps, afRange);
         }
         
         // Determine processing pipeline based on detector properties
@@ -99,6 +108,11 @@ public class AcquisitionConfigurationBuilder {
         // Get white balance setting from config for this profile
         boolean whiteBalanceEnabled = configManager.isWhiteBalanceEnabled(baseModality, objective, detector);
         logger.debug("White balance enabled for {}/{}/{}: {}", baseModality, objective, detector, whiteBalanceEnabled);
+        
+        // TODO: Add white balance configuration validation
+        // TODO: When white balance is enabled, validate that gains are properly configured for this hardware combination
+        // TODO: Show warning if white balance is enabled but no gains are available (similar to autofocus validation)
+        // TODO: This is lower priority since we're currently not actively white balancing in the workflow
         
         // Build enhanced acquisition command
         AcquisitionCommandBuilder acquisitionBuilder = AcquisitionCommandBuilder.builder()
@@ -148,5 +162,34 @@ public class AcquisitionConfigurationBuilder {
             }
         }
         return "unknown";
+    }
+    
+    /**
+     * Shows a warning dialog when autofocus parameters are missing for an objective.
+     * This prevents silent degradation of focus quality.
+     */
+    private static void showAutofocusConfigurationWarning(String objective, int defaultTiles, int defaultSteps, double defaultRange) {
+        javafx.application.Platform.runLater(() -> {
+            javafx.scene.control.Alert warning = new javafx.scene.control.Alert(javafx.scene.control.Alert.AlertType.WARNING);
+            warning.setTitle("Autofocus Configuration Missing");
+            warning.setHeaderText("No autofocus parameters found for " + objective);
+            
+            StringBuilder message = new StringBuilder();
+            message.append("No objective-specific autofocus parameters were found in the configuration.\n\n");
+            message.append("Using generic defaults:\n");
+            message.append(String.format("• Focus tiles: %d\n", defaultTiles));
+            message.append(String.format("• Focus steps: %d\n", defaultSteps));
+            message.append(String.format("• Search range: %.1f μm\n\n", defaultRange));
+            message.append("This may result in suboptimal focus quality, especially for high-magnification objectives.\n\n");
+            message.append("Recommendation: Add autofocus configuration for ").append(objective);
+            message.append(" in the microscope configuration file for optimal performance.");
+            
+            warning.setContentText(message.toString());
+            warning.setResizable(true);
+            warning.getDialogPane().setPrefWidth(500);
+            warning.getDialogPane().setPrefHeight(350);
+            
+            warning.showAndWait();
+        });
     }
 }

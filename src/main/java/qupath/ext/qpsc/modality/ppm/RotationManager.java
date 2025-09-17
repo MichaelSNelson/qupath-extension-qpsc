@@ -22,14 +22,16 @@ public class RotationManager {
     private final List<RotationStrategy> strategies = new ArrayList<>();
 
     /**
-     * Creates a RotationManager configured for the given modality.
+     * Creates a RotationManager configured for the given modality with hardware parameters.
      * @param modality The imaging modality name
+     * @param objective The objective ID for priority exposure lookup
+     * @param detector The detector ID for priority exposure lookup
      */
-    public RotationManager(String modality) {
-        initializeStrategies(modality);
+    public RotationManager(String modality, String objective, String detector) {
+        initializeStrategies(modality, modality, objective, detector);
     }
 
-    private void initializeStrategies(String modality) {
+    private void initializeStrategies(String modality, String modalityForExposure, String objective, String detector) {
         MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(
                 QPPreferenceDialog.getMicroscopeConfigFileProperty()
         );
@@ -66,7 +68,8 @@ public class RotationManager {
                 logger.warn("No rotation angles found for modality {} - using defaults", modality);
             }
 
-            // Get exposure times from PPMPreferences
+            // Get exposure times using priority order - no longer hardcoded from PPMPreferences
+            // These will be determined by the PPMAngleSelectionController using the proper priority
             double plusExposure = PPMPreferences.getPlusExposureMs();
             double minusExposure = PPMPreferences.getMinusExposureMs();
             double zeroExposure = PPMPreferences.getZeroExposureMs();
@@ -76,10 +79,14 @@ public class RotationManager {
                     new AngleExposure(plusTick, plusExposure),
                     new AngleExposure(minusTick, minusExposure),
                     new AngleExposure(zeroTick, zeroExposure),
-                    new AngleExposure(uncrossedTick, uncrossedExposure)
+                    new AngleExposure(uncrossedTick, uncrossedExposure),
+                    modalityForExposure,
+                    objective,
+                    detector
             ));
 
-            logger.info("PPM ticks configured");
+            logger.info("PPM ticks configured with hardware parameters: modality={}, objective={}, detector={}", 
+                    modalityForExposure, objective, detector);
         }
 
         // Always add NoRotationStrategy as fallback for non-PPM modalities

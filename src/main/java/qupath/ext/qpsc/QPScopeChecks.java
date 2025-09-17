@@ -58,6 +58,11 @@ public class QPScopeChecks {
         if (!validateMicroscopeConfig()) {
             return false; // Error dialogs are shown inside validateMicroscopeConfig
         }
+        
+        // 5. Validate stage limits configuration
+        if (!validateStageLimitsConfig()) {
+            return false; // Error dialogs are shown inside validateStageLimitsConfig
+        }
 
         // All checks passed.
         return true;
@@ -312,6 +317,89 @@ public class QPScopeChecks {
         // - Verify project directory structure
         // - Check available memory
         return true;
+    }
+    
+    /**
+     * Validates stage limits configuration.
+     * Stage limits are critical for preventing hardware damage from out-of-bounds movements.
+     *
+     * @return true if stage limits configuration is adequate
+     */
+    public static boolean validateStageLimitsConfig() {
+        try {
+            String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
+            MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(configPath);
+            
+            List<String> missingConfigs = new ArrayList<>();
+            List<String> warnings = new ArrayList<>();
+            
+            // Check stage limits configuration
+            Map<String, Double> xyLimits = mgr.getStageXYLimits();
+            Map<String, Double> zLimits = mgr.getStageZLimits();
+            
+            if (xyLimits == null || xyLimits.isEmpty()) {
+                missingConfigs.add("Stage XY limits (x_low, x_high, y_low, y_high)");
+                warnings.add("• Stage XY movements will not be bounds-checked");
+                warnings.add("• Risk of hardware damage from out-of-bounds movements");
+            } else {
+                // Validate XY limits are complete
+                String[] requiredXYKeys = {"x_low", "x_high", "y_low", "y_high"};
+                for (String key : requiredXYKeys) {
+                    if (!xyLimits.containsKey(key) || xyLimits.get(key) == null) {
+                        missingConfigs.add("Stage XY limit: " + key);
+                    }
+                }
+            }
+            
+            if (zLimits == null || zLimits.isEmpty()) {
+                missingConfigs.add("Stage Z limits (z_low, z_high)");
+                warnings.add("• Stage Z movements will not be bounds-checked");
+                warnings.add("• Risk of hardware damage from out-of-bounds movements");
+            } else {
+                // Validate Z limits are complete
+                String[] requiredZKeys = {"z_low", "z_high"};
+                for (String key : requiredZKeys) {
+                    if (!zLimits.containsKey(key) || zLimits.get(key) == null) {
+                        missingConfigs.add("Stage Z limit: " + key);
+                    }
+                }
+            }
+            
+            
+            // If we have missing critical configurations, block progress
+            if (!missingConfigs.isEmpty()) {
+                StringBuilder errorMessage = new StringBuilder();
+                errorMessage.append("Critical stage limits configuration is missing:\n\n");
+                
+                errorMessage.append("Missing configurations:\n");
+                for (String missing : missingConfigs) {
+                    errorMessage.append("• ").append(missing).append("\n");
+                }
+                
+                if (!warnings.isEmpty()) {
+                    errorMessage.append("\nPotential issues:\n");
+                    for (String warning : warnings) {
+                        errorMessage.append(warning).append("\n");
+                    }
+                }
+                
+                errorMessage.append("\nThe extension is disabled until stage limits are properly configured.");
+                errorMessage.append("\nPlease add the missing configuration to your microscope YAML file.");
+                
+                logger.error("Stage limits validation failed: {}", missingConfigs);
+                Dialogs.showErrorNotification("Stage Limits Configuration Required", errorMessage.toString());
+                return false;
+            }
+            
+            logger.info("Stage limits configuration validated successfully");
+            return true;
+            
+        } catch (Exception e) {
+            logger.error("Error validating stage limits configuration", e);
+            Dialogs.showErrorNotification("Configuration Validation Error", 
+                    "Failed to validate stage limits configuration: " + e.getMessage());
+            return false;
+        }
     }
 
 }

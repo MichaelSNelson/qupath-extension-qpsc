@@ -196,7 +196,7 @@ public class BoundingBoxWorkflow {
                     }
 
                     double finalWSI_pixelSize_um = WSI_pixelSize_um;
-                    modalityHandler.getRotationAngles(sample.modality())
+                    modalityHandler.getRotationAngles(sample.modality(), sample.objective(), sample.detector())
                             .thenApply(angleExposures -> {
                                 if (bb.angleOverrides() != null && !bb.angleOverrides().isEmpty()) {
                                     return modalityHandler.applyAngleOverrides(angleExposures, bb.angleOverrides());
