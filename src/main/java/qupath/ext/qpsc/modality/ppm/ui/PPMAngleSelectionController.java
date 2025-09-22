@@ -326,7 +326,7 @@ public class PPMAngleSelectionController {
         try {
             String configFileLocation = QPPreferenceDialog.getMicroscopeConfigFileProperty();
             MicroscopeConfigManager configManager = MicroscopeConfigManager.getInstance(configFileLocation);
-            String backgroundFolder = configManager.getBackgroundCorrectionFolder();
+            String backgroundFolder = configManager.getBackgroundCorrectionFolder(modality);
             
             if (backgroundFolder != null) {
                 BackgroundSettingsReader.BackgroundSettings backgroundSettings = 
@@ -444,7 +444,7 @@ public class PPMAngleSelectionController {
         try {
             String configFileLocation = QPPreferenceDialog.getMicroscopeConfigFileProperty();
             MicroscopeConfigManager configManager = MicroscopeConfigManager.getInstance(configFileLocation);
-            String backgroundFolder = configManager.getBackgroundCorrectionFolder();
+            String backgroundFolder = configManager.getBackgroundCorrectionFolder(modality);
             
             if (backgroundFolder == null) {
                 logger.debug("No background correction folder configured - skipping validation");

@@ -334,35 +334,34 @@ public class QPScopeChecks {
             List<String> warnings = new ArrayList<>();
             
             // Check stage limits configuration
-            Map<String, Double> xyLimits = mgr.getStageXYLimits();
-            Map<String, Double> zLimits = mgr.getStageZLimits();
+            // Check stage limits using individual getStageLimit calls
+            boolean xyLimitsValid = true;
+            boolean zLimitsValid = true;
             
-            if (xyLimits == null || xyLimits.isEmpty()) {
+            // Check XY limits
+            try {
+                double xLow = mgr.getStageLimit("x", "low");
+                double xHigh = mgr.getStageLimit("x", "high");
+                double yLow = mgr.getStageLimit("y", "low");
+                double yHigh = mgr.getStageLimit("y", "high");
+                logger.debug("Found stage XY limits: x({}, {}), y({}, {})", xLow, xHigh, yLow, yHigh);
+            } catch (Exception e) {
+                xyLimitsValid = false;
                 missingConfigs.add("Stage XY limits (x_low, x_high, y_low, y_high)");
                 warnings.add("• Stage XY movements will not be bounds-checked");
                 warnings.add("• Risk of hardware damage from out-of-bounds movements");
-            } else {
-                // Validate XY limits are complete
-                String[] requiredXYKeys = {"x_low", "x_high", "y_low", "y_high"};
-                for (String key : requiredXYKeys) {
-                    if (!xyLimits.containsKey(key) || xyLimits.get(key) == null) {
-                        missingConfigs.add("Stage XY limit: " + key);
-                    }
-                }
             }
             
-            if (zLimits == null || zLimits.isEmpty()) {
+            // Check Z limits
+            try {
+                double zLow = mgr.getStageLimit("z", "low");
+                double zHigh = mgr.getStageLimit("z", "high");
+                logger.debug("Found stage Z limits: z({}, {})", zLow, zHigh);
+            } catch (Exception e) {
+                zLimitsValid = false;
                 missingConfigs.add("Stage Z limits (z_low, z_high)");
                 warnings.add("• Stage Z movements will not be bounds-checked");
                 warnings.add("• Risk of hardware damage from out-of-bounds movements");
-            } else {
-                // Validate Z limits are complete
-                String[] requiredZKeys = {"z_low", "z_high"};
-                for (String key : requiredZKeys) {
-                    if (!zLimits.containsKey(key) || zLimits.get(key) == null) {
-                        missingConfigs.add("Stage Z limit: " + key);
-                    }
-                }
             }
             
             
