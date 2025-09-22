@@ -349,19 +349,23 @@ public class TileProcessingUtilities {
                 
                 // This is angle-based stitching - include both annotation AND angle
                 // Format: sampleLabel_modality_annotation_angle.ome.tif
+                // Extract original region name from potentially combined path (e.g., "bounds\_temp_7_0" -> "bounds")
+                String originalRegionName = extractOriginalRegionName(annotationName);
                 // Sanitize annotation name to replace path separators with underscores for valid filenames
-                String sanitizedAnnotationName = annotationName.replace(File.separator, "_")
-                                                               .replace("/", "_")
-                                                               .replace("\\", "_");
+                String sanitizedAnnotationName = originalRegionName.replace(File.separator, "_")
+                                                                   .replace("/", "_")
+                                                                   .replace("\\", "_");
                 baseName = sampleLabel + "_" + imagingModeWithIndex + "_" +
                         sanitizedAnnotationName + "_" + angleSuffix + ".ome.tif";
                 logger.info("Angle-based stitching detected - including annotation and angle in filename");
             } else {
                 // Standard stitching - just annotation (or nothing for "bounds")
+                // Extract original region name from potentially combined path (e.g., "bounds\_temp_7_0" -> "bounds")
+                String originalRegionName = extractOriginalRegionName(annotationName);
                 // Sanitize annotation name to replace path separators with underscores for valid filenames
-                String sanitizedAnnotationName = annotationName.replace(File.separator, "_")
-                                                               .replace("/", "_")
-                                                               .replace("\\", "_");
+                String sanitizedAnnotationName = originalRegionName.replace(File.separator, "_")
+                                                                   .replace("/", "_")
+                                                                   .replace("\\", "_");
                 baseName = sampleLabel + "_" + imagingModeWithIndex
                         + (sanitizedAnnotationName.equals("bounds") ? "" : "_" + sanitizedAnnotationName)
                         + ".ome.tif";
@@ -446,6 +450,35 @@ public class TileProcessingUtilities {
 
         logger.info("=== Stitching workflow completed ===");
         return lastProcessedPath;
+    }
+
+    /**
+     * Extracts the original region name from a potentially combined path.
+     * When using directory isolation for multi-angle stitching, temporary directories
+     * like "_temp_7_0" are added to the annotation name, resulting in paths like
+     * "bounds\_temp_7_0". This method extracts just the original region name ("bounds").
+     *
+     * @param annotationName The annotation name, potentially including temporary directory parts
+     * @return The original region name without temporary directory components
+     */
+    private static String extractOriginalRegionName(String annotationName) {
+        if (annotationName == null) {
+            return "";
+        }
+
+        // Handle both path separators and the specific temporary directory pattern
+        String[] parts = annotationName.split("[/\\\\]");
+
+        for (String part : parts) {
+            // Return the first part that doesn't start with "_temp_"
+            if (!part.startsWith("_temp_")) {
+                return part;
+            }
+        }
+
+        // If all parts start with "_temp_", return the original string
+        // This shouldn't happen in normal operation but provides a fallback
+        return annotationName;
     }
 
     /**
