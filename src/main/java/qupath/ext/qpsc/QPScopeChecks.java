@@ -330,59 +330,38 @@ public class QPScopeChecks {
             String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
             MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(configPath);
             
-            List<String> missingConfigs = new ArrayList<>();
+            // Use the designed validation method instead of duplicating logic
+            List<String> missingConfigs = mgr.validateConfiguration();
             List<String> warnings = new ArrayList<>();
-            
-            // Check stage limits configuration
-            // Check stage limits using individual getStageLimit calls
-            boolean xyLimitsValid = true;
-            boolean zLimitsValid = true;
-            
-            // Check XY limits
-            try {
-                double xLow = mgr.getStageLimit("x", "low");
-                double xHigh = mgr.getStageLimit("x", "high");
-                double yLow = mgr.getStageLimit("y", "low");
-                double yHigh = mgr.getStageLimit("y", "high");
-                logger.debug("Found stage XY limits: x({}, {}), y({}, {})", xLow, xHigh, yLow, yHigh);
-            } catch (Exception e) {
-                xyLimitsValid = false;
-                missingConfigs.add("Stage XY limits (x_low, x_high, y_low, y_high)");
-                warnings.add("• Stage XY movements will not be bounds-checked");
-                warnings.add("• Risk of hardware damage from out-of-bounds movements");
-            }
-            
-            // Check Z limits
-            try {
-                double zLow = mgr.getStageLimit("z", "low");
-                double zHigh = mgr.getStageLimit("z", "high");
-                logger.debug("Found stage Z limits: z({}, {})", zLow, zHigh);
-            } catch (Exception e) {
-                zLimitsValid = false;
-                missingConfigs.add("Stage Z limits (z_low, z_high)");
-                warnings.add("• Stage Z movements will not be bounds-checked");
-                warnings.add("• Risk of hardware damage from out-of-bounds movements");
+
+            // Add specific warnings for stage limits if they're missing
+            for (String missing : missingConfigs) {
+                if (missing.contains("stage.limits") || missing.contains("stage")) {
+                    warnings.add("• Stage movements will not be bounds-checked");
+                    warnings.add("• Risk of hardware damage from out-of-bounds movements");
+                    break;
+                }
             }
             
             
             // If we have missing critical configurations, block progress
             if (!missingConfigs.isEmpty()) {
                 StringBuilder errorMessage = new StringBuilder();
-                errorMessage.append("Critical stage limits configuration is missing:\n\n");
-                
+                errorMessage.append("Critical microscope configuration is missing or incomplete:\n\n");
+
                 errorMessage.append("Missing configurations:\n");
                 for (String missing : missingConfigs) {
                     errorMessage.append("• ").append(missing).append("\n");
                 }
-                
+
                 if (!warnings.isEmpty()) {
                     errorMessage.append("\nPotential issues:\n");
                     for (String warning : warnings) {
                         errorMessage.append(warning).append("\n");
                     }
                 }
-                
-                errorMessage.append("\nThe extension is disabled until stage limits are properly configured.");
+
+                errorMessage.append("\nThe extension is disabled until the configuration is properly set up.");
                 errorMessage.append("\nPlease add the missing configuration to your microscope YAML file.");
                 
                 logger.error("Stage limits validation failed: {}", missingConfigs);
