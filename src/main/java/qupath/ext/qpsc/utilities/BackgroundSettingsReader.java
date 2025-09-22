@@ -9,6 +9,7 @@ import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
@@ -204,7 +205,53 @@ public class BackgroundSettingsReader {
         
         return true;
     }
-    
+
+    /**
+     * Check if the provided angle-exposure list is compatible with background settings.
+     * This method allows for subset validation - the user can select fewer angles than
+     * what background images exist for, as long as the selected angles exist and have
+     * matching exposures.
+     *
+     * @param settings The background settings to compare against
+     * @param currentAngleExposures The current angle-exposure list (can be subset)
+     * @param tolerance Tolerance for exposure time comparison (e.g., 0.1 for 0.1ms tolerance)
+     * @return true if selected angles exist in background settings with matching exposures
+     */
+    public static boolean validateAngleExposuresSubset(BackgroundSettings settings,
+            List<AngleExposure> currentAngleExposures, double tolerance) {
+
+        if (settings == null || currentAngleExposures == null) {
+            return false;
+        }
+
+        // Create a map of background angles for quick lookup
+        Map<Double, Double> backgroundAngleToExposure = new HashMap<>();
+        for (AngleExposure ae : settings.angleExposures) {
+            backgroundAngleToExposure.put(ae.ticks(), ae.exposureMs());
+        }
+
+        // Check each selected angle
+        for (AngleExposure currentAe : currentAngleExposures) {
+            Double backgroundExposure = backgroundAngleToExposure.get(currentAe.ticks());
+
+            if (backgroundExposure == null) {
+                // Selected angle doesn't exist in background settings
+                logger.debug("Selected angle {}° not found in background settings", currentAe.ticks());
+                return false;
+            }
+
+            // Check exposure match (within tolerance)
+            if (Math.abs(backgroundExposure - currentAe.exposureMs()) > tolerance) {
+                logger.debug("Exposure mismatch for angle {}°: background={}ms, selected={}ms (tolerance={}ms)",
+                        currentAe.ticks(), backgroundExposure, currentAe.exposureMs(), tolerance);
+                return false;
+            }
+        }
+
+        logger.debug("All selected angles ({}) match background settings", currentAngleExposures.size());
+        return true;
+    }
+
     /**
      * Extract magnification from objective identifier.
      * Examples:

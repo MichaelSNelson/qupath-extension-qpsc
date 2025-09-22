@@ -467,8 +467,9 @@ public class PPMAngleSelectionController {
             }
             
             // Validate with a tolerance of 0.1ms
+            // Use subset validation to allow users to select fewer angles than background images exist for
             double tolerance = 0.1;
-            boolean matches = BackgroundSettingsReader.validateAngleExposures(
+            boolean matches = BackgroundSettingsReader.validateAngleExposuresSubset(
                     backgroundSettings, currentAngles, tolerance);
             
             if (!matches) {
@@ -494,10 +495,10 @@ public class PPMAngleSelectionController {
         Platform.runLater(() -> {
             Alert warning = new Alert(Alert.AlertType.WARNING);
             warning.setTitle("Background Settings Mismatch");
-            warning.setHeaderText("Exposure settings don't match existing background correction");
-            
+            warning.setHeaderText("Selected angles have exposure time mismatches or missing background images");
+
             StringBuilder message = new StringBuilder();
-            message.append("Your selected exposure times do not match the existing background correction settings.\n\n");
+            message.append("Some of your selected angles either don't have background images or have different exposure times.\n\n");
             message.append("This may affect image quality and analysis accuracy.\n\n");
             
             message.append("Background settings (from ").append(backgroundSettings.settingsFilePath).append("):\n");
