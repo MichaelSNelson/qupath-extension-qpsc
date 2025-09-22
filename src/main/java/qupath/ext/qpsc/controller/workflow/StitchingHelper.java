@@ -323,7 +323,54 @@ public class StitchingHelper {
                             logger.warn("Could not list tile base directory: {}", e.getMessage());
                         }
                     }
-                    
+
+                    // Process sum image if it exists
+                    if (blockingDialog != null) {
+                        blockingDialog.updateStatus("Checking for sum results for " + annotationName + "...");
+                    }
+
+                    String sumAngleStr = angleExposures.get(0).ticks() + ".sum";
+                    Path sumPath = tileBaseDir.resolve(sumAngleStr);
+
+                    logger.info("Checking for sum directory at: {}", sumPath);
+                    logger.info("Sum directory exists: {}", Files.exists(sumPath));
+
+                    if (Files.exists(sumPath)) {
+                        logger.info("Found sum directory: {}", sumPath);
+
+                        // Log directory contents to understand what's inside
+                        try {
+                            logger.info("Sum directory contents:");
+                            Files.list(sumPath).forEach(path -> logger.info("  - {}", path));
+                        } catch (IOException e) {
+                            logger.warn("Could not list sum directory contents: {}", e.getMessage());
+                        }
+
+                        if (blockingDialog != null) {
+                            blockingDialog.updateStatus("Processing sum image for " + annotationName + "...");
+                        }
+
+                        try {
+                            logger.info("Starting sum isolation processing for angle string: {}", sumAngleStr);
+                            String sumOutPath = processAngleWithIsolation(
+                                    tileBaseDir, sumAngleStr, sample, modeWithIndex, annotationName,
+                                    compression, pixelSize, stitchingConfig.downsampleFactor(),
+                                    gui, project, handler, stitchParams
+                            );
+
+                            if (sumOutPath != null) {
+                                stitchedImages.add(sumOutPath);
+                                logger.info("Successfully processed sum image - output: {}", sumOutPath);
+                            } else {
+                                logger.error("Sum processing returned null output path");
+                            }
+                        } catch (Exception e) {
+                            logger.error("Failed to stitch sum image for angle {}: {}", sumAngleStr, e.getMessage(), e);
+                        }
+                    } else {
+                        logger.info("No sum directory found at: {}", sumPath);
+                    }
+
                     // Return path of last successfully processed image
                     String outPath = stitchedImages.isEmpty() ? null : stitchedImages.get(stitchedImages.size() - 1);
 
@@ -629,7 +676,54 @@ public class StitchingHelper {
                             logger.warn("Could not list tile base directory: {}", e.getMessage());
                         }
                     }
-                    
+
+                    // Process sum image if it exists
+                    if (blockingDialog != null) {
+                        blockingDialog.updateStatus("Checking for sum results for " + regionName + "...");
+                    }
+
+                    String sumAngleStr = angleExposures.get(0).ticks() + ".sum";
+                    Path sumPath = tileBaseDir.resolve(sumAngleStr);
+
+                    logger.info("Checking for sum directory at: {}", sumPath);
+                    logger.info("Sum directory exists: {}", Files.exists(sumPath));
+
+                    if (Files.exists(sumPath)) {
+                        logger.info("Found sum directory: {}", sumPath);
+
+                        // Log directory contents to understand what's inside
+                        try {
+                            logger.info("Sum directory contents:");
+                            Files.list(sumPath).forEach(path -> logger.info("  - {}", path));
+                        } catch (IOException e) {
+                            logger.warn("Could not list sum directory contents: {}", e.getMessage());
+                        }
+
+                        if (blockingDialog != null) {
+                            blockingDialog.updateStatus("Processing sum image for " + regionName + "...");
+                        }
+
+                        try {
+                            logger.info("Starting sum isolation processing for angle string: {}", sumAngleStr);
+                            String sumOutPath = processAngleWithIsolation(
+                                    tileBaseDir, sumAngleStr, sample, modeWithIndex, regionName,
+                                    compression, pixelSize, stitchingConfig.downsampleFactor(),
+                                    gui, project, handler, stitchParams
+                            );
+
+                            if (sumOutPath != null) {
+                                stitchedImages.add(sumOutPath);
+                                logger.info("Successfully processed sum image - output: {}", sumOutPath);
+                            } else {
+                                logger.error("Sum processing returned null output path");
+                            }
+                        } catch (Exception e) {
+                            logger.error("Failed to stitch sum image for angle {}: {}", sumAngleStr, e.getMessage(), e);
+                        }
+                    } else {
+                        logger.info("No sum directory found at: {}", sumPath);
+                    }
+
                     // Return path of last successfully processed image
                     String outPath = stitchedImages.isEmpty() ? null : stitchedImages.get(stitchedImages.size() - 1);
 

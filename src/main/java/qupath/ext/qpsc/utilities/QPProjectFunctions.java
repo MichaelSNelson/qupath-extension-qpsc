@@ -531,8 +531,9 @@ public class QPProjectFunctions {
         );
 
         // Save
-        flippedEntry.saveImageData(flippedData);
         project.syncChanges();
+        // Note: Avoid calling saveImageData here to prevent save dialogs
+        // The image data will be automatically saved when needed
 
         logger.info("Successfully created flipped duplicate: {}", flippedName);
         return flippedEntry;
@@ -660,9 +661,10 @@ public class QPProjectFunctions {
             // Set a user-friendly name for the image in the project
             entry.setImageName(imageFile.getName());
 
-            // Sync changes and save the image data
+            // Sync changes
             project.syncChanges();
-            entry.saveImageData(imageData);
+            // Note: Avoid calling saveImageData here to prevent save dialogs
+            // The image data will be automatically saved when needed
 
             logger.info("Successfully added image to project with all associated images");
             return true;
@@ -717,7 +719,8 @@ public class QPProjectFunctions {
 
         // Save the changes
         project.syncChanges();
-        entry.saveImageData(imageData);
+        // Note: Avoid calling saveImageData here to prevent save dialogs
+        // The image data will be automatically saved when needed
 
         logger.info("Successfully added flipped image to project (associated images not preserved)");
         return true;
