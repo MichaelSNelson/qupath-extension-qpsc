@@ -13,6 +13,7 @@ import javafx.stage.Modality;
 import qupath.ext.qpsc.modality.ppm.PPMPreferences;
 import qupath.ext.qpsc.utilities.BackgroundSettingsReader;
 import qupath.ext.qpsc.utilities.MicroscopeConfigManager;
+import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.lib.scripting.QP;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -323,7 +324,8 @@ public class PPMAngleSelectionController {
         
         // Priority 1: Check background image exposure times per angle
         try {
-            MicroscopeConfigManager configManager = MicroscopeConfigManager.getInstance();
+            String configFileLocation = QPPreferenceDialog.getMicroscopeConfigFileProperty();
+            MicroscopeConfigManager configManager = MicroscopeConfigManager.getInstance(configFileLocation);
             String backgroundFolder = configManager.getBackgroundCorrectionFolder();
             
             if (backgroundFolder != null) {
@@ -347,7 +349,8 @@ public class PPMAngleSelectionController {
         
         // Priority 2: Check config file for current microscope
         try {
-            MicroscopeConfigManager configManager = MicroscopeConfigManager.getInstance();
+            String configFileLocation = QPPreferenceDialog.getMicroscopeConfigFileProperty();
+            MicroscopeConfigManager configManager = MicroscopeConfigManager.getInstance(configFileLocation);
             Map<String, Object> exposures = configManager.getModalityExposures(modality, objective, detector);
             
             if (exposures != null) {
@@ -439,7 +442,8 @@ public class PPMAngleSelectionController {
         }
         
         try {
-            MicroscopeConfigManager configManager = MicroscopeConfigManager.getInstance();
+            String configFileLocation = QPPreferenceDialog.getMicroscopeConfigFileProperty();
+            MicroscopeConfigManager configManager = MicroscopeConfigManager.getInstance(configFileLocation);
             String backgroundFolder = configManager.getBackgroundCorrectionFolder();
             
             if (backgroundFolder == null) {
@@ -601,7 +605,8 @@ public class PPMAngleSelectionController {
         }
         
         try {
-            MicroscopeConfigManager configManager = MicroscopeConfigManager.getInstance();
+            String configFileLocation = QPPreferenceDialog.getMicroscopeConfigFileProperty();
+            MicroscopeConfigManager configManager = MicroscopeConfigManager.getInstance(configFileLocation);
             
             // Check if background correction is enabled
             boolean bgEnabled = configManager.isBackgroundCorrectionEnabled(modality);
