@@ -43,8 +43,8 @@ public class RotationManager {
             // Read rotation angles from modality configuration
             List<?> anglesList = mgr.getList("modalities", modality, "rotation_angles");
 
-            double plusTick = 5.0;
-            double minusTick = -5.0;
+            double plusTick = 7.0;
+            double minusTick = -7.0;
             double zeroTick = 0.0;
             double uncrossedTick = 90.0;
 
@@ -138,6 +138,25 @@ public class RotationManager {
                 logger.info("Using {} for modality {}",
                         strategy.getClass().getSimpleName(), modalityName);
                 return strategy.getRotationTicksWithExposure();
+            }
+        }
+        return CompletableFuture.completedFuture(List.of());
+    }
+
+    /**
+     * Gets the default angles with exposures from configuration without showing any dialog.
+     * This is used when angle overrides need to be applied before showing the user dialog.
+     * @param modalityName The modality name
+     * @return CompletableFuture with list of default AngleExposure objects
+     */
+    public CompletableFuture<List<AngleExposure>> getDefaultAnglesWithExposure(String modalityName) {
+        logger.info("Getting default angles without dialog for modality: {}", modalityName);
+
+        for (RotationStrategy strategy : strategies) {
+            if (strategy.appliesTo(modalityName) && strategy instanceof PPMRotationStrategy) {
+                PPMRotationStrategy ppmStrategy = (PPMRotationStrategy) strategy;
+                // Return the configured angles directly without showing dialog
+                return CompletableFuture.completedFuture(ppmStrategy.getConfiguredAngles());
             }
         }
         return CompletableFuture.completedFuture(List.of());

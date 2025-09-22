@@ -196,13 +196,59 @@ public class BoundingBoxWorkflow {
                     }
 
                     double finalWSI_pixelSize_um = WSI_pixelSize_um;
-                    modalityHandler.getRotationAngles(sample.modality(), sample.objective(), sample.detector())
+
+                    // Handle angle overrides by pre-applying them and calling the dialog directly
+                    CompletableFuture<List<qupath.ext.qpsc.modality.AngleExposure>> anglesFuture;
+                    if (bb.angleOverrides() != null && !bb.angleOverrides().isEmpty() && "ppm".equals(sample.modality())) {
+                        // For PPM with overrides, get the default angles first, apply overrides, then show dialog with corrected angles
+                        qupath.ext.qpsc.modality.ppm.RotationManager rotationManager =
+                            new qupath.ext.qpsc.modality.ppm.RotationManager(sample.modality(), sample.objective(), sample.detector());
+
+                        // Get the default angles (this won't show any dialog since we're using the new method)
+                        anglesFuture = rotationManager.getDefaultAnglesWithExposure(sample.modality())
+                            .thenCompose(defaultAngles -> {
+                                // Apply overrides to the default angles
+                                List<qupath.ext.qpsc.modality.AngleExposure> overriddenAngles =
+                                    modalityHandler.applyAngleOverrides(defaultAngles, bb.angleOverrides());
+
+                                // Extract the overridden plus/minus angles for the dialog
+                                double plusAngle = 7.0;  // fallback
+                                double minusAngle = -7.0; // fallback
+                                double uncrossedAngle = 90.0; // fallback
+
+                                for (qupath.ext.qpsc.modality.AngleExposure ae : overriddenAngles) {
+                                    if (ae.ticks() > 0 && ae.ticks() < 45) plusAngle = ae.ticks();
+                                    else if (ae.ticks() < 0) minusAngle = ae.ticks();
+                                    else if (ae.ticks() >= 45) uncrossedAngle = ae.ticks();
+                                }
+
+                                // Now show the dialog with the correct angles
+                                return qupath.ext.qpsc.modality.ppm.ui.PPMAngleSelectionController.showDialog(
+                                    plusAngle, minusAngle, uncrossedAngle,
+                                    sample.modality(), sample.objective(), sample.detector())
+                                    .thenApply(result -> {
+                                        if (result == null) {
+                                            return new ArrayList<qupath.ext.qpsc.modality.AngleExposure>();
+                                        }
+                                        List<qupath.ext.qpsc.modality.AngleExposure> finalAngles = new ArrayList<>();
+                                        for (qupath.ext.qpsc.modality.ppm.ui.PPMAngleSelectionController.AngleExposure ae : result.angleExposures) {
+                                            finalAngles.add(new qupath.ext.qpsc.modality.AngleExposure(ae.angle, ae.exposureMs));
+                                        }
+                                        return finalAngles;
+                                    });
+                            });
+                    } else {
+                        // Normal flow - no overrides or not PPM
+                        anglesFuture = modalityHandler.getRotationAngles(sample.modality(), sample.objective(), sample.detector())
                             .thenApply(angleExposures -> {
                                 if (bb.angleOverrides() != null && !bb.angleOverrides().isEmpty()) {
                                     return modalityHandler.applyAngleOverrides(angleExposures, bb.angleOverrides());
                                 }
                                 return angleExposures;
-                            })
+                            });
+                    }
+
+                    anglesFuture
                             .thenAccept(angleExposures -> {
                                 // Extract just the angles for logging and file counting
                                 List<Double> rotationAngles = angleExposures.stream()

@@ -21,6 +21,7 @@ import java.util.Map;
  * <ul>
  *   <li><strong>Angle Selection:</strong> Boolean flags for each of the four PPM angles</li>
  *   <li><strong>Exposure Times:</strong> Decimal exposure values in milliseconds for precise timing</li>
+ *   <li><strong>Angle Overrides:</strong> Custom angle values for per-acquisition customization</li>
  *   <li><strong>Configuration Loading:</strong> Automatic loading of default exposures from YAML config</li>
  * </ul>
  * 
@@ -55,6 +56,14 @@ public class PPMPreferences {
             PathPrefs.createPersistentPreference("PPMPlusExposureMs", "500");
     private static final StringProperty uncrossedExposure =
             PathPrefs.createPersistentPreference("PPMUncrossedExposureMs", "10");
+
+    // Angle override preferences for per-acquisition customization
+    private static final StringProperty overrideEnabled =
+            PathPrefs.createPersistentPreference("PPMAngleOverrideEnabled", "false");
+    private static final StringProperty overridePlusAngle =
+            PathPrefs.createPersistentPreference("PPMOverridePlusAngle", "7.0");
+    private static final StringProperty overrideMinusAngle =
+            PathPrefs.createPersistentPreference("PPMOverrideMinusAngle", "-7.0");
 
     static {
         // PPM exposure defaults are initialized with fallback values.
@@ -250,6 +259,56 @@ public class PPMPreferences {
             case "setUncrossedExposureMs" -> setUncrossedExposureMs(ms);
             default -> logger.warn("Unknown setter method: {}", setterMethod);
         }
+    }
+
+    // =============== Angle Override Preferences ===============
+
+    /**
+     * Gets whether angle override is enabled for per-acquisition customization.
+     * @return true if angle override is enabled, false otherwise
+     */
+    public static boolean getAngleOverrideEnabled() {
+        return Boolean.parseBoolean(overrideEnabled.get());
+    }
+
+    /**
+     * Sets whether angle override is enabled for per-acquisition customization.
+     * @param enabled true to enable angle override, false to disable
+     */
+    public static void setAngleOverrideEnabled(boolean enabled) {
+        overrideEnabled.set(String.valueOf(enabled));
+    }
+
+    /**
+     * Gets the custom positive angle override value.
+     * @return positive angle in degrees (default 7.0)
+     */
+    public static double getOverridePlusAngle() {
+        return Double.parseDouble(overridePlusAngle.get());
+    }
+
+    /**
+     * Sets the custom positive angle override value.
+     * @param angle positive angle in degrees
+     */
+    public static void setOverridePlusAngle(double angle) {
+        overridePlusAngle.set(String.valueOf(angle));
+    }
+
+    /**
+     * Gets the custom negative angle override value.
+     * @return negative angle in degrees (default -7.0)
+     */
+    public static double getOverrideMinusAngle() {
+        return Double.parseDouble(overrideMinusAngle.get());
+    }
+
+    /**
+     * Sets the custom negative angle override value.
+     * @param angle negative angle in degrees
+     */
+    public static void setOverrideMinusAngle(double angle) {
+        overrideMinusAngle.set(String.valueOf(angle));
     }
 }
 

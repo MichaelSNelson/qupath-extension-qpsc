@@ -9,6 +9,7 @@ import javafx.scene.control.SpinnerValueFactory;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.VBox;
 import qupath.ext.qpsc.modality.ModalityHandler;
+import qupath.ext.qpsc.modality.ppm.PPMPreferences;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.utilities.MicroscopeConfigManager;
 
@@ -32,8 +33,8 @@ public class PPMBoundingBoxUI implements ModalityHandler.BoundingBoxUI {
         MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(
                 QPPreferenceDialog.getMicroscopeConfigFileProperty());
 
-        double defaultPlus = 5.0;
-        double defaultMinus = -5.0;
+        double defaultPlus = 7.0;
+        double defaultMinus = -7.0;
 
         java.util.List<?> angles = mgr.getList("modalities", "ppm", "rotation_angles");
         if (angles != null) {
@@ -60,13 +61,18 @@ public class PPMBoundingBoxUI implements ModalityHandler.BoundingBoxUI {
         grid.setVgap(5);
         grid.setDisable(true);
 
+        // Load saved preferences or use defaults
+        double savedPlusAngle = PPMPreferences.getOverridePlusAngle();
+        double savedMinusAngle = PPMPreferences.getOverrideMinusAngle();
+        boolean overrideEnabled = PPMPreferences.getAngleOverrideEnabled();
+
         plusSpinner = new Spinner<>();
-        plusSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(-180, 180, defaultPlus, 0.5));
+        plusSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(-180, 180, savedPlusAngle, 0.5));
         plusSpinner.setEditable(true);
         plusSpinner.setPrefWidth(100);
 
         minusSpinner = new Spinner<>();
-        minusSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(-180, 180, defaultMinus, 0.5));
+        minusSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(-180, 180, savedMinusAngle, 0.5));
         minusSpinner.setEditable(true);
         minusSpinner.setPrefWidth(100);
 
@@ -75,7 +81,27 @@ public class PPMBoundingBoxUI implements ModalityHandler.BoundingBoxUI {
         grid.add(new Label("Minus angle (ticks):"), 0, 1);
         grid.add(minusSpinner, 1, 1);
 
-        overrideAngles.selectedProperty().addListener((obs, old, sel) -> grid.setDisable(!sel));
+        // Set checkbox to saved state
+        overrideAngles.setSelected(overrideEnabled);
+        grid.setDisable(!overrideEnabled);
+
+        // Save preferences when values change
+        overrideAngles.selectedProperty().addListener((obs, old, sel) -> {
+            grid.setDisable(!sel);
+            PPMPreferences.setAngleOverrideEnabled(sel);
+        });
+
+        plusSpinner.valueProperty().addListener((obs, old, newVal) -> {
+            if (newVal != null) {
+                PPMPreferences.setOverridePlusAngle(newVal);
+            }
+        });
+
+        minusSpinner.valueProperty().addListener((obs, old, newVal) -> {
+            if (newVal != null) {
+                PPMPreferences.setOverrideMinusAngle(newVal);
+            }
+        });
 
         root.getChildren().addAll(new Separator(), label, overrideAngles, grid);
     }

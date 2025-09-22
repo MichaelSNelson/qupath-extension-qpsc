@@ -37,9 +37,9 @@ import java.util.stream.Collectors;
  * 
  * <p>The dialog presents checkboxes for four standard PPM angles:</p>
  * <ul>
- *   <li><strong>Minus angle:</strong> Negative polarizer rotation (e.g., -5.0 degrees)</li>
+ *   <li><strong>Minus angle:</strong> Negative polarizer rotation (e.g., -7.0 degrees)</li>
  *   <li><strong>Zero angle:</strong> Crossed polarizers at 0.0 degrees</li>
- *   <li><strong>Plus angle:</strong> Positive polarizer rotation (e.g., +5.0 degrees)</li>
+ *   <li><strong>Plus angle:</strong> Positive polarizer rotation (e.g., +7.0 degrees)</li>
  *   <li><strong>Uncrossed angle:</strong> Parallel polarizers (e.g., 45.0 degrees)</li>
  * </ul>
  * 
@@ -112,7 +112,7 @@ public class PPMAngleSelectionController {
         
         /**
          * Returns a formatted string showing both angle and exposure time.
-         * @return formatted string in the format "angle° @ exposureMs" (e.g., "5.0° @ 1.2ms")
+         * @return formatted string in the format "angle° @ exposureMs" (e.g., "7.0° @ 1.2ms")
          */
         @Override
         public String toString() {
@@ -134,8 +134,8 @@ public class PPMAngleSelectionController {
      * <p>The dialog includes convenience buttons for \"Select All\" and \"Select None\" to
      * quickly configure common acquisition patterns.</p>
      * 
-     * @param plusAngle the positive polarizer angle value in degrees (typically +5.0)
-     * @param minusAngle the negative polarizer angle value in degrees (typically -5.0)
+     * @param plusAngle the positive polarizer angle value in degrees (typically +7.0)
+     * @param minusAngle the negative polarizer angle value in degrees (typically -7.0)
      * @param uncrossedAngle the uncrossed polarizer angle in degrees (typically 45.0)
      * @param modality the modality name (e.g., "ppm") for config lookup
      * @param objective the objective ID for config lookup

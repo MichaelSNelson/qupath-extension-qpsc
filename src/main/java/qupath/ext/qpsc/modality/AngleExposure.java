@@ -22,7 +22,7 @@ package qupath.ext.qpsc.modality;
  * For PPM (Polarized light microscopy) systems, typical conversions are:
  * <ul>
  *   <li>1 tick = 2 degrees (Thorlabs rotation stages)</li>
- *   <li>Common values: -5 ticks (negative), 0 ticks (crossed), +5 ticks (positive), 45 ticks (uncrossed)</li>
+ *   <li>Common values: -7 ticks (negative), 0 ticks (crossed), +7 ticks (positive), 45 ticks (uncrossed)</li>
  *   <li>Tick values are passed directly to microscope control software without conversion</li>
  * </ul>
  * 
@@ -38,7 +38,7 @@ package qupath.ext.qpsc.modality;
  * <p><strong>Command Building Integration:</strong><br>
  * When building Pycro-Manager acquisition commands, {@code AngleExposure} lists are processed as:
  * <pre>{@code
- * --angles (-5.0,0.0,5.0) --exposures (500.0,800.5,1.2)
+ * --angles (-7.0,0.0,7.0) --exposures (500.0,800.5,1.2)
  * }</pre>
  * The {@link #toString()} method provides a comma-separated format for debugging and logging.</p>
  * 
@@ -51,9 +51,9 @@ package qupath.ext.qpsc.modality;
  * <pre>{@code
  * // PPM three-angle sequence
  * List<AngleExposure> ppmSequence = List.of(
- *     new AngleExposure(-5.0, 500.0),  // Negative polarizer angle
- *     new AngleExposure(0.0, 800.5),   // Crossed polarizers  
- *     new AngleExposure(5.0, 1.2)      // Positive polarizer angle (fine control)
+ *     new AngleExposure(-7.0, 500.0),  // Negative polarizer angle
+ *     new AngleExposure(0.0, 800.5),   // Crossed polarizers
+ *     new AngleExposure(7.0, 1.2)      // Positive polarizer angle (fine control)
  * );
  * 
  * // Single brightfield acquisition
@@ -101,7 +101,7 @@ public record AngleExposure(double ticks, double exposureMs) {
     /**
      * Returns a comma-separated string representation for debugging and logging purposes.
      * 
-     * <p>The format is: {@code "ticks,exposureMs"} (e.g., {@code "-5.0,500.0"})</p>
+     * <p>The format is: {@code "ticks,exposureMs"} (e.g., {@code "-7.0,500.0"})</p>
      * 
      * <p>This format is primarily used for:
      * <ul>

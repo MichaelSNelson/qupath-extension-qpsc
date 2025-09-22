@@ -112,6 +112,20 @@ class PPMRotationStrategy implements RotationStrategy {
     public String getAngleSuffix(double angle) {
         return "";
     }
+
+    /**
+     * Gets the configured angles without showing any dialog.
+     * Used for applying overrides before showing the user dialog.
+     * @return List of default AngleExposure objects from configuration
+     */
+    public List<AngleExposure> getConfiguredAngles() {
+        List<AngleExposure> configuredAngles = new ArrayList<>();
+        configuredAngles.add(plusAngleExposure);
+        configuredAngles.add(minusAngleExposure);
+        configuredAngles.add(zeroAngleExposure);
+        configuredAngles.add(uncrossedAngleExposure);
+        return configuredAngles;
+    }
 }
 
 /**
