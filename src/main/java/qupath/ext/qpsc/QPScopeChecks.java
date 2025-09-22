@@ -72,224 +72,47 @@ public class QPScopeChecks {
      * Validate the YAML config and return true if all required keys are present.
      */
     public static boolean validateMicroscopeConfig() {
-        // Define the nested keys that are required for basic operation
-        Set<String[]> required = Set.of(
-                // Basic microscope info
-                new String[]{"microscope", "name"},
-                new String[]{"microscope", "type"},
+        try {
+            String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
+            MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(configPath);
 
-                // Stage configuration - used for bounds checking
-                new String[]{"stage", "limits", "x_um", "low"},
-                new String[]{"stage", "limits", "x_um", "high"},
-                new String[]{"stage", "limits", "y_um", "low"},
-                new String[]{"stage", "limits", "y_um", "high"},
-                new String[]{"stage", "limits", "z_um", "low"},
-                new String[]{"stage", "limits", "z_um", "high"},
+            // Use the comprehensive validation method from MicroscopeConfigManager
+            List<String> errors = mgr.validateConfiguration();
 
-                // Core sections
-                new String[]{"modalities"},
-                new String[]{"acq_profiles_new"},
-                new String[]{"slide_size_um"}
-        );
+            if (!errors.isEmpty()) {
+                logger.error("Configuration validation failed: {}", errors);
+                String errorMessage = "Configuration validation errors:\n\n• " +
+                        String.join("\n• ", errors);
+                Dialogs.showWarningNotification("Configuration Errors", errorMessage);
+                return false;
+            }
 
-        String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
-        var mgr = MicroscopeConfigManager.getInstance(configPath);
-
-        // First check the basic required keys
-        var missing = mgr.validateRequiredKeys(required);
-        if (!missing.isEmpty()) {
-            logger.error("Missing required configuration keys: {}",
-                    missing.stream().map(arr -> String.join(".", arr)).toList());
-            Dialogs.showWarningNotification("Configuration Error",
-                    "Missing required configuration sections:\n" +
-                            missing.stream().map(arr -> String.join(".", arr)).toList());
+            logger.info("Configuration validation passed");
+            return true;
+        } catch (Exception e) {
+            logger.error("Error during configuration validation", e);
+            Dialogs.showErrorNotification("Configuration Validation Error",
+                    "Failed to validate configuration: " + e.getMessage());
             return false;
         }
 
-        // Check modalities section
-        Set<String> availableModalities = mgr.getAvailableModalities();
-        if (availableModalities.isEmpty()) {
-            logger.error("No modalities defined in configuration");
-            Dialogs.showWarningNotification("Configuration Error",
-                    "No modalities defined in configuration");
-            return false;
-        }
-
-        // Check acquisition profiles
-        List<Object> profiles = mgr.getList("acq_profiles_new", "profiles");
-        if (profiles == null || profiles.isEmpty()) {
-            logger.error("No acquisition profiles defined");
-            Dialogs.showWarningNotification("Configuration Error",
-                    "No acquisition profiles defined in configuration");
-            return false;
-        }
-
-        // Validate that we have at least one complete profile
-        boolean hasValidProfile = false;
-        List<String> profileErrors = new ArrayList<>();
-
-        // Track which objectives are used in profiles
-        Set<String> usedObjectives = new HashSet<>();
-
-        for (Object profileObj : profiles) {
-            if (!(profileObj instanceof Map)) continue;
-
-            @SuppressWarnings("unchecked")
-            Map<String, Object> profile = (Map<String, Object>) profileObj;
-
-            String modality = (String) profile.get("modality");
-            String objective = (String) profile.get("objective");
-            String detector = (String) profile.get("detector");
-
-            if (modality == null || objective == null || detector == null) {
-                profileErrors.add(String.format("Profile missing required fields: modality=%s, objective=%s, detector=%s",
-                        modality, objective, detector));
-                continue;
-            }
-
-            usedObjectives.add(objective);
-
-            // Check if modality exists
-            if (!availableModalities.contains(modality)) {
-                profileErrors.add(String.format("Profile references unknown modality: %s", modality));
-                continue;
-            }
-
-            // Check if detector exists in resources
-            Map<String, Object> detectorSection = mgr.getResourceSection("id_detector");
-            if (detectorSection == null || !detectorSection.containsKey(detector)) {
-                profileErrors.add(String.format("Profile references unknown detector: %s", detector));
-                continue;
-            }
-
-            // Validate detector dimensions
-            @SuppressWarnings("unchecked")
-            Map<String, Object> detectorData = (Map<String, Object>) detectorSection.get(detector);
-            Integer width = detectorData != null && detectorData.get("width_px") instanceof Number ?
-                    ((Number) detectorData.get("width_px")).intValue() : null;
-            Integer height = detectorData != null && detectorData.get("height_px") instanceof Number ?
-                    ((Number) detectorData.get("height_px")).intValue() : null;
-
-            if (width == null || height == null || width <= 0 || height <= 0) {
-                profileErrors.add(String.format("Detector %s has invalid dimensions: width=%s, height=%s",
-                        detector, width, height));
-                continue;
-            }
-
-            // Check if settings exist
-            if (!profile.containsKey("settings")) {
-                profileErrors.add(String.format("Profile %s/%s/%s missing settings",
-                        modality, objective, detector));
-                continue;
-            }
-
-            @SuppressWarnings("unchecked")
-            Map<String, Object> settings = (Map<String, Object>) profile.get("settings");
-
-            // Validate exposure settings
-            if (!settings.containsKey("exposures_ms")) {
-                profileErrors.add(String.format("Profile %s/%s/%s missing exposures_ms",
-                        modality, objective, detector));
-                continue;
-            }
-
-            // Check pixel size (should come from defaults or profile)
-            double pixelSize = mgr.getModalityPixelSize(modality, objective, detector);
-            if (pixelSize <= 0) {
-                profileErrors.add(String.format("Invalid pixel size for %s/%s/%s: %f",
-                        modality, objective, detector, pixelSize));
-                continue;
-            }
-
-            logger.debug("Valid profile found: {}/{}/{} with pixel size {} µm",
-                    modality, objective, detector, pixelSize);
-            hasValidProfile = true;
-        }
-
-        // Check defaults for all used objectives
-        List<Object> defaults = mgr.getList("acq_profiles_new", "defaults");
-        if (defaults != null) {
-            for (String objective : usedObjectives) {
-                boolean hasDefaults = false;
-                for (Object defaultObj : defaults) {
-                    if (defaultObj instanceof Map) {
-                        @SuppressWarnings("unchecked")
-                        Map<String, Object> def = (Map<String, Object>) defaultObj;
-                        if (objective.equals(def.get("objective"))) {
-                            hasDefaults = true;
-
-                            // Validate autofocus parameters
-                            Map<String, Object> autofocus = mgr.getAutofocusParams(objective);
-                            if (autofocus != null) {
-                                Integer nSteps = mgr.getAutofocusIntParam(objective, "n_steps");
-                                Integer searchRange = mgr.getAutofocusIntParam(objective, "search_range_um");
-
-                                if (nSteps == null || nSteps <= 0 || searchRange == null || searchRange <= 0) {
-                                    logger.warn("Incomplete autofocus configuration for objective {}: n_steps={}, search_range_um={}",
-                                            objective, nSteps, searchRange);
-                                    profileErrors.add(String.format("Incomplete autofocus for objective %s", objective));
-                                }
-                            }
-                            break;
-                        }
-                    }
-                }
-
-                if (!hasDefaults) {
-                    logger.warn("No defaults found for objective: {}", objective);
-                    profileErrors.add(String.format("No defaults defined for objective: %s", objective));
-                }
-            }
-        }
-
-        // Check for PPM-specific requirements if PPM modality is present
-        if (availableModalities.contains("ppm")) {
-            // Check rotation stage
-            String rotationDevice = mgr.getString("modalities", "ppm", "rotation_stage", "device");
-            if (rotationDevice == null) {
-                profileErrors.add("PPM modality missing rotation stage configuration");
-            }
-
-            // Check rotation angles
-            List<Object> rotationAngles = mgr.getList("modalities", "ppm", "rotation_angles");
-            if (rotationAngles == null || rotationAngles.isEmpty()) {
-                profileErrors.add("PPM modality missing rotation angles");
-            }
-        }
-
-        // Report all errors if any were found
-        if (!profileErrors.isEmpty()) {
-            logger.error("Configuration validation errors: {}", profileErrors);
-            String errorMessage = "Configuration validation errors:\n\n" +
-                    String.join("\n", profileErrors);
-            Dialogs.showWarningNotification("Configuration Errors", errorMessage);
-            return false;
-        }
-
-        if (!hasValidProfile) {
-            logger.error("No valid acquisition profiles found");
-            Dialogs.showWarningNotification("Configuration Error",
-                    "No valid acquisition profiles found in configuration");
-            return false;
-        }
-
-        // Additional validation using ConfigManager's built-in validation
-        List<String> configErrors = mgr.validateConfiguration();
-        if (!configErrors.isEmpty()) {
-            logger.error("Configuration validation failed: {}", configErrors);
-            Dialogs.showWarningNotification("Configuration Error",
-                    "Configuration validation failed:\n" + String.join("\n", configErrors));
-            return false;
-        }
-
-        logger.info("Microscope configuration validation passed");
-        return true;
     }
 
     /**
-     * Dummy check for hardware accessibility.
-     * Replace this with real logic to check that the hardware is connected
-     * or available as expected by your preferences.
+     * Validates stage limits configuration.
+     * Since comprehensive validation is now handled by validateConfiguration(),
+     * this method is redundant and simply delegates to validateMicroscopeConfig().
+     *
+     * @return true if stage limits configuration is adequate
+     */
+    public static boolean validateStageLimitsConfig() {
+        // Delegate to comprehensive validation
+        return validateMicroscopeConfig();
+    }
+
+    /**
+     * Dummy check to ensure hardware is accessible.
+     * Replace with actual hardware checks when needed.
      *
      * @return true if hardware is accessible
      */
@@ -310,74 +133,12 @@ public class QPScopeChecks {
      * @return true if QuPath is in the correct state
      */
     private static boolean checkQuPathState() {
-        // TODO: Implement real state checking logic.
+        // TODO: Implement real QuPath state checks.
         // For example:
-        // - Check if an image is currently open
         // - Check if annotations exist
         // - Verify project directory structure
         // - Check available memory
         return true;
-    }
-    
-    /**
-     * Validates stage limits configuration.
-     * Stage limits are critical for preventing hardware damage from out-of-bounds movements.
-     *
-     * @return true if stage limits configuration is adequate
-     */
-    public static boolean validateStageLimitsConfig() {
-        try {
-            String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
-            MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(configPath);
-            
-            // Use the designed validation method instead of duplicating logic
-            List<String> missingConfigs = mgr.validateConfiguration();
-            List<String> warnings = new ArrayList<>();
-
-            // Add specific warnings for stage limits if they're missing
-            for (String missing : missingConfigs) {
-                if (missing.contains("stage.limits") || missing.contains("stage")) {
-                    warnings.add("• Stage movements will not be bounds-checked");
-                    warnings.add("• Risk of hardware damage from out-of-bounds movements");
-                    break;
-                }
-            }
-            
-            
-            // If we have missing critical configurations, block progress
-            if (!missingConfigs.isEmpty()) {
-                StringBuilder errorMessage = new StringBuilder();
-                errorMessage.append("Critical microscope configuration is missing or incomplete:\n\n");
-
-                errorMessage.append("Missing configurations:\n");
-                for (String missing : missingConfigs) {
-                    errorMessage.append("• ").append(missing).append("\n");
-                }
-
-                if (!warnings.isEmpty()) {
-                    errorMessage.append("\nPotential issues:\n");
-                    for (String warning : warnings) {
-                        errorMessage.append(warning).append("\n");
-                    }
-                }
-
-                errorMessage.append("\nThe extension is disabled until the configuration is properly set up.");
-                errorMessage.append("\nPlease add the missing configuration to your microscope YAML file.");
-                
-                logger.error("Stage limits validation failed: {}", missingConfigs);
-                Dialogs.showErrorNotification("Stage Limits Configuration Required", errorMessage.toString());
-                return false;
-            }
-            
-            logger.info("Stage limits configuration validated successfully");
-            return true;
-            
-        } catch (Exception e) {
-            logger.error("Error validating stage limits configuration", e);
-            Dialogs.showErrorNotification("Configuration Validation Error", 
-                    "Failed to validate stage limits configuration: " + e.getMessage());
-            return false;
-        }
     }
 
 }
