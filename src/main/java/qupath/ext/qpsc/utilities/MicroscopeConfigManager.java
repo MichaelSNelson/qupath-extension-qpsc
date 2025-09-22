@@ -1141,41 +1141,233 @@ public class MicroscopeConfigManager {
      * Returns list of missing sections.
      */
     public List<String> validateConfiguration() {
-        List<String> missing = new ArrayList<>();
+        List<String> errors = new ArrayList<>();
 
-        // Check required top-level sections
-        String[] required = {"microscope", "stage", "modalities", "acq_profiles_new"};
-        for (String section : required) {
-            if (getSection(section) == null) {
-                missing.add(section);
-            }
+        // Check detailed required configuration keys
+        Set<String[]> required = Set.of(
+                // Basic microscope info
+                new String[]{"microscope", "name"},
+                new String[]{"microscope", "type"},
+
+                // Stage configuration - used for bounds checking
+                new String[]{"stage", "limits", "x_um", "low"},
+                new String[]{"stage", "limits", "x_um", "high"},
+                new String[]{"stage", "limits", "y_um", "low"},
+                new String[]{"stage", "limits", "y_um", "high"},
+                new String[]{"stage", "limits", "z_um", "low"},
+                new String[]{"stage", "limits", "z_um", "high"},
+
+                // Core sections
+                new String[]{"modalities"},
+                new String[]{"acq_profiles_new"},
+                new String[]{"slide_size_um"}
+        );
+
+        // First check the basic required keys
+        var missing = validateRequiredKeys(required);
+        if (!missing.isEmpty()) {
+            errors.addAll(missing.stream().map(arr -> String.join(".", arr)).toList());
         }
 
-        // Check stage limits
-        if (getSection("stage", "limits") == null) {
-            missing.add("stage.limits");
-        }
-
-        // Check at least one modality
-        Set<String> modalities = getAvailableModalities();
-        if (modalities.isEmpty()) {
-            missing.add("modalities (at least one required)");
+        // Check modalities section
+        Set<String> availableModalities = getAvailableModalities();
+        if (availableModalities.isEmpty()) {
+            errors.add("No modalities defined in configuration");
         }
 
         // Check acquisition profiles
         List<Object> profiles = getList("acq_profiles_new", "profiles");
         if (profiles == null || profiles.isEmpty()) {
-            missing.add("acq_profiles_new.profiles (at least one required)");
+            errors.add("No acquisition profiles defined in configuration");
+        } else {
+            // Validate profile completeness and consistency
+            errors.addAll(validateProfiles(profiles, availableModalities));
         }
 
+        // Check defaults for objectives
+        List<Object> defaults = getList("acq_profiles_new", "defaults");
+        if (defaults != null && profiles != null) {
+            errors.addAll(validateObjectiveDefaults(defaults, profiles));
+        }
 
-        if (!missing.isEmpty()) {
-            logger.error("Configuration validation failed. Missing: {}", missing);
+        // Check PPM-specific requirements if PPM modality is present
+        if (availableModalities.contains("ppm")) {
+            errors.addAll(validatePPMConfiguration());
+        }
+
+        if (!errors.isEmpty()) {
+            logger.error("Configuration validation failed. Errors: {}", errors);
         } else {
             logger.info("Configuration validation passed");
         }
 
-        return missing;
+        return errors;
+    }
+
+    /**
+     * Validates acquisition profiles for completeness and consistency.
+     */
+    private List<String> validateProfiles(List<Object> profiles, Set<String> availableModalities) {
+        List<String> errors = new ArrayList<>();
+        boolean hasValidProfile = false;
+        Set<String> usedObjectives = new HashSet<>();
+
+        for (Object profileObj : profiles) {
+            if (!(profileObj instanceof Map)) continue;
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> profile = (Map<String, Object>) profileObj;
+
+            String modality = (String) profile.get("modality");
+            String objective = (String) profile.get("objective");
+            String detector = (String) profile.get("detector");
+
+            if (modality == null || objective == null || detector == null) {
+                errors.add(String.format("Profile missing required fields: modality=%s, objective=%s, detector=%s",
+                        modality, objective, detector));
+                continue;
+            }
+
+            usedObjectives.add(objective);
+
+            // Check if modality exists
+            if (!availableModalities.contains(modality)) {
+                errors.add(String.format("Profile references unknown modality: %s", modality));
+                continue;
+            }
+
+            // Check if detector exists in resources
+            Map<String, Object> detectorSection = getResourceSection("id_detector");
+            if (detectorSection == null || !detectorSection.containsKey(detector)) {
+                errors.add(String.format("Profile references unknown detector: %s", detector));
+                continue;
+            }
+
+            // Validate detector dimensions
+            @SuppressWarnings("unchecked")
+            Map<String, Object> detectorData = (Map<String, Object>) detectorSection.get(detector);
+            Integer width = detectorData != null && detectorData.get("width_px") instanceof Number ?
+                    ((Number) detectorData.get("width_px")).intValue() : null;
+            Integer height = detectorData != null && detectorData.get("height_px") instanceof Number ?
+                    ((Number) detectorData.get("height_px")).intValue() : null;
+
+            if (width == null || height == null || width <= 0 || height <= 0) {
+                errors.add(String.format("Detector %s has invalid dimensions: width=%s, height=%s",
+                        detector, width, height));
+                continue;
+            }
+
+            // Check if settings exist
+            if (!profile.containsKey("settings")) {
+                errors.add(String.format("Profile %s/%s/%s missing settings",
+                        modality, objective, detector));
+                continue;
+            }
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> settings = (Map<String, Object>) profile.get("settings");
+
+            // Validate exposure settings
+            if (!settings.containsKey("exposures_ms")) {
+                errors.add(String.format("Profile %s/%s/%s missing exposures_ms",
+                        modality, objective, detector));
+                continue;
+            }
+
+            // Check pixel size (should come from defaults or profile)
+            double pixelSize = getModalityPixelSize(modality, objective, detector);
+            if (pixelSize <= 0) {
+                errors.add(String.format("Invalid pixel size for %s/%s/%s: %f",
+                        modality, objective, detector, pixelSize));
+                continue;
+            }
+
+            logger.debug("Valid profile found: {}/{}/{} with pixel size {} µm",
+                    modality, objective, detector, pixelSize);
+            hasValidProfile = true;
+        }
+
+        if (!hasValidProfile) {
+            errors.add("No valid acquisition profiles found");
+        }
+
+        return errors;
+    }
+
+    /**
+     * Validates objective defaults configuration.
+     */
+    private List<String> validateObjectiveDefaults(List<Object> defaults, List<Object> profiles) {
+        List<String> errors = new ArrayList<>();
+
+        // Track which objectives are used in profiles
+        Set<String> usedObjectives = new HashSet<>();
+        for (Object profileObj : profiles) {
+            if (profileObj instanceof Map) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> profile = (Map<String, Object>) profileObj;
+                String objective = (String) profile.get("objective");
+                if (objective != null) {
+                    usedObjectives.add(objective);
+                }
+            }
+        }
+
+        // Check defaults for all used objectives
+        for (String objective : usedObjectives) {
+            boolean hasDefaults = false;
+            for (Object defaultObj : defaults) {
+                if (defaultObj instanceof Map) {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> def = (Map<String, Object>) defaultObj;
+                    if (objective.equals(def.get("objective"))) {
+                        hasDefaults = true;
+
+                        // Validate autofocus parameters
+                        Map<String, Object> autofocus = getAutofocusParams(objective);
+                        if (autofocus != null) {
+                            Integer nSteps = getAutofocusIntParam(objective, "n_steps");
+                            Integer searchRange = getAutofocusIntParam(objective, "search_range_um");
+
+                            if (nSteps == null || nSteps <= 0 || searchRange == null || searchRange <= 0) {
+                                logger.warn("Incomplete autofocus configuration for objective {}: n_steps={}, search_range_um={}",
+                                        objective, nSteps, searchRange);
+                                errors.add(String.format("Incomplete autofocus for objective %s", objective));
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+
+            if (!hasDefaults) {
+                logger.warn("No defaults found for objective: {}", objective);
+                errors.add(String.format("No defaults defined for objective: %s", objective));
+            }
+        }
+
+        return errors;
+    }
+
+    /**
+     * Validates PPM-specific configuration requirements.
+     */
+    private List<String> validatePPMConfiguration() {
+        List<String> errors = new ArrayList<>();
+
+        // Check rotation stage
+        String rotationDevice = getString("modalities", "ppm", "rotation_stage", "device");
+        if (rotationDevice == null) {
+            errors.add("PPM modality missing rotation stage configuration");
+        }
+
+        // Check rotation angles
+        List<Object> rotationAngles = getList("modalities", "ppm", "rotation_angles");
+        if (rotationAngles == null || rotationAngles.isEmpty()) {
+            errors.add("PPM modality missing rotation angles");
+        }
+
+        return errors;
     }
 
     /**
