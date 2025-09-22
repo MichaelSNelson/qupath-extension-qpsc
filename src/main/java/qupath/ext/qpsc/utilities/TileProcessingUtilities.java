@@ -319,6 +319,22 @@ public class TileProcessingUtilities {
                     } else {
                         angleSuffix = matchingString.replace(".", "_");
                     }
+                }
+                // Handle sum images specially
+                else if (matchingString.contains(".sum")) {
+                    // Extract base angle and add sum indicator
+                    String baseAngle = matchingString.replace(".sum", "");
+                    if (modalityHandler != null) {
+                        try {
+                            String baseAngleSuffix = modalityHandler.getAngleSuffix(Double.parseDouble(baseAngle));
+                            angleSuffix = baseAngleSuffix + "_sum";
+                        } catch (NumberFormatException ignored) {
+                            // Keep original if parsing fails
+                            angleSuffix = matchingString.replace(".", "_");
+                        }
+                    } else {
+                        angleSuffix = matchingString.replace(".", "_");
+                    }
                 } else if (modalityHandler != null) {
                     try {
                         angleSuffix = modalityHandler.getAngleSuffix(Double.parseDouble(matchingString));
