@@ -208,8 +208,12 @@ public class TileProcessingUtilities {
                 }
 
                 // Create the full name with sample, mode, annotation, and angle
+                // Sanitize annotation name to replace path separators with underscores for valid filenames
+                String sanitizedAnnotationName = annotationName.replace(File.separator, "_")
+                                                               .replace("/", "_")
+                                                               .replace("\\", "_");
                 String baseName = sampleLabel + "_" + imagingModeWithIndex + "_" +
-                        annotationName + "_" + angleSuffix + ".ome.tif";
+                        sanitizedAnnotationName + "_" + angleSuffix + ".ome.tif";
                 File renamed = new File(stitchedFile.getParent(), baseName);
 
                 logger.info("Renaming {} → {}", originalName, baseName);
@@ -345,13 +349,21 @@ public class TileProcessingUtilities {
                 
                 // This is angle-based stitching - include both annotation AND angle
                 // Format: sampleLabel_modality_annotation_angle.ome.tif
+                // Sanitize annotation name to replace path separators with underscores for valid filenames
+                String sanitizedAnnotationName = annotationName.replace(File.separator, "_")
+                                                               .replace("/", "_")
+                                                               .replace("\\", "_");
                 baseName = sampleLabel + "_" + imagingModeWithIndex + "_" +
-                        annotationName + "_" + angleSuffix + ".ome.tif";
+                        sanitizedAnnotationName + "_" + angleSuffix + ".ome.tif";
                 logger.info("Angle-based stitching detected - including annotation and angle in filename");
             } else {
                 // Standard stitching - just annotation (or nothing for "bounds")
+                // Sanitize annotation name to replace path separators with underscores for valid filenames
+                String sanitizedAnnotationName = annotationName.replace(File.separator, "_")
+                                                               .replace("/", "_")
+                                                               .replace("\\", "_");
                 baseName = sampleLabel + "_" + imagingModeWithIndex
-                        + (annotationName.equals("bounds") ? "" : "_" + annotationName)
+                        + (sanitizedAnnotationName.equals("bounds") ? "" : "_" + sanitizedAnnotationName)
                         + ".ome.tif";
                 logger.info("Standard stitching - using annotation-based filename");
             }
