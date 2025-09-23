@@ -405,12 +405,13 @@ public class PPMAngleSelectionController {
                                                           AngleExposureResult result) {
         Platform.runLater(() -> {
             Alert warning = new Alert(Alert.AlertType.WARNING);
-            warning.setTitle("Background Settings Mismatch");
-            warning.setHeaderText("Selected angles have exposure time mismatches or missing background images");
+            warning.setTitle("Background Correction Issue");
+            warning.setHeaderText("Selected angles missing background images or have exposure mismatches");
 
             StringBuilder message = new StringBuilder();
-            message.append("Some of your selected angles either don't have background images or have different exposure times.\n\n");
-            message.append("This may affect image quality and analysis accuracy.\n\n");
+            message.append("Some of your selected angles have issues that may affect background correction:\n\n");
+            message.append("• Missing background images: Cannot perform background correction\n");
+            message.append("• Exposure mismatches: Background correction may be inaccurate\n\n");
 
             message.append("Background settings (from ").append(backgroundSettings.settingsFilePath).append("):\n");
             for (qupath.ext.qpsc.modality.AngleExposure bgAe : backgroundSettings.angleExposures) {
@@ -604,64 +605,66 @@ public class PPMAngleSelectionController {
 
     /**
      * Gets detailed mismatch information between background settings and user selections.
-     * 
+     * Focuses on actual issues: missing background images and exposure mismatches.
+     *
      * @param backgroundSettings the existing background settings
      * @param selectedAngles the user's selected angle-exposure pairs
-     * @return formatted string describing the differences
+     * @return formatted string describing the actual problems
      */
     private static String getDetailedMismatchInfo(BackgroundSettingsReader.BackgroundSettings backgroundSettings,
                                                  List<AngleExposure> selectedAngles) {
         StringBuilder info = new StringBuilder();
-        
+
         // Convert user angles to the format used by background settings
         Map<Double, Double> userAngleMap = new HashMap<>();
         for (AngleExposure userAe : selectedAngles) {
             userAngleMap.put(userAe.angle, userAe.exposureMs);
         }
-        
+
         Map<Double, Double> bgAngleMap = new HashMap<>();
         for (qupath.ext.qpsc.modality.AngleExposure bgAe : backgroundSettings.angleExposures) {
             bgAngleMap.put(bgAe.ticks(), bgAe.exposureMs());
         }
-        
-        // Check for missing angles
-        Set<Double> missingFromUser = new HashSet<>(bgAngleMap.keySet());
-        missingFromUser.removeAll(userAngleMap.keySet());
-        
-        Set<Double> extraInUser = new HashSet<>(userAngleMap.keySet());
-        extraInUser.removeAll(bgAngleMap.keySet());
-        
-        if (!missingFromUser.isEmpty()) {
-            info.append("  Missing angles: ");
-            missingFromUser.forEach(angle -> info.append(String.format("%.1f° ", angle)));
+
+        // Find selected angles that have NO background images
+        Set<Double> anglesWithoutBackground = new HashSet<>();
+        for (Double userAngle : userAngleMap.keySet()) {
+            if (!bgAngleMap.containsKey(userAngle)) {
+                anglesWithoutBackground.add(userAngle);
+            }
+        }
+
+        if (!anglesWithoutBackground.isEmpty()) {
+            info.append("  Selected angles without background images: ");
+            anglesWithoutBackground.forEach(angle -> info.append(String.format("%.1f° ", angle)));
             info.append("\n");
         }
-        
-        if (!extraInUser.isEmpty()) {
-            info.append("  Extra angles: ");
-            extraInUser.forEach(angle -> info.append(String.format("%.1f° ", angle)));
-            info.append("\n");
-        }
-        
-        // Check for exposure time differences
+
+        // Check for exposure time differences (only for angles that DO have background images)
         double tolerance = 0.1;
+        boolean hasExposureMismatches = false;
         for (Double angle : userAngleMap.keySet()) {
             if (bgAngleMap.containsKey(angle)) {
                 double userExposure = userAngleMap.get(angle);
                 double bgExposure = bgAngleMap.get(angle);
                 double diff = Math.abs(userExposure - bgExposure);
-                
+
                 if (diff > tolerance) {
-                    info.append(String.format("  %.1f°: %.1f ms vs %.1f ms (diff: %.1f ms)\n", 
+                    if (!hasExposureMismatches) {
+                        info.append("  Exposure time mismatches:\n");
+                        hasExposureMismatches = true;
+                    }
+                    info.append(String.format("    %.1f°: selected %.1f ms vs background %.1f ms (diff: %.1f ms)\n",
                             angle, userExposure, bgExposure, diff));
                 }
             }
         }
-        
+
+        // If no specific issues found, provide general explanation
         if (info.length() == 0) {
-            info.append("  Different number of angles selected");
+            info.append("  Background images exist for different angles than selected");
         }
-        
+
         return info.toString();
     }
     
