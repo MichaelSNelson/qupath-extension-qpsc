@@ -284,30 +284,197 @@ public class PPMAngleSelectionController {
                     if(minusCheck.isSelected()) list.add(new AngleExposure(minusAngle,Double.parseDouble(minusExposure.getText())));
 
                     logger.info("PPM angles and exposures selected: {}", list);
-
-                    // Validate against background settings if available
-                    try {
-                        validateAgainstBackgroundSettings(list, modality, objective, detector);
-                    } catch (Exception e) {
-                        if (e.getMessage() != null && e.getMessage().contains("BACKGROUND_MISMATCH_CANCELLED")) {
-                            logger.info("Background validation cancelled by user - returning null to cancel dialog");
-                            return null; // This will cancel the dialog and prevent acquisition
-                        } else {
-                            logger.warn("Background validation failed with unexpected error: {}", e.getMessage());
-                            // Continue with acquisition for other errors
-                        }
-                    }
-
                     return new AngleExposureResult(list);
                 }
                 return null;
             });
 
-            dialog.showAndWait().ifPresentOrElse(future::complete, ()->future.cancel(true));
+            // Handle the dialog result and validation asynchronously
+            dialog.showAndWait().ifPresentOrElse(result -> {
+                // Perform background validation asynchronously after dialog closes
+                performBackgroundValidationAsync(result, modality, objective, detector, future);
+            }, () -> future.cancel(true));
         });
         return future;
     }
 
+    /**
+     * Performs background validation asynchronously after the main dialog closes.
+     * This prevents deadlocks by not blocking the JavaFX thread during dialog result conversion.
+     *
+     * @param result the selected angle-exposure result
+     * @param modality the modality name
+     * @param objective the objective ID
+     * @param detector the detector ID
+     * @param future the future to complete with the final result
+     */
+    private static void performBackgroundValidationAsync(AngleExposureResult result, String modality,
+                                                        String objective, String detector,
+                                                        CompletableFuture<AngleExposureResult> future) {
+        // Validate against background settings if available
+        try {
+            validateAgainstBackgroundSettingsAsync(result.angleExposures, modality, objective, detector, future, result);
+        } catch (Exception e) {
+            logger.warn("Background validation failed with error: {}", e.getMessage());
+            // Complete with the result anyway for other errors
+            future.complete(result);
+        }
+    }
+
+    /**
+     * Asynchronous version of background settings validation that doesn't block the JavaFX thread.
+     *
+     * @param selectedAngles the user's selected angle-exposure pairs
+     * @param modality the modality name
+     * @param objective the objective ID
+     * @param detector the detector ID
+     * @param future the future to complete based on validation result
+     * @param result the result to complete with if validation passes
+     */
+    private static void validateAgainstBackgroundSettingsAsync(List<AngleExposure> selectedAngles,
+                                                              String modality, String objective, String detector,
+                                                              CompletableFuture<AngleExposureResult> future,
+                                                              AngleExposureResult result) {
+        // Skip validation if hardware parameters are missing
+        if (modality == null || objective == null || detector == null) {
+            logger.debug("Skipping background validation - missing hardware parameters");
+            future.complete(result);
+            return;
+        }
+
+        try {
+            String configFileLocation = QPPreferenceDialog.getMicroscopeConfigFileProperty();
+            MicroscopeConfigManager configManager = MicroscopeConfigManager.getInstance(configFileLocation);
+            String backgroundFolder = configManager.getBackgroundCorrectionFolder(modality);
+
+            if (backgroundFolder == null) {
+                logger.debug("No background correction folder configured - skipping validation");
+                future.complete(result);
+                return;
+            }
+
+            BackgroundSettingsReader.BackgroundSettings backgroundSettings =
+                    BackgroundSettingsReader.findBackgroundSettings(backgroundFolder, modality, objective, detector);
+
+            if (backgroundSettings == null) {
+                logger.debug("No background settings found for {}/{}/{} - skipping validation",
+                        modality, objective, detector);
+                future.complete(result);
+                return;
+            }
+
+            // Convert UI angle-exposure pairs to the format expected by validator
+            List<qupath.ext.qpsc.modality.AngleExposure> currentAngles = new ArrayList<>();
+            for (AngleExposure ae : selectedAngles) {
+                currentAngles.add(new qupath.ext.qpsc.modality.AngleExposure(ae.angle, ae.exposureMs));
+            }
+
+            // Validate with a tolerance of 0.1ms
+            // Use subset validation to allow users to select fewer angles than background images exist for
+            double tolerance = 0.1;
+            boolean matches = BackgroundSettingsReader.validateAngleExposuresSubset(
+                    backgroundSettings, currentAngles, tolerance);
+
+            if (!matches) {
+                logger.warn("Selected exposure settings do not match existing background settings");
+                // Show warning dialog asynchronously
+                showBackgroundMismatchWarningAsync(backgroundSettings, selectedAngles, future, result);
+            } else {
+                logger.info("Selected exposure settings match existing background settings");
+                future.complete(result);
+            }
+
+        } catch (Exception e) {
+            logger.error("Error validating against background settings", e);
+            // Complete with result anyway for validation errors
+            future.complete(result);
+        }
+    }
+
+    /**
+     * Shows background mismatch warning dialog asynchronously without blocking the JavaFX thread.
+     *
+     * @param backgroundSettings the existing background settings
+     * @param selectedAngles the user's selected angle-exposure pairs
+     * @param future the future to complete based on user choice
+     * @param result the result to complete with if user chooses to proceed
+     */
+    private static void showBackgroundMismatchWarningAsync(BackgroundSettingsReader.BackgroundSettings backgroundSettings,
+                                                          List<AngleExposure> selectedAngles,
+                                                          CompletableFuture<AngleExposureResult> future,
+                                                          AngleExposureResult result) {
+        Platform.runLater(() -> {
+            Alert warning = new Alert(Alert.AlertType.WARNING);
+            warning.setTitle("Background Settings Mismatch");
+            warning.setHeaderText("Selected angles have exposure time mismatches or missing background images");
+
+            StringBuilder message = new StringBuilder();
+            message.append("Some of your selected angles either don't have background images or have different exposure times.\n\n");
+            message.append("This may affect image quality and analysis accuracy.\n\n");
+
+            message.append("Background settings (from ").append(backgroundSettings.settingsFilePath).append("):\n");
+            for (qupath.ext.qpsc.modality.AngleExposure bgAe : backgroundSettings.angleExposures) {
+                message.append(String.format("  %.1f° = %.1f ms\n", bgAe.ticks(), bgAe.exposureMs()));
+            }
+
+            message.append("\nYour selected settings:\n");
+            for (AngleExposure userAe : selectedAngles) {
+                message.append(String.format("  %.1f° = %.1f ms\n", userAe.angle, userAe.exposureMs));
+            }
+
+            message.append("\nDetailed differences:\n");
+            message.append(getDetailedMismatchInfo(backgroundSettings, selectedAngles));
+
+            message.append("\nRecommendation: Use the background settings exposure times for optimal results,");
+            message.append(" or collect new background images with your selected exposure times.");
+
+            warning.setContentText(message.toString());
+            warning.setResizable(true);
+
+            // Make dialog larger to accommodate content
+            warning.getDialogPane().setPrefWidth(600);
+            warning.getDialogPane().setPrefHeight(400);
+
+            // Make the dialog modal and always on top
+            warning.initModality(javafx.stage.Modality.APPLICATION_MODAL);
+            warning.initOwner(javafx.stage.Stage.getWindows().stream()
+                    .filter(javafx.stage.Window::isShowing)
+                    .findFirst().orElse(null));
+
+            // Set custom button types for clearer user choice
+            warning.getButtonTypes().clear();
+            ButtonType proceedButton = new ButtonType("Proceed Anyway", ButtonBar.ButtonData.OK_DONE);
+            ButtonType cancelButton = new ButtonType("Cancel Acquisition", ButtonBar.ButtonData.CANCEL_CLOSE);
+            warning.getButtonTypes().addAll(proceedButton, cancelButton);
+
+            // Make Cancel the default button to encourage users to review settings
+            Button cancelBtn = (Button) warning.getDialogPane().lookupButton(cancelButton);
+            Button proceedBtn = (Button) warning.getDialogPane().lookupButton(proceedButton);
+
+            cancelBtn.setDefaultButton(true);
+            proceedBtn.setDefaultButton(false);
+
+            // Style the proceed button to indicate it's not recommended
+            proceedBtn.setStyle("-fx-base: #ffcc99;"); // Light orange to indicate caution
+
+            // Handle the result asynchronously
+            warning.showAndWait().ifPresentOrElse(
+                buttonType -> {
+                    if (buttonType == proceedButton) {
+                        logger.info("User chose to proceed despite background settings mismatch");
+                        future.complete(result);
+                    } else {
+                        logger.info("User chose to cancel acquisition due to background settings mismatch");
+                        future.cancel(true);
+                    }
+                },
+                () -> {
+                    logger.info("Background mismatch dialog was closed - canceling acquisition");
+                    future.cancel(true);
+                }
+            );
+        });
+    }
 
     /**
      * Gets default exposure time for a given angle following priority order:
@@ -435,155 +602,6 @@ public class PPMAngleSelectionController {
         return 1.0;
     }
 
-    /**
-     * Validates the selected angle-exposure pairs against existing background settings.
-     * Shows a warning dialog if the settings don't match.
-     * 
-     * @param selectedAngles the user's selected angle-exposure pairs
-     * @param modality the modality name 
-     * @param objective the objective ID
-     * @param detector the detector ID
-     */
-    private static void validateAgainstBackgroundSettings(List<AngleExposure> selectedAngles, 
-                                                          String modality, String objective, String detector) {
-        // Skip validation if hardware parameters are missing
-        if (modality == null || objective == null || detector == null) {
-            logger.debug("Skipping background validation - missing hardware parameters");
-            return;
-        }
-        
-        try {
-            String configFileLocation = QPPreferenceDialog.getMicroscopeConfigFileProperty();
-            MicroscopeConfigManager configManager = MicroscopeConfigManager.getInstance(configFileLocation);
-            String backgroundFolder = configManager.getBackgroundCorrectionFolder(modality);
-            
-            if (backgroundFolder == null) {
-                logger.debug("No background correction folder configured - skipping validation");
-                return;
-            }
-            
-            BackgroundSettingsReader.BackgroundSettings backgroundSettings = 
-                    BackgroundSettingsReader.findBackgroundSettings(backgroundFolder, modality, objective, detector);
-            
-            if (backgroundSettings == null) {
-                logger.debug("No background settings found for {}/{}/{} - skipping validation", 
-                        modality, objective, detector);
-                return;
-            }
-            
-            // Convert UI angle-exposure pairs to the format expected by validator
-            List<qupath.ext.qpsc.modality.AngleExposure> currentAngles = new ArrayList<>();
-            for (AngleExposure ae : selectedAngles) {
-                currentAngles.add(new qupath.ext.qpsc.modality.AngleExposure(ae.angle, ae.exposureMs));
-            }
-            
-            // Validate with a tolerance of 0.1ms
-            // Use subset validation to allow users to select fewer angles than background images exist for
-            double tolerance = 0.1;
-            boolean matches = BackgroundSettingsReader.validateAngleExposuresSubset(
-                    backgroundSettings, currentAngles, tolerance);
-            
-            if (!matches) {
-                logger.warn("Selected exposure settings do not match existing background settings");
-                boolean shouldProceed = showBackgroundMismatchWarning(backgroundSettings, selectedAngles);
-                if (!shouldProceed) {
-                    logger.info("User chose to cancel acquisition due to background settings mismatch");
-                    throw new RuntimeException("BACKGROUND_MISMATCH_CANCELLED");
-                }
-                logger.info("User chose to proceed despite background settings mismatch");
-            } else {
-                logger.info("Selected exposure settings match existing background settings");
-            }
-            
-        } catch (Exception e) {
-            if (e.getMessage() != null && e.getMessage().contains("BACKGROUND_MISMATCH_CANCELLED")) {
-                // Re-throw cancellation exceptions to be handled by caller
-                throw e;
-            } else {
-                logger.error("Error validating against background settings", e);
-            }
-        }
-    }
-    
-    /**
-     * Shows a warning dialog when user's exposure settings don't match background settings.
-     * Returns true if user chooses to proceed, false if they choose to cancel.
-     *
-     * @param backgroundSettings the existing background settings
-     * @param selectedAngles the user's selected angle-exposure pairs
-     * @return true if user chooses to proceed with acquisition, false to cancel
-     */
-    private static boolean showBackgroundMismatchWarning(BackgroundSettingsReader.BackgroundSettings backgroundSettings,
-                                                        List<AngleExposure> selectedAngles) {
-        // Use a CompletableFuture to handle the modal dialog result
-        CompletableFuture<Boolean> resultFuture = new CompletableFuture<>();
-
-        Platform.runLater(() -> {
-            Alert warning = new Alert(Alert.AlertType.WARNING);
-            warning.setTitle("Background Settings Mismatch");
-            warning.setHeaderText("Selected angles have exposure time mismatches or missing background images");
-
-            StringBuilder message = new StringBuilder();
-            message.append("Some of your selected angles either don't have background images or have different exposure times.\n\n");
-            message.append("This may affect image quality and analysis accuracy.\n\n");
-
-            message.append("Background settings (from ").append(backgroundSettings.settingsFilePath).append("):\n");
-            for (qupath.ext.qpsc.modality.AngleExposure bgAe : backgroundSettings.angleExposures) {
-                message.append(String.format("  %.1f° = %.1f ms\n", bgAe.ticks(), bgAe.exposureMs()));
-            }
-
-            message.append("\nYour selected settings:\n");
-            for (AngleExposure userAe : selectedAngles) {
-                message.append(String.format("  %.1f° = %.1f ms\n", userAe.angle, userAe.exposureMs));
-            }
-
-            message.append("\nDetailed differences:\n");
-            message.append(getDetailedMismatchInfo(backgroundSettings, selectedAngles));
-
-            message.append("\nRecommendation: Use the background settings exposure times for optimal results,");
-            message.append(" or collect new background images with your selected exposure times.");
-
-            warning.setContentText(message.toString());
-            warning.setResizable(true);
-
-            // Make dialog larger to accommodate content
-            warning.getDialogPane().setPrefWidth(600);
-            warning.getDialogPane().setPrefHeight(400);
-
-            // Make the dialog modal and always on top
-            warning.initModality(javafx.stage.Modality.APPLICATION_MODAL);
-            warning.initOwner(javafx.stage.Stage.getWindows().stream()
-                    .filter(javafx.stage.Window::isShowing)
-                    .findFirst().orElse(null));
-
-            // Set custom button types for clearer user choice
-            warning.getButtonTypes().clear();
-            ButtonType proceedButton = new ButtonType("Proceed Anyway", ButtonBar.ButtonData.OK_DONE);
-            ButtonType cancelButton = new ButtonType("Cancel Acquisition", ButtonBar.ButtonData.CANCEL_CLOSE);
-            warning.getButtonTypes().addAll(proceedButton, cancelButton);
-
-            // Make Cancel the default button to encourage users to review settings
-            Button cancelBtn = (Button) warning.getDialogPane().lookupButton(cancelButton);
-            Button proceedBtn = (Button) warning.getDialogPane().lookupButton(proceedButton);
-
-            cancelBtn.setDefaultButton(true);
-            proceedBtn.setDefaultButton(false);
-
-            // Style the proceed button to indicate it's not recommended
-            proceedBtn.setStyle("-fx-base: #ffcc99;"); // Light orange to indicate caution
-
-            Optional<ButtonType> result = warning.showAndWait();
-            resultFuture.complete(result.isPresent() && result.get() == proceedButton);
-        });
-
-        try {
-            return resultFuture.get();
-        } catch (Exception e) {
-            logger.error("Error waiting for background mismatch dialog result", e);
-            return false; // Default to canceling if there's an error
-        }
-    }
-    
     /**
      * Gets detailed mismatch information between background settings and user selections.
      * 
