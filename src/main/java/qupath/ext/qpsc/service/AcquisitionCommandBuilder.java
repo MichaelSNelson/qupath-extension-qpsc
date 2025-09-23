@@ -35,6 +35,7 @@ public class AcquisitionCommandBuilder {
     private boolean backgroundCorrectionEnabled = false;
     private String backgroundCorrectionMethod;
     private String backgroundCorrectionFolder;
+    private List<Double> backgroundCorrectionDisabledAngles = new ArrayList<>();
 
     // White balance parameters
     private boolean whiteBalanceEnabled = true; // Default enabled for backward compatibility
@@ -132,6 +133,24 @@ public class AcquisitionCommandBuilder {
         this.backgroundCorrectionEnabled = enabled;
         this.backgroundCorrectionMethod = method;
         this.backgroundCorrectionFolder = folder;
+        if (enabled && !processingSteps.contains("background_correction")) {
+            processingSteps.add("background_correction");
+        }
+        return this;
+    }
+
+    /**
+     * Configure background correction with specific angles to disable
+     * @param enabled Whether background correction is enabled
+     * @param method Correction method ("divide" or "subtract")
+     * @param folder Path to background images folder
+     * @param disabledAngles List of angles where background correction should be disabled
+     */
+    public AcquisitionCommandBuilder backgroundCorrection(boolean enabled, String method, String folder, List<Double> disabledAngles) {
+        this.backgroundCorrectionEnabled = enabled;
+        this.backgroundCorrectionMethod = method;
+        this.backgroundCorrectionFolder = folder;
+        this.backgroundCorrectionDisabledAngles = new ArrayList<>(disabledAngles);
         if (enabled && !processingSteps.contains("background_correction")) {
             processingSteps.add("background_correction");
         }
@@ -316,6 +335,13 @@ public class AcquisitionCommandBuilder {
             }
             if (backgroundCorrectionFolder != null) {
                 args.addAll(Arrays.asList("--bg-folder", backgroundCorrectionFolder));
+            }
+            // Add disabled angles if any
+            if (!backgroundCorrectionDisabledAngles.isEmpty()) {
+                String disabledAnglesStr = backgroundCorrectionDisabledAngles.stream()
+                        .map(angle -> String.valueOf(angle))
+                        .collect(Collectors.joining(",", "(", ")"));
+                args.addAll(Arrays.asList("--bg-disabled-angles", disabledAnglesStr));
             }
         }
 

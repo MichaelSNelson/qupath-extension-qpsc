@@ -604,17 +604,35 @@ public class PPMAngleSelectionController {
     }
 
     /**
-     * Gets detailed mismatch information between background settings and user selections.
-     * Focuses on actual issues: missing background images and exposure mismatches.
+     * Container for background validation results
+     */
+    public static class BackgroundValidationResult {
+        public final Set<Double> anglesWithoutBackground;
+        public final Set<Double> angleswithExposureMismatches;
+        public final String userMessage;
+
+        public BackgroundValidationResult(Set<Double> anglesWithoutBackground,
+                                        Set<Double> anglesWithExposureMismatches,
+                                        String userMessage) {
+            this.anglesWithoutBackground = anglesWithoutBackground;
+            this.angleswithExposureMismatches = anglesWithExposureMismatches;
+            this.userMessage = userMessage;
+        }
+
+        public boolean hasIssues() {
+            return !anglesWithoutBackground.isEmpty() || !angleswithExposureMismatches.isEmpty();
+        }
+    }
+
+    /**
+     * Validates background settings against user selections and returns structured results.
      *
      * @param backgroundSettings the existing background settings
      * @param selectedAngles the user's selected angle-exposure pairs
-     * @return formatted string describing the actual problems
+     * @return validation results with angles to disable background correction for
      */
-    private static String getDetailedMismatchInfo(BackgroundSettingsReader.BackgroundSettings backgroundSettings,
-                                                 List<AngleExposure> selectedAngles) {
-        StringBuilder info = new StringBuilder();
-
+    public static BackgroundValidationResult validateBackgroundSettings(BackgroundSettingsReader.BackgroundSettings backgroundSettings,
+                                                                        List<AngleExposure> selectedAngles) {
         // Convert user angles to the format used by background settings
         Map<Double, Double> userAngleMap = new HashMap<>();
         for (AngleExposure userAe : selectedAngles) {
@@ -634,15 +652,9 @@ public class PPMAngleSelectionController {
             }
         }
 
-        if (!anglesWithoutBackground.isEmpty()) {
-            info.append("  Selected angles without background images: ");
-            anglesWithoutBackground.forEach(angle -> info.append(String.format("%.1f° ", angle)));
-            info.append("\n");
-        }
-
-        // Check for exposure time differences (only for angles that DO have background images)
+        // Find angles with exposure mismatches
+        Set<Double> anglesWithExposureMismatches = new HashSet<>();
         double tolerance = 0.1;
-        boolean hasExposureMismatches = false;
         for (Double angle : userAngleMap.keySet()) {
             if (bgAngleMap.containsKey(angle)) {
                 double userExposure = userAngleMap.get(angle);
@@ -650,13 +662,42 @@ public class PPMAngleSelectionController {
                 double diff = Math.abs(userExposure - bgExposure);
 
                 if (diff > tolerance) {
-                    if (!hasExposureMismatches) {
-                        info.append("  Exposure time mismatches:\n");
-                        hasExposureMismatches = true;
-                    }
-                    info.append(String.format("    %.1f°: selected %.1f ms vs background %.1f ms (diff: %.1f ms)\n",
-                            angle, userExposure, bgExposure, diff));
+                    anglesWithExposureMismatches.add(angle);
                 }
+            }
+        }
+
+        // Generate user message
+        String userMessage = generateBackgroundValidationMessage(anglesWithoutBackground, anglesWithExposureMismatches,
+                                                               userAngleMap, bgAngleMap, tolerance);
+
+        return new BackgroundValidationResult(anglesWithoutBackground, anglesWithExposureMismatches, userMessage);
+    }
+
+    /**
+     * Generates user message for background validation issues.
+     */
+    private static String generateBackgroundValidationMessage(Set<Double> anglesWithoutBackground,
+                                                            Set<Double> anglesWithExposureMismatches,
+                                                            Map<Double, Double> userAngleMap,
+                                                            Map<Double, Double> bgAngleMap,
+                                                            double tolerance) {
+        StringBuilder info = new StringBuilder();
+
+        if (!anglesWithoutBackground.isEmpty()) {
+            info.append("  Selected angles without background images: ");
+            anglesWithoutBackground.forEach(angle -> info.append(String.format("%.1f° ", angle)));
+            info.append("\n  → Background correction will be DISABLED for these angles\n");
+        }
+
+        if (!anglesWithExposureMismatches.isEmpty()) {
+            info.append("  Exposure time mismatches (background correction will be DISABLED):\n");
+            for (Double angle : anglesWithExposureMismatches) {
+                double userExposure = userAngleMap.get(angle);
+                double bgExposure = bgAngleMap.get(angle);
+                double diff = Math.abs(userExposure - bgExposure);
+                info.append(String.format("    %.1f°: selected %.1f ms vs background %.1f ms (diff: %.1f ms)\n",
+                        angle, userExposure, bgExposure, diff));
             }
         }
 
@@ -666,6 +707,20 @@ public class PPMAngleSelectionController {
         }
 
         return info.toString();
+    }
+
+    /**
+     * Gets detailed mismatch information between background settings and user selections.
+     * Focuses on actual issues: missing background images and exposure mismatches.
+     *
+     * @param backgroundSettings the existing background settings
+     * @param selectedAngles the user's selected angle-exposure pairs
+     * @return formatted string describing the actual problems
+     */
+    private static String getDetailedMismatchInfo(BackgroundSettingsReader.BackgroundSettings backgroundSettings,
+                                                 List<AngleExposure> selectedAngles) {
+        BackgroundValidationResult result = validateBackgroundSettings(backgroundSettings, selectedAngles);
+        return result.userMessage;
     }
     
     /**

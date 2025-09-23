@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory;
 import qupath.ext.qpsc.modality.AngleExposure;
 import qupath.ext.qpsc.service.AcquisitionCommandBuilder;
 import qupath.ext.qpsc.ui.SampleSetupController;
+import qupath.ext.qpsc.modality.ppm.ui.PPMAngleSelectionController;
 
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -129,7 +130,30 @@ public class AcquisitionConfigurationBuilder {
         
         // Only add background correction if enabled and configured
         if (bgEnabled && bgMethod != null && bgFolder != null) {
-            acquisitionBuilder.backgroundCorrection(true, bgMethod, bgFolder);
+            // Perform background validation to determine which angles should have correction disabled
+            List<Double> disabledAngles = new ArrayList<>();
+            try {
+                BackgroundSettingsReader.BackgroundSettings backgroundSettings =
+                    BackgroundSettingsReader.findBackgroundSettings(bgBaseFolder, baseModality, objective, detector);
+
+                if (backgroundSettings != null) {
+                    PPMAngleSelectionController.BackgroundValidationResult validation =
+                        PPMAngleSelectionController.validateBackgroundSettings(backgroundSettings, angleExposures);
+
+                    // Combine angles without background and angles with exposure mismatches
+                    disabledAngles.addAll(validation.anglesWithoutBackground);
+                    disabledAngles.addAll(validation.angleswithExposureMismatches);
+
+                    logger.info("Background validation: {} angles will have correction disabled", disabledAngles.size());
+                    if (!disabledAngles.isEmpty()) {
+                        logger.info("Disabled angles: {}", disabledAngles);
+                    }
+                }
+            } catch (Exception e) {
+                logger.warn("Error during background validation, proceeding without angle-specific disabling: {}", e.getMessage());
+            }
+
+            acquisitionBuilder.backgroundCorrection(true, bgMethod, bgFolder, disabledAngles);
         }
         
         return new AcquisitionConfiguration(
