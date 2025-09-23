@@ -26,6 +26,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.UnaryOperator;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 /**
@@ -283,10 +284,20 @@ public class PPMAngleSelectionController {
                     if(minusCheck.isSelected()) list.add(new AngleExposure(minusAngle,Double.parseDouble(minusExposure.getText())));
 
                     logger.info("PPM angles and exposures selected: {}", list);
-                    
+
                     // Validate against background settings if available
-                    validateAgainstBackgroundSettings(list, modality, objective, detector);
-                    
+                    try {
+                        validateAgainstBackgroundSettings(list, modality, objective, detector);
+                    } catch (Exception e) {
+                        if (e.getMessage() != null && e.getMessage().contains("BACKGROUND_MISMATCH_CANCELLED")) {
+                            logger.info("Background validation cancelled by user - returning null to cancel dialog");
+                            return null; // This will cancel the dialog and prevent acquisition
+                        } else {
+                            logger.warn("Background validation failed with unexpected error: {}", e.getMessage());
+                            // Continue with acquisition for other errors
+                        }
+                    }
+
                     return new AngleExposureResult(list);
                 }
                 return null;
@@ -474,24 +485,39 @@ public class PPMAngleSelectionController {
             
             if (!matches) {
                 logger.warn("Selected exposure settings do not match existing background settings");
-                showBackgroundMismatchWarning(backgroundSettings, selectedAngles);
+                boolean shouldProceed = showBackgroundMismatchWarning(backgroundSettings, selectedAngles);
+                if (!shouldProceed) {
+                    logger.info("User chose to cancel acquisition due to background settings mismatch");
+                    throw new RuntimeException("BACKGROUND_MISMATCH_CANCELLED");
+                }
+                logger.info("User chose to proceed despite background settings mismatch");
             } else {
                 logger.info("Selected exposure settings match existing background settings");
             }
             
         } catch (Exception e) {
-            logger.error("Error validating against background settings", e);
+            if (e.getMessage() != null && e.getMessage().contains("BACKGROUND_MISMATCH_CANCELLED")) {
+                // Re-throw cancellation exceptions to be handled by caller
+                throw e;
+            } else {
+                logger.error("Error validating against background settings", e);
+            }
         }
     }
     
     /**
      * Shows a warning dialog when user's exposure settings don't match background settings.
-     * 
+     * Returns true if user chooses to proceed, false if they choose to cancel.
+     *
      * @param backgroundSettings the existing background settings
      * @param selectedAngles the user's selected angle-exposure pairs
+     * @return true if user chooses to proceed with acquisition, false to cancel
      */
-    private static void showBackgroundMismatchWarning(BackgroundSettingsReader.BackgroundSettings backgroundSettings,
-                                                     List<AngleExposure> selectedAngles) {
+    private static boolean showBackgroundMismatchWarning(BackgroundSettingsReader.BackgroundSettings backgroundSettings,
+                                                        List<AngleExposure> selectedAngles) {
+        // Use a CompletableFuture to handle the modal dialog result
+        CompletableFuture<Boolean> resultFuture = new CompletableFuture<>();
+
         Platform.runLater(() -> {
             Alert warning = new Alert(Alert.AlertType.WARNING);
             warning.setTitle("Background Settings Mismatch");
@@ -500,32 +526,62 @@ public class PPMAngleSelectionController {
             StringBuilder message = new StringBuilder();
             message.append("Some of your selected angles either don't have background images or have different exposure times.\n\n");
             message.append("This may affect image quality and analysis accuracy.\n\n");
-            
+
             message.append("Background settings (from ").append(backgroundSettings.settingsFilePath).append("):\n");
             for (qupath.ext.qpsc.modality.AngleExposure bgAe : backgroundSettings.angleExposures) {
                 message.append(String.format("  %.1f° = %.1f ms\n", bgAe.ticks(), bgAe.exposureMs()));
             }
-            
+
             message.append("\nYour selected settings:\n");
             for (AngleExposure userAe : selectedAngles) {
                 message.append(String.format("  %.1f° = %.1f ms\n", userAe.angle, userAe.exposureMs));
             }
-            
+
             message.append("\nDetailed differences:\n");
             message.append(getDetailedMismatchInfo(backgroundSettings, selectedAngles));
-            
+
             message.append("\nRecommendation: Use the background settings exposure times for optimal results,");
             message.append(" or collect new background images with your selected exposure times.");
-            
+
             warning.setContentText(message.toString());
             warning.setResizable(true);
-            
+
             // Make dialog larger to accommodate content
             warning.getDialogPane().setPrefWidth(600);
             warning.getDialogPane().setPrefHeight(400);
-            
-            warning.showAndWait();
+
+            // Make the dialog modal and always on top
+            warning.initModality(javafx.stage.Modality.APPLICATION_MODAL);
+            warning.initOwner(javafx.stage.Stage.getWindows().stream()
+                    .filter(javafx.stage.Window::isShowing)
+                    .findFirst().orElse(null));
+
+            // Set custom button types for clearer user choice
+            warning.getButtonTypes().clear();
+            ButtonType proceedButton = new ButtonType("Proceed Anyway", ButtonBar.ButtonData.OK_DONE);
+            ButtonType cancelButton = new ButtonType("Cancel Acquisition", ButtonBar.ButtonData.CANCEL_CLOSE);
+            warning.getButtonTypes().addAll(proceedButton, cancelButton);
+
+            // Make Cancel the default button to encourage users to review settings
+            Button cancelBtn = (Button) warning.getDialogPane().lookupButton(cancelButton);
+            Button proceedBtn = (Button) warning.getDialogPane().lookupButton(proceedButton);
+
+            cancelBtn.setDefaultButton(true);
+            proceedBtn.setDefaultButton(false);
+
+            // Style the proceed button to indicate it's not recommended
+            proceedBtn.setStyle("-fx-base: #ffcc99;"); // Light orange to indicate caution
+
+            Optional<ButtonType> result = warning.showAndWait();
+            resultFuture.complete(result.isPresent() && result.get() == proceedButton);
         });
+
+        try {
+            return resultFuture.get();
+        } catch (Exception e) {
+            logger.error("Error waiting for background mismatch dialog result", e);
+            return false; // Default to canceling if there's an error
+        }
     }
     
     /**

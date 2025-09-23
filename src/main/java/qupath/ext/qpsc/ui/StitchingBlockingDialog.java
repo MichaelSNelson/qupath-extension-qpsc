@@ -1,5 +1,7 @@
 package qupath.ext.qpsc.ui;
 
+import javafx.animation.KeyFrame;
+import javafx.animation.Timeline;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -8,6 +10,7 @@ import javafx.scene.layout.VBox;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
 import javafx.stage.Window;
+import javafx.util.Duration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -70,6 +73,17 @@ public class StitchingBlockingDialog {
         dialog.setHeaderText("Processing " + sampleName);
         dialog.initModality(Modality.APPLICATION_MODAL);
         dialog.setResizable(false);
+
+        // Set owner to QuPath main window for proper modality
+        Stage owner = Stage.getWindows().stream()
+                .filter(window -> window instanceof Stage && window.isShowing())
+                .map(window -> (Stage) window)
+                .filter(stage -> stage.getTitle() != null && stage.getTitle().contains("QuPath"))
+                .findFirst()
+                .orElse(null);
+        if (owner != null) {
+            dialog.initOwner(owner);
+        }
         
         // Create content
         VBox content = createDialogContent(sampleName);
@@ -168,18 +182,31 @@ public class StitchingBlockingDialog {
                 "• Loss of acquisition data\n\n" +
                 "It is strongly recommended to wait for stitching to complete.\n\n" +
                 "Do you still want to proceed at your own risk?");
-        
+
         warning.getButtonTypes().setAll(ButtonType.YES, ButtonType.NO);
         warning.setResizable(true);
-        
+
+        // Make the dialog modal and always on top
+        warning.initModality(Modality.APPLICATION_MODAL);
+        warning.initOwner(dialog.getOwner());
+
         // Make NO the default button
         Button noButton = (Button) warning.getDialogPane().lookupButton(ButtonType.NO);
         noButton.setDefaultButton(true);
-        
+
         Button yesButton = (Button) warning.getDialogPane().lookupButton(ButtonType.YES);
         yesButton.setDefaultButton(false);
         yesButton.setStyle("-fx-base: #ff6b6b;"); // Red color to indicate danger
-        
+
+        // Set always on top using a different approach
+        Platform.runLater(() -> {
+            if (warning.getDialogPane().getScene() != null &&
+                warning.getDialogPane().getScene().getWindow() instanceof Stage warningStage) {
+                warningStage.setAlwaysOnTop(true);
+                warningStage.toFront();
+            }
+        });
+
         return warning.showAndWait().orElse(ButtonType.NO) == ButtonType.YES;
     }
     
@@ -196,10 +223,33 @@ public class StitchingBlockingDialog {
         }
         
         StitchingBlockingDialog blockingDialog = new StitchingBlockingDialog(sampleName);
-        
+
         // Show dialog non-blocking (modality will block interface, but not this thread)
         blockingDialog.dialog.show();
-        
+
+        // Ensure dialog is always on top and stays visible
+        Platform.runLater(() -> {
+            if (blockingDialog.dialog.getDialogPane().getScene() != null &&
+                blockingDialog.dialog.getDialogPane().getScene().getWindow() instanceof Stage stage) {
+                stage.setAlwaysOnTop(true);
+                stage.toFront();
+                stage.requestFocus();
+
+                // Add a periodic timer to keep dialog on top during stitching
+                Timeline keepOnTop = new Timeline(new KeyFrame(Duration.seconds(2), e -> {
+                    if (!blockingDialog.isComplete.get() && stage.isShowing()) {
+                        stage.toFront();
+                        stage.setAlwaysOnTop(true); // Re-apply in case it was lost
+                    }
+                }));
+                keepOnTop.setCycleCount(Timeline.INDEFINITE);
+                keepOnTop.play();
+
+                // Stop the timer when dialog closes
+                stage.setOnHiding(e -> keepOnTop.stop());
+            }
+        });
+
         logger.info("Showing stitching blocking dialog for sample: {}", sampleName);
         return blockingDialog;
     }

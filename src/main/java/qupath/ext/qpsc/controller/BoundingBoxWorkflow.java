@@ -228,7 +228,8 @@ public class BoundingBoxWorkflow {
                                     sample.modality(), sample.objective(), sample.detector())
                                     .thenApply(result -> {
                                         if (result == null) {
-                                            return new ArrayList<qupath.ext.qpsc.modality.AngleExposure>();
+                                            logger.info("User cancelled angle selection dialog - acquisition will be cancelled");
+                                            throw new RuntimeException("ANGLE_SELECTION_CANCELLED");
                                         }
                                         List<qupath.ext.qpsc.modality.AngleExposure> finalAngles = new ArrayList<>();
                                         for (qupath.ext.qpsc.modality.ppm.ui.PPMAngleSelectionController.AngleExposure ae : result.angleExposures) {
@@ -455,7 +456,24 @@ public class BoundingBoxWorkflow {
                                 });
                             }) // This closes the thenAccept from angleExposures
                             .exceptionally(ex -> {
-                                logger.error("Rotation workflow failed", ex);
+                                // Check if cancellation was due to user choice (background mismatch or angle selection)
+                                Throwable cause = ex.getCause();
+                                String message = cause != null ? cause.getMessage() : ex.getMessage();
+
+                                if (message != null && (message.contains("BACKGROUND_MISMATCH_CANCELLED") ||
+                                                       message.contains("ANGLE_SELECTION_CANCELLED"))) {
+                                    logger.info("Acquisition cancelled by user due to: {}", message);
+                                    Platform.runLater(() ->
+                                            qupath.fx.dialogs.Dialogs.showInfoNotification(
+                                                    "Acquisition Cancelled",
+                                                    "Acquisition was cancelled by user request"));
+                                } else {
+                                    logger.error("Rotation workflow failed", ex);
+                                    Platform.runLater(() ->
+                                            UIFunctions.notifyUserOfError(
+                                                    "Workflow error: " + ex.getMessage(),
+                                                    res.getString("acquisition.error.title")));
+                                }
                                 return null;
                             });
 
