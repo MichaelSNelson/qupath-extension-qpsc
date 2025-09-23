@@ -137,8 +137,14 @@ public class AcquisitionConfigurationBuilder {
                     BackgroundSettingsReader.findBackgroundSettings(bgBaseFolder, baseModality, objective, detector);
 
                 if (backgroundSettings != null) {
+                    // Convert to PPMAngleSelectionController.AngleExposure format
+                    List<PPMAngleSelectionController.AngleExposure> ppmAngleExposures = new ArrayList<>();
+                    for (AngleExposure ae : angleExposures) {
+                        ppmAngleExposures.add(new PPMAngleSelectionController.AngleExposure(ae.ticks(), ae.exposureMs()));
+                    }
+
                     PPMAngleSelectionController.BackgroundValidationResult validation =
-                        PPMAngleSelectionController.validateBackgroundSettings(backgroundSettings, angleExposures);
+                        PPMAngleSelectionController.validateBackgroundSettings(backgroundSettings, ppmAngleExposures);
 
                     // Combine angles without background and angles with exposure mismatches
                     disabledAngles.addAll(validation.anglesWithoutBackground);
