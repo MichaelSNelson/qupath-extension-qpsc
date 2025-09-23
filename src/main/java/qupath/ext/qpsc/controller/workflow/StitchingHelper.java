@@ -267,14 +267,32 @@ public class StitchingHelper {
                     if (blockingDialog != null) {
                         blockingDialog.updateStatus("Checking for birefringence results for " + annotationName + "...");
                     }
-                    
-                    String birefAngleStr = angleExposures.get(0).ticks() + ".biref";
-                    Path birefPath = tileBaseDir.resolve(birefAngleStr);
-                    
+
+                    // Scan for any birefringence directory (ends with .biref)
+                    String birefAngleStr = null;
+                    Path birefPath = null;
+
+                    try {
+                        if (Files.exists(tileBaseDir)) {
+                            birefPath = Files.list(tileBaseDir)
+                                    .filter(Files::isDirectory)
+                                    .filter(path -> path.getFileName().toString().endsWith(".biref"))
+                                    .findFirst()
+                                    .orElse(null);
+
+                            if (birefPath != null) {
+                                birefAngleStr = birefPath.getFileName().toString();
+                                logger.info("Found birefringence directory: {}", birefAngleStr);
+                            }
+                        }
+                    } catch (IOException e) {
+                        logger.warn("Could not scan for birefringence directories: {}", e.getMessage());
+                    }
+
                     logger.info("Checking for birefringence directory at: {}", birefPath);
-                    logger.info("Birefringence directory exists: {}", Files.exists(birefPath));
-                    
-                    if (Files.exists(birefPath)) {
+                    logger.info("Birefringence directory exists: {}", birefPath != null && Files.exists(birefPath));
+
+                    if (birefPath != null && Files.exists(birefPath)) {
                         logger.info("Found birefringence directory: {}", birefPath);
                         
                         // Log directory contents to understand what's inside
@@ -329,13 +347,31 @@ public class StitchingHelper {
                         blockingDialog.updateStatus("Checking for sum results for " + annotationName + "...");
                     }
 
-                    String sumAngleStr = angleExposures.get(0).ticks() + ".sum";
-                    Path sumPath = tileBaseDir.resolve(sumAngleStr);
+                    // Scan for any sum directory (ends with .sum)
+                    String sumAngleStr = null;
+                    Path sumPath = null;
+
+                    try {
+                        if (Files.exists(tileBaseDir)) {
+                            sumPath = Files.list(tileBaseDir)
+                                    .filter(Files::isDirectory)
+                                    .filter(path -> path.getFileName().toString().endsWith(".sum"))
+                                    .findFirst()
+                                    .orElse(null);
+
+                            if (sumPath != null) {
+                                sumAngleStr = sumPath.getFileName().toString();
+                                logger.info("Found sum directory: {}", sumAngleStr);
+                            }
+                        }
+                    } catch (IOException e) {
+                        logger.warn("Could not scan for sum directories: {}", e.getMessage());
+                    }
 
                     logger.info("Checking for sum directory at: {}", sumPath);
-                    logger.info("Sum directory exists: {}", Files.exists(sumPath));
+                    logger.info("Sum directory exists: {}", sumPath != null && Files.exists(sumPath));
 
-                    if (Files.exists(sumPath)) {
+                    if (sumPath != null && Files.exists(sumPath)) {
                         logger.info("Found sum directory: {}", sumPath);
 
                         // Log directory contents to understand what's inside
@@ -620,14 +656,32 @@ public class StitchingHelper {
                     if (blockingDialog != null) {
                         blockingDialog.updateStatus("Checking for birefringence results for " + regionName + "...");
                     }
-                    
-                    String birefAngleStr = angleExposures.get(0).ticks() + ".biref";
-                    Path birefPath = tileBaseDir.resolve(birefAngleStr);
-                    
+
+                    // Scan for any birefringence directory (ends with .biref)
+                    String birefAngleStr = null;
+                    Path birefPath = null;
+
+                    try {
+                        if (Files.exists(tileBaseDir)) {
+                            birefPath = Files.list(tileBaseDir)
+                                    .filter(Files::isDirectory)
+                                    .filter(path -> path.getFileName().toString().endsWith(".biref"))
+                                    .findFirst()
+                                    .orElse(null);
+
+                            if (birefPath != null) {
+                                birefAngleStr = birefPath.getFileName().toString();
+                                logger.info("Found birefringence directory: {}", birefAngleStr);
+                            }
+                        }
+                    } catch (IOException e) {
+                        logger.warn("Could not scan for birefringence directories: {}", e.getMessage());
+                    }
+
                     logger.info("Checking for birefringence directory at: {}", birefPath);
-                    logger.info("Birefringence directory exists: {}", Files.exists(birefPath));
-                    
-                    if (Files.exists(birefPath)) {
+                    logger.info("Birefringence directory exists: {}", birefPath != null && Files.exists(birefPath));
+
+                    if (birefPath != null && Files.exists(birefPath)) {
                         logger.info("Found birefringence directory: {}", birefPath);
                         
                         // Log directory contents to understand what's inside
@@ -682,13 +736,31 @@ public class StitchingHelper {
                         blockingDialog.updateStatus("Checking for sum results for " + regionName + "...");
                     }
 
-                    String sumAngleStr = angleExposures.get(0).ticks() + ".sum";
-                    Path sumPath = tileBaseDir.resolve(sumAngleStr);
+                    // Scan for any sum directory (ends with .sum)
+                    String sumAngleStr = null;
+                    Path sumPath = null;
+
+                    try {
+                        if (Files.exists(tileBaseDir)) {
+                            sumPath = Files.list(tileBaseDir)
+                                    .filter(Files::isDirectory)
+                                    .filter(path -> path.getFileName().toString().endsWith(".sum"))
+                                    .findFirst()
+                                    .orElse(null);
+
+                            if (sumPath != null) {
+                                sumAngleStr = sumPath.getFileName().toString();
+                                logger.info("Found sum directory: {}", sumAngleStr);
+                            }
+                        }
+                    } catch (IOException e) {
+                        logger.warn("Could not scan for sum directories: {}", e.getMessage());
+                    }
 
                     logger.info("Checking for sum directory at: {}", sumPath);
-                    logger.info("Sum directory exists: {}", Files.exists(sumPath));
+                    logger.info("Sum directory exists: {}", sumPath != null && Files.exists(sumPath));
 
-                    if (Files.exists(sumPath)) {
+                    if (sumPath != null && Files.exists(sumPath)) {
                         logger.info("Found sum directory: {}", sumPath);
 
                         // Log directory contents to understand what's inside
