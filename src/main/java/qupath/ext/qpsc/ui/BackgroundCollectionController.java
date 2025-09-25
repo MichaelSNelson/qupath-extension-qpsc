@@ -527,17 +527,17 @@ public class BackgroundCollectionController {
             outputPathField.setText("C:/qpsc_data/background_tiles");
         }
     }
-    
+
     private BackgroundCollectionResult createResult() {
         try {
             String modality = modalityComboBox.getValue();
             String objective = objectiveComboBox.getValue();
             String outputPath = outputPathField.getText().trim();
-            
+
             if (modality == null || objective == null || outputPath.isEmpty()) {
                 return null;
             }
-            
+
             // Validate exposure values and angles
             List<AngleExposure> finalExposures = new ArrayList<>();
             for (int i = 0; i < exposureFields.size(); i++) {
@@ -554,24 +554,23 @@ public class BackgroundCollectionController {
 
                     finalExposures.add(new AngleExposure(angle, exposure));
                 } catch (NumberFormatException e) {
-                    Dialogs.showErrorMessage("Invalid Exposure", 
+                    Dialogs.showErrorMessage("Invalid Exposure",
                             "Please enter valid numeric values for all exposure times.");
                     return null;
                 }
             }
-            
-            // Check if settings match existing background
-            boolean settingsMatchExisting = existingBackgroundSettings != null && 
-                    BackgroundSettingsReader.validateAngleExposures(existingBackgroundSettings, finalExposures, 0.1);
-            
-            return new BackgroundCollectionResult(modality, objective, finalExposures, outputPath, settingsMatchExisting);
-            
+
+            // Remove the settingsMatchExisting check - it's not relevant for background collection
+            // We're creating new backgrounds, not using them for correction
+            return new BackgroundCollectionResult(modality, objective, finalExposures, outputPath);
+
         } catch (Exception e) {
             logger.error("Error creating result", e);
             Dialogs.showErrorMessage("Error", "Failed to create background collection parameters: " + e.getMessage());
             return null;
         }
     }
+
     
     /**
      * Gets default angle-exposure values for background collection, prioritizing preferences first.

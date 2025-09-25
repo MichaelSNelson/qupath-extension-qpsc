@@ -447,9 +447,9 @@ public class MicroscopeSocketClient implements AutoCloseable {
      * @param exposures Exposure values in parentheses format (e.g., "(120.0,250.0,60.0,1.2)")
      * @throws IOException if communication fails
      */
-    public void startBackgroundAcquisition(String yamlPath, String outputPath, String modality, 
-                                          String angles, String exposures) throws IOException {
-        
+    public void startBackgroundAcquisition(String yamlPath, String outputPath, String modality,
+                                           String angles, String exposures) throws IOException {
+
         // Build BGACQUIRE-specific command message
         String message = String.format("--yaml %s --output %s --modality %s --angles %s --exposures %s END_MARKER",
                 yamlPath, outputPath, modality, angles, exposures);
@@ -461,14 +461,13 @@ public class MicroscopeSocketClient implements AutoCloseable {
 
         synchronized (socketLock) {
             ensureConnected();
-            
+
             // Temporarily increase socket timeout for background acquisition
-            // Background acquisition can take 10-15 seconds depending on angles/exposures
             int originalTimeout = readTimeout;
             try {
                 if (socket != null) {
-                    socket.setSoTimeout(20000); // 20 seconds for background acquisition
-                    logger.debug("Increased socket timeout to 20s for background acquisition");
+                    socket.setSoTimeout(30000); // 30 seconds for background acquisition
+                    logger.debug("Increased socket timeout to 30s for background acquisition");
                 }
 
                 // Send BGACQUIRE command (8 bytes)
@@ -490,34 +489,42 @@ public class MicroscopeSocketClient implements AutoCloseable {
                 lastActivityTime.set(System.currentTimeMillis());
                 logger.info("Background acquisition command sent successfully");
 
-                // Wait for immediate acknowledgment from server to confirm command was received
-                try {
-                    // Read the STARTED acknowledgment (variable length)
-                    byte[] buffer = new byte[1024];
-                    int bytesRead = input.read(buffer);
-                    if (bytesRead > 0) {
-                        String response = new String(buffer, 0, bytesRead, StandardCharsets.UTF_8);
-                        logger.info("Received server response: {}", response);
-                        
-                        if (response.startsWith("STARTED:")) {
-                            logger.info("Background acquisition started successfully on server");
-                        } else if (response.startsWith("FAILED:")) {
-                            throw new IOException("Server rejected background acquisition: " + response);
-                        } else {
-                            logger.warn("Unexpected server response: {}", response);
-                        }
-                    } else {
-                        logger.warn("No acknowledgment received from server");
+                // Read the STARTED acknowledgment
+                byte[] buffer = new byte[1024];
+                int bytesRead = input.read(buffer);
+                if (bytesRead > 0) {
+                    String response = new String(buffer, 0, bytesRead, StandardCharsets.UTF_8);
+                    logger.info("Received initial server response: {}", response);
+
+                    if (response.startsWith("FAILED:")) {
+                        throw new IOException("Server rejected background acquisition: " + response);
+                    } else if (!response.startsWith("STARTED:")) {
+                        logger.warn("Unexpected initial server response: {}", response);
                     }
-                    lastActivityTime.set(System.currentTimeMillis());
-                } catch (IOException e) {
-                    logger.error("Failed to receive server acknowledgment", e);
-                    throw new IOException("Failed to receive server acknowledgment for background acquisition", e);
                 }
 
+                // Now wait for the final SUCCESS/FAILED response
+                logger.info("Waiting for background acquisition to complete...");
+                bytesRead = input.read(buffer);
+                if (bytesRead > 0) {
+                    String finalResponse = new String(buffer, 0, bytesRead, StandardCharsets.UTF_8);
+                    logger.info("Received final server response: {}", finalResponse);
+
+                    if (finalResponse.startsWith("FAILED:")) {
+                        throw new IOException("Background acquisition failed: " + finalResponse.substring(7));
+                    } else if (!finalResponse.startsWith("SUCCESS:")) {
+                        logger.warn("Unexpected final response: {}", finalResponse);
+                    }
+                    // SUCCESS - method completes normally
+                } else {
+                    throw new IOException("No final response received from background acquisition");
+                }
+
+                lastActivityTime.set(System.currentTimeMillis());
+
             } catch (IOException | InterruptedException e) {
-                handleIOException(new IOException("Failed to send background acquisition command", e));
-                throw new IOException("Failed to send background acquisition command", e);
+                handleIOException(new IOException("Background acquisition error", e));
+                throw new IOException("Background acquisition error: " + e.getMessage(), e);
             } finally {
                 // Restore original timeout
                 if (socket != null) {
@@ -531,7 +538,6 @@ public class MicroscopeSocketClient implements AutoCloseable {
             }
         }
     }
-
     /**
      * Executes a command and optionally waits for response.
      *

@@ -15,6 +15,7 @@ import qupath.ext.qpsc.ui.BackgroundCollectionController;
 import qupath.ext.qpsc.utilities.MicroscopeConfigManager;
 import qupath.fx.dialogs.Dialogs;
 
+import java.io.FileReader;
 import java.io.IOException;
 import java.io.FileWriter;
 import java.io.PrintWriter;
@@ -74,8 +75,17 @@ public class BackgroundCollectionWorkflow {
                                     result.modality(), result.angleExposures().size());
                             
                             // Execute background acquisition
-                            executeBackgroundAcquisition(result.modality(), result.objective(), result.angleExposures(), 
-                                    result.outputPath(), result.settingsMatchExisting());
+                            CompletableFuture.runAsync(() -> {
+                                executeBackgroundAcquisition(result.modality(), result.objective(),
+                                        result.angleExposures(), result.outputPath());
+                            }).exceptionally(ex -> {
+                                logger.error("Background acquisition failed", ex);
+                                Platform.runLater(() -> {
+                                    Dialogs.showErrorMessage("Background Acquisition Error",
+                                            "Failed to execute background acquisition: " + ex.getMessage());
+                                });
+                                return null;
+                            });
                         } else {
                             logger.info("Background collection cancelled by user");
                         }
@@ -102,174 +112,80 @@ public class BackgroundCollectionWorkflow {
      * @param objective The selected objective
      * @param angleExposures List of angle-exposure pairs
      * @param outputPath Base output path for background images
-     * @param settingsMatchExisting Whether the settings match existing background images
+
      */
-    private static void executeBackgroundAcquisition(String modality, String objective, List<AngleExposure> angleExposures, 
-            String outputPath, boolean settingsMatchExisting) {
-        
-        logger.info("Executing background acquisition for modality '{}' with {} angles", 
+// Replace the executeBackgroundAcquisition method with this fixed version
+    private static void executeBackgroundAcquisition(String modality, String objective, List<AngleExposure> angleExposures,
+                                                     String outputPath) {
+        logger.info("Executing background acquisition for modality '{}' with {} angles",
                 modality, angleExposures.size());
-        
-        if (settingsMatchExisting) {
-            logger.info("Settings match existing background images - future acquisitions will use background correction");
-        } else {
-            logger.warn("Settings do NOT match existing background images - background correction will be disabled for incompatible settings");
-        }
-        
-        // Create progress counter and show progress bar
-        AtomicInteger progressCounter = new AtomicInteger(0);
-        // Temporarily disable progress bar to test if it's blocking execution
-        // UIFunctions.ProgressHandle progressHandle = UIFunctions.showProgressBarAsync(
-        //         progressCounter,
-        //         angleExposures.size(),
-        //         300000, // 5 minute timeout
-        //         false   // No cancel button for background collection
-        // );
-        UIFunctions.ProgressHandle progressHandle = null; // Temporary fix
-        
-        logger.info("Creating background acquisition CompletableFuture");
-        // Use explicit executor to avoid common pool issues
-        var executor = Executors.newSingleThreadExecutor();
-        CompletableFuture<Void> acquisitionFuture = CompletableFuture.runAsync(() -> {
-            try {
-                logger.info("Starting background acquisition async task");
-                
-                // Get socket client from MicroscopeController 
-                MicroscopeSocketClient socketClient = MicroscopeController.getInstance().getSocketClient();
-                logger.info("Retrieved socket client from MicroscopeController");
-                
-                // Ensure connection to microscope server
-                if (!MicroscopeController.getInstance().isConnected()) {
-                    logger.info("Connecting to microscope server for background acquisition");
-                    MicroscopeController.getInstance().connect();
-                    logger.info("Connection attempt completed");
-                } else {
-                    logger.info("Already connected to microscope server");
-                }
-                logger.info("Using microscope server connection for background acquisition");
-                
-                // Build background acquisition command using AcquisitionCommandBuilder
-                String configFileLocation = QPPreferenceDialog.getMicroscopeConfigFileProperty();
-                logger.info("Using config file: {}", configFileLocation);
-                var configManager = MicroscopeConfigManager.getInstance(configFileLocation);
-                logger.info("Retrieved config manager");
-                
-                // Use the user-selected objective
-                logger.info("Using user-selected objective: {}", objective);
-                
-                String detector = null;
-                if (objective != null) {
-                    Set<String> availableDetectors = configManager.getAvailableDetectorsForModalityObjective(modality, objective);
-                    logger.info("Available detectors for {}/{}: {}", modality, objective, availableDetectors);
-                    detector = availableDetectors.isEmpty() ? null : availableDetectors.iterator().next();
-                }
-                logger.info("Selected hardware: objective={}, detector={}", objective, detector);
-                
-                // Create proper background folder structure: base_folder/detector/modality/magnification
-                String finalOutputPath = outputPath;
-                if (objective != null && detector != null) {
-                    // Extract magnification from objective (e.g., "LOCI_OBJECTIVE_OLYMPUS_20X_POL_001" -> "20x")
-                    String magnification = extractMagnificationFromObjective(objective);
-                    finalOutputPath = java.nio.file.Paths.get(outputPath, detector, modality, magnification).toString();
-                    logger.info("Created background folder structure: {}", finalOutputPath);
-                } else {
-                    logger.warn("Could not determine objective/detector for {}, using base output path", modality);
-                }
-                
-                // Create the output directory if it doesn't exist
-                java.io.File outputDir = new java.io.File(finalOutputPath);
-                logger.info("Creating output directory: {}", finalOutputPath);
-                if (!outputDir.exists() && !outputDir.mkdirs()) {
-                    throw new IOException("Failed to create output directory: " + finalOutputPath);
-                }
-                logger.info("Output directory ready: {}", finalOutputPath);
-                
-                // Build BGACQUIRE-specific command parameters (different from regular acquisition)
-                logger.info("Building BGACQUIRE command with {} angles", angleExposures.size());
-                
-                // Format angles and exposures for BGACQUIRE command (server expects parentheses format)
-                String angles = angleExposures.stream()
-                        .map(ae -> String.valueOf(ae.ticks()))
-                        .collect(java.util.stream.Collectors.joining(",", "(", ")"));
-                String exposures = angleExposures.stream()
-                        .map(ae -> String.valueOf(ae.exposureMs()))
-                        .collect(java.util.stream.Collectors.joining(",", "(", ")"));
-                
-                logger.info("Formatted for BGACQUIRE - angles: {}, exposures: {}", angles, exposures);
-                
-                logger.info("Starting background acquisition for modality '{}' with {} angles", modality, angleExposures.size());
-                
-                // Send BGACQUIRE command with correct parameters
-                logger.info("Sending BGACQUIRE command to server");
-                socketClient.startBackgroundAcquisition(configFileLocation, finalOutputPath, modality, angles, exposures);
-                logger.info("Background acquisition command sent, monitoring progress");
-                
-                // Monitor acquisition with progress updates
-                MicroscopeSocketClient.AcquisitionState finalState =
-                        socketClient.monitorAcquisition(
-                                // Progress callback - update the progress counter
-                                progress -> {
-                                    logger.debug("Background collection progress: {}", progress);
-                                    progressCounter.set(progress.current);
-                                },
-                                500,    // Poll every 500ms
-                                300000  // 5 minute timeout
-                        );
-                
-                // Check final state
-                if (finalState == MicroscopeSocketClient.AcquisitionState.COMPLETED) {
-                    logger.info("Background acquisition completed successfully");
-                    
-                    // Save background collection defaults to text file
-                    try {
-                        saveBackgroundDefaults(finalOutputPath, modality, objective, detector, angleExposures);
-                        logger.info("Background collection defaults saved to file");
-                    } catch (Exception e) {
-                        logger.error("Failed to save background collection defaults", e);
-                        // Don't fail the whole workflow if defaults save fails
-                    }
-                    
-                    Platform.runLater(() -> {
-                        if (progressHandle != null) progressHandle.close();
-                        Dialogs.showInfoNotification("Background Collection Complete", 
-                                String.format("Successfully acquired %d background images for %s modality", 
-                                        angleExposures.size(), modality));
-                    });
-                } else if (finalState == MicroscopeSocketClient.AcquisitionState.CANCELLED) {
-                    logger.warn("Background acquisition was cancelled");
-                    Platform.runLater(() -> {
-                        if (progressHandle != null) progressHandle.close();
-                        Dialogs.showInfoNotification("Background Collection Cancelled",
-                                "Background acquisition was cancelled by user request");
-                    });
-                } else if (finalState == MicroscopeSocketClient.AcquisitionState.FAILED) {
-                    throw new RuntimeException("Background acquisition failed on server");
-                } else {
-                    logger.warn("Background acquisition ended in unexpected state: {}", finalState);
-                }
-                
-            } catch (Exception e) {
-                logger.error("Background acquisition failed", e);
-                Platform.runLater(() -> {
-                    if (progressHandle != null) progressHandle.close();
-                    Dialogs.showErrorMessage("Background Acquisition Failed", 
-                            "Failed to acquire background images: " + e.getMessage());
-                });
+
+        try {
+            // Get socket client from MicroscopeController
+            MicroscopeSocketClient socketClient = MicroscopeController.getInstance().getSocketClient();
+
+            // Ensure connection
+            if (!MicroscopeController.getInstance().isConnected()) {
+                logger.info("Connecting to microscope server for background acquisition");
+                MicroscopeController.getInstance().connect();
             }
-        });
-        
-        // Handle any exceptions from the CompletableFuture itself
-        acquisitionFuture.exceptionally(ex -> {
-            logger.error("CompletableFuture execution failed", ex);
+
+            // Build parameters
+            String configFileLocation = QPPreferenceDialog.getMicroscopeConfigFileProperty();
+            var configManager = MicroscopeConfigManager.getInstance(configFileLocation);
+
+            // Create proper folder structure
+            String detector = null;
+            if (objective != null) {
+                Set<String> availableDetectors = configManager.getAvailableDetectorsForModalityObjective(modality, objective);
+                detector = availableDetectors.isEmpty() ? null : availableDetectors.iterator().next();
+            }
+
+            String finalOutputPath = outputPath;
+            if (objective != null && detector != null) {
+                String magnification = extractMagnificationFromObjective(objective);
+                finalOutputPath = java.nio.file.Paths.get(outputPath, detector, modality, magnification).toString();
+            }
+
+            // Create output directory
+            java.io.File outputDir = new java.io.File(finalOutputPath);
+            if (!outputDir.exists() && !outputDir.mkdirs()) {
+                throw new IOException("Failed to create output directory: " + finalOutputPath);
+            }
+
+            // Format angles and exposures
+            String angles = angleExposures.stream()
+                    .map(ae -> String.valueOf(ae.ticks()))
+                    .collect(java.util.stream.Collectors.joining(",", "(", ")"));
+            String exposures = angleExposures.stream()
+                    .map(ae -> String.valueOf(ae.exposureMs()))
+                    .collect(java.util.stream.Collectors.joining(",", "(", ")"));
+
+            logger.info("Starting background acquisition with angles: {}, exposures: {}", angles, exposures);
+
+            // Call the synchronous background acquisition method
+            socketClient.startBackgroundAcquisition(configFileLocation, finalOutputPath, modality, angles, exposures);
+
+            logger.info("Background acquisition completed successfully");
+
+            // Save background collection defaults
+            saveBackgroundDefaults(finalOutputPath, modality, objective, detector, angleExposures);
+
+            // Show success notification on UI thread
             Platform.runLater(() -> {
-                if (progressHandle != null) progressHandle.close();
-                Dialogs.showErrorMessage("Background Acquisition Error", 
-                        "Failed to start background acquisition: " + ex.getMessage());
+                Dialogs.showInfoNotification("Background Collection Complete",
+                        String.format("Successfully acquired %d background images for %s modality",
+                                angleExposures.size(), modality));
             });
-            return null;
-        });
+
+        } catch (Exception e) {
+            logger.error("Background acquisition failed", e);
+            Platform.runLater(() -> {
+                Dialogs.showErrorMessage("Background Acquisition Failed",
+                        "Failed to acquire background images: " + e.getMessage());
+            });
+        }
     }
-    
     /**
      * Data class for background collection parameters.
      */
@@ -277,8 +193,7 @@ public class BackgroundCollectionWorkflow {
             String modality,
             String objective,
             List<AngleExposure> angleExposures,
-            String outputPath,
-            boolean settingsMatchExisting
+            String outputPath
     ) {}
     
     /**
@@ -293,87 +208,113 @@ public class BackgroundCollectionWorkflow {
      * @param angleExposures The angle-exposure pairs used
      * @throws IOException if file writing fails
      */
-    private static void saveBackgroundDefaults(String outputPath, String modality, String objective, 
-            String detector, List<AngleExposure> angleExposures) throws IOException {
-        
-        // Create settings file in the same directory as the background images
+    private static void saveBackgroundDefaults(String outputPath, String modality, String objective,
+                                               String detector, List<AngleExposure> angleExposures) throws IOException {
+
         java.io.File settingsFile = new java.io.File(outputPath, "background_settings.yml");
-        
+
         logger.info("Saving background collection settings to: {}", settingsFile.getAbsolutePath());
-        
-        // Configure YAML output format
+
         DumperOptions options = new DumperOptions();
         options.setIndent(2);
         options.setPrettyFlow(true);
         options.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK);
         Yaml yaml = new Yaml(options);
-        
-        // Build YAML structure using LinkedHashMap to preserve order
+
+        // Load existing angle data if file exists
+        Map<Double, Double> existingAngleExposureMap = new LinkedHashMap<>();
+        if (settingsFile.exists()) {
+            try (FileReader reader = new FileReader(settingsFile)) {
+                Map<String, Object> existingData = yaml.load(reader);
+
+                // Try to load from angle_exposures list (the format readers expect)
+                if (existingData != null && existingData.containsKey("angle_exposures")) {
+                    List<Map<String, Double>> existingList =
+                            (List<Map<String, Double>>) existingData.get("angle_exposures");
+                    for (Map<String, Double> pair : existingList) {
+                        existingAngleExposureMap.put(pair.get("angle"), pair.get("exposure"));
+                    }
+                    logger.info("Loaded {} existing angle-exposure pairs", existingAngleExposureMap.size());
+                }
+            } catch (Exception e) {
+                logger.warn("Could not load existing settings, creating new file", e);
+            }
+        }
+
+        // Add/update with new angles
+        for (AngleExposure ae : angleExposures) {
+            existingAngleExposureMap.put(ae.ticks(), ae.exposureMs());
+        }
+
+        // Build YAML in the expected format
         Map<String, Object> yamlData = new LinkedHashMap<>();
-        
-        // Add header comment (will be written separately)
         String timestamp = LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME);
-        
-        // Metadata section
+
+        // Metadata
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("generated", timestamp);
         metadata.put("version", "1.0");
         metadata.put("description", "QPSC Background Collection Settings - Contains settings used for background image acquisition");
         yamlData.put("metadata", metadata);
-        
-        // Hardware configuration
+
+        // Hardware
         Map<String, Object> hardware = new LinkedHashMap<>();
         hardware.put("modality", modality);
         hardware.put("objective", objective != null ? objective : "unknown");
         hardware.put("detector", detector != null ? detector : "unknown");
         hardware.put("magnification", extractMagnificationFromObjective(objective));
         yamlData.put("hardware", hardware);
-        
-        // Acquisition settings
-        Map<String, Object> acquisition = new LinkedHashMap<>();
-        acquisition.put("total_angles", angleExposures.size());
-        
-        // Extract angles and exposures as separate arrays
+
+        // Create sorted lists from the merged data
+        List<Map<String, Double>> angleExposureList = new ArrayList<>();
         List<Double> angles = new ArrayList<>();
         List<Double> exposures = new ArrayList<>();
-        for (AngleExposure ae : angleExposures) {
-            angles.add(ae.ticks());
-            exposures.add(ae.exposureMs());
+
+        // Sort by angle for consistent output
+        List<Double> sortedAngles = new ArrayList<>(existingAngleExposureMap.keySet());
+        sortedAngles.sort(Double::compare);
+
+        for (Double angle : sortedAngles) {
+            Double exposure = existingAngleExposureMap.get(angle);
+
+            angles.add(angle);
+            exposures.add(exposure);
+
+            Map<String, Double> pair = new LinkedHashMap<>();
+            pair.put("angle", angle);
+            pair.put("exposure", exposure);
+            angleExposureList.add(pair);
         }
+
+        // Acquisition summary - flat structure that readers expect
+        Map<String, Object> acquisition = new LinkedHashMap<>();
+        acquisition.put("total_angles", angles.size());
         acquisition.put("angles_degrees", angles);
         acquisition.put("exposures_ms", exposures);
         yamlData.put("acquisition", acquisition);
-        
-        // Detailed angle-exposure pairs
-        List<Map<String, Double>> angleExposureList = new ArrayList<>();
-        for (AngleExposure ae : angleExposures) {
-            Map<String, Double> pair = new LinkedHashMap<>();
-            pair.put("angle", ae.ticks());
-            pair.put("exposure", ae.exposureMs());
-            angleExposureList.add(pair);
-        }
+
+        // The main angle_exposures list - this is what readers look for
         yamlData.put("angle_exposures", angleExposureList);
-        
-        // Usage notes
+
+        // Notes
         List<String> notes = new ArrayList<>();
         notes.add("Use these exact settings for background correction to work properly");
         notes.add("If exposure times are changed, new background images must be acquired");
         notes.add("This file should be included when sharing background image sets");
         notes.add("Images are saved as: <angle>.tif (e.g., 0.0.tif, 90.0.tif)");
         yamlData.put("notes", notes);
-        
-        // Write YAML file with header comment
+
+        // Write YAML file
         try (FileWriter writer = new FileWriter(settingsFile)) {
-            // Write header comment
             writer.write("# QPSC Background Collection Settings\n");
             writer.write("# Generated: " + timestamp + "\n");
             writer.write("# Keep this file with the background images for reference\n\n");
-            
-            // Write YAML data
+
             yaml.dump(yamlData, writer);
         }
-        
-        logger.info("Background collection settings saved successfully as YAML");
+
+        logger.info("Background collection settings saved successfully with {} angles: {}",
+                angles.size(), angles);
     }
 
     /**
