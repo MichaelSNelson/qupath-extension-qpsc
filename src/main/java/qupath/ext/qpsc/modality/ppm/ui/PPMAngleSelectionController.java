@@ -274,14 +274,14 @@ public class PPMAngleSelectionController {
             }, minusCheck.selectedProperty(), zeroCheck.selectedProperty(), plusCheck.selectedProperty(), uncrossedCheck.selectedProperty(),
             minusExposure.textProperty(), zeroExposure.textProperty(), plusExposure.textProperty(), uncrossedExposure.textProperty());
             okNode.disableProperty().bind(valid.not());
-
+            //TODO MAKE THIS EASIER TO CHANGE IN THE FUTURE AND NOT SET IN THE GUI CODE
             dialog.setResultConverter(button -> {
                 if(button==okType){
                     List<AngleExposure> list = new ArrayList<>();
                     if(uncrossedCheck.isSelected()) list.add(new AngleExposure(uncrossedAngle,Double.parseDouble(uncrossedExposure.getText())));
-                    if(plusCheck.isSelected()) list.add(new AngleExposure(plusAngle,Double.parseDouble(plusExposure.getText())));
-                    if(zeroCheck.isSelected()) list.add(new AngleExposure(0.0,Double.parseDouble(zeroExposure.getText())));
                     if(minusCheck.isSelected()) list.add(new AngleExposure(minusAngle,Double.parseDouble(minusExposure.getText())));
+                    if(zeroCheck.isSelected()) list.add(new AngleExposure(0.0,Double.parseDouble(zeroExposure.getText())));
+                    if(plusCheck.isSelected()) list.add(new AngleExposure(plusAngle,Double.parseDouble(plusExposure.getText())));
 
                     logger.info("PPM angles and exposures selected: {}", list);
                     return new AngleExposureResult(list);

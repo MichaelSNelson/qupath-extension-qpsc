@@ -11,6 +11,7 @@ import qupath.ext.qpsc.ui.*;
 import qupath.ext.qpsc.utilities.*;
 import qupath.fx.dialogs.Dialogs;
 import qupath.lib.gui.QuPathGUI;
+import qupath.lib.images.ImageData;
 import qupath.lib.objects.PathObject;
 import qupath.lib.projects.Project;
 import qupath.lib.projects.ProjectImageEntry;
@@ -132,6 +133,10 @@ public class ExistingImageWorkflow {
          * Validates image flip status and creates flipped duplicate if needed.
          * This should be called after the project is created/opened.
          */
+        /**
+         * Validates image flip status and creates flipped duplicate if needed.
+         * This should be called after the project is created/opened.
+         */
         private CompletableFuture<Boolean> validateAndPrepareImage() {
             return CompletableFuture.supplyAsync(() -> {
                 // Get flip requirements from preferences
@@ -145,8 +150,7 @@ public class ExistingImageWorkflow {
                 }
 
                 // Check if we're in a project
-                @SuppressWarnings("unchecked")
-                Project<BufferedImage> project = (Project<BufferedImage>) gui.getProject();
+                Project<BufferedImage> project = gui.getProject();
                 if (project == null) {
                     logger.warn("No project available to check flip status");
                     return true; // Project will handle flipping during import
@@ -187,21 +191,94 @@ public class ExistingImageWorkflow {
                     );
 
                     if (flippedEntry != null) {
-                        logger.info("Opening flipped duplicate: {}", flippedEntry.getImageName());
+                        logger.info("Created flipped duplicate: {}", flippedEntry.getImageName());
 
-                        // Open on UI thread
-                        CompletableFuture<Boolean> openFuture = new CompletableFuture<>();
+                        // CRITICAL: Sync project changes BEFORE attempting to open
+                        project.syncChanges();
+                        logger.info("Project synchronized after adding flipped image");
+
+                        // Create a future to track the image load
+                        CompletableFuture<Boolean> loadFuture = new CompletableFuture<>();
+
+                        // Set up the listener and open the image on the UI thread
                         Platform.runLater(() -> {
-                            gui.openImageEntry(flippedEntry);
+                            try {
+                                // Refresh project UI first
+                                gui.refreshProject();
 
-                            // Wait for image to load
-                            QPProjectFunctions.onImageLoadedInViewer(gui,
-                                    flippedEntry.getImageName(),
-                                    () -> openFuture.complete(true)
-                            );
+                                // Register the callback BEFORE opening the image
+                                QPProjectFunctions.onImageLoadedInViewer(gui,
+                                        flippedEntry.getImageName(),
+                                        () -> {
+                                            logger.info("Flipped image loaded successfully via callback");
+                                            loadFuture.complete(true);
+                                        }
+                                );
+
+                                // Add a backup listener in case the callback mechanism fails
+                                javafx.beans.value.ChangeListener<ImageData<BufferedImage>> backupListener =
+                                        new javafx.beans.value.ChangeListener<ImageData<BufferedImage>>() {
+                                            @Override
+                                            public void changed(
+                                                    javafx.beans.value.ObservableValue<? extends ImageData<BufferedImage>> observable,
+                                                    ImageData<BufferedImage> oldValue,
+                                                    ImageData<BufferedImage> newValue) {
+
+                                                if (newValue != null &&
+                                                        newValue.getServer().getPath().contains(flippedEntry.getImageName())) {
+                                                    logger.info("Flipped image loaded via backup listener");
+                                                    // Remove this listener
+                                                    gui.getViewer().imageDataProperty().removeListener(this);
+                                                    // Complete the future if not already done
+                                                    loadFuture.complete(true);
+                                                }
+                                            }
+                                        };
+
+                                // Add the backup listener
+                                gui.getViewer().imageDataProperty().addListener(backupListener);
+
+                                // Now open the image
+                                logger.info("Opening image entry: {}", flippedEntry.getImageName());
+                                gui.openImageEntry(flippedEntry);
+
+                                // Set up timeout handler
+                                CompletableFuture.delayedExecutor(30, TimeUnit.SECONDS).execute(() -> {
+                                    if (!loadFuture.isDone()) {
+                                        // Remove backup listener
+                                        Platform.runLater(() ->
+                                                gui.getViewer().imageDataProperty().removeListener(backupListener)
+                                        );
+
+                                        // Check one more time if image actually loaded
+                                        if (gui.getImageData() != null &&
+                                                gui.getImageData().getServer().getPath().contains(flippedEntry.getImageName())) {
+                                            logger.warn("Image loaded but listeners didn't fire - completing anyway");
+                                            loadFuture.complete(true);
+                                        } else {
+                                            loadFuture.completeExceptionally(
+                                                    new TimeoutException("Image failed to load within 30 seconds"));
+                                        }
+                                    }
+                                });
+
+                            } catch (Exception ex) {
+                                logger.error("Error in UI thread while opening image", ex);
+                                loadFuture.completeExceptionally(ex);
+                            }
                         });
 
-                        return openFuture.get(10, TimeUnit.SECONDS);
+                        // Wait for the load to complete
+                        try {
+                            return loadFuture.get(35, TimeUnit.SECONDS); // Slightly longer than internal timeout
+                        } catch (TimeoutException e) {
+                            logger.error("Timeout waiting for flipped image to load");
+                            throw new RuntimeException("Failed to load flipped image within timeout period", e);
+                        } catch (Exception e) {
+                            logger.error("Error waiting for flipped image to load", e);
+                            throw new RuntimeException("Failed to load flipped image", e);
+                        }
+
                     } else {
                         logger.error("Failed to create flipped duplicate");
                         Platform.runLater(() ->
@@ -225,7 +302,6 @@ public class ExistingImageWorkflow {
                 }
             });
         }
-
         /**
          * Shows sample setup dialog and stores results.
          */
