@@ -478,18 +478,26 @@ public class QPProjectFunctions {
         String originalUri = originalEntry.getURIs().iterator().next().toString();
         ImageServer<BufferedImage> originalServer = ImageServers.buildServer(originalUri);
 
-        // Create transformation
+        // Create transformation following QuPath coordinate system standards
+        // Note: For TransformedServerBuilder, we need to apply operations in reverse order
+        // compared to coordinate transformation, as the builder applies them to the image itself
         AffineTransform transform = new AffineTransform();
-        double scaleX = flipX ? -1 : 1;
-        double scaleY = flipY ? -1 : 1;
-        transform.scale(scaleX, scaleY);
 
-        if (flipX) {
+        if (flipX && flipY) {
+            // Combined flip: translate first, then scale
+            transform.translate(-originalServer.getWidth(), -originalServer.getHeight());
+            transform.scale(-1.0, -1.0);
+        } else if (flipX) {
+            // Horizontal flip: translate then scale
             transform.translate(-originalServer.getWidth(), 0);
-        }
-        if (flipY) {
+            transform.scale(-1.0, 1.0);
+        } else if (flipY) {
+            // Vertical flip: translate then scale
             transform.translate(0, -originalServer.getHeight());
+            transform.scale(1.0, -1.0);
         }
+
+        logger.debug("Server transform for flips (X={}, Y={}): {}", flipX, flipY, transform);
 
         // Create transformed server
         ImageServer<BufferedImage> flippedServer = new TransformedServerBuilder(originalServer)
@@ -515,10 +523,15 @@ public class QPProjectFunctions {
         PathObjectHierarchy originalHierarchy = originalData.getHierarchy();
         PathObjectHierarchy flippedHierarchy = flippedData.getHierarchy();
 
-        // TODO: Implement transformHierarchy in TransformationFunctions
-        // This should iterate through all PathObjects in originalHierarchy,
-        // transform their ROIs using the AffineTransform, and add them to flippedHierarchy
-        logger.warn("transformHierarchy not yet implemented - hierarchy copying skipped");
+        // Transform hierarchy to account for flips
+        TransformationFunctions.transformHierarchy(
+                originalHierarchy,
+                flippedHierarchy,
+                flipX,
+                flipY,
+                originalData.getServer().getWidth(),
+                originalData.getServer().getHeight()
+        );
 
         // Apply metadata - get offsets from original
         double[] offsets = ImageMetadataManager.getXYOffset(originalEntry);
@@ -530,10 +543,18 @@ public class QPProjectFunctions {
                 sampleName
         );
 
-        // Save
+        // Save the flipped image data explicitly to persist the transformed hierarchy
+        try {
+            flippedEntry.saveImageData(flippedData);
+            logger.debug("Saved image data for flipped duplicate");
+        } catch (IOException e) {
+            logger.warn("Could not save image data for flipped duplicate: {}", e.getMessage());
+            // Continue anyway - project sync should be sufficient
+        }
+
+        // Save project changes
         project.syncChanges();
-        // Note: Avoid calling saveImageData here to prevent save dialogs
-        // The image data will be automatically saved when needed
+        logger.debug("Synced project changes for flipped duplicate");
 
         logger.info("Successfully created flipped duplicate: {}", flippedName);
         return flippedEntry;

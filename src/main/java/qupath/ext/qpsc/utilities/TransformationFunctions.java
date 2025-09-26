@@ -3,6 +3,9 @@ package qupath.ext.qpsc.utilities;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qupath.lib.objects.PathObject;
+import qupath.lib.objects.PathObjectTools;
+import qupath.lib.objects.hierarchy.PathObjectHierarchy;
+import qupath.lib.roi.RoiTools;
 import qupath.lib.roi.interfaces.ROI;
 
 import java.awt.geom.AffineTransform;
@@ -11,6 +14,9 @@ import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.*;
+import java.util.Collection;
+import java.util.List;
+import java.util.ArrayList;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -128,6 +134,136 @@ public class TransformationFunctions {
         } catch (Exception e) {
             throw new IllegalStateException("Cannot invert transform", e);
         }
+    }
+
+    /**
+     * Transforms all PathObjects from the source hierarchy to the destination hierarchy.
+     * This applies the appropriate transform to handle coordinate flipping between images.
+     *
+     * Uses QuPath's official PathObjectTools.transformObject() for proper object handling.
+     *
+     * @param sourceHierarchy The hierarchy containing the original objects
+     * @param destHierarchy The hierarchy to receive the transformed objects
+     * @param flipX Whether to flip X coordinates
+     * @param flipY Whether to flip Y coordinates
+     * @param imageWidth Width of the image for flip calculations
+     * @param imageHeight Height of the image for flip calculations
+     */
+    public static void transformHierarchy(
+            PathObjectHierarchy sourceHierarchy,
+            PathObjectHierarchy destHierarchy,
+            boolean flipX,
+            boolean flipY,
+            double imageWidth,
+            double imageHeight) {
+
+        logger.info("Transforming hierarchy with flips: X={}, Y={}", flipX, flipY);
+
+        if (sourceHierarchy == null || destHierarchy == null) {
+            logger.warn("Cannot transform hierarchy - null hierarchy provided");
+            return;
+        }
+
+        // Create the flip transform following QuPath coordinate system standards
+        AffineTransform flipTransform = createFlipTransform(flipX, flipY, imageWidth, imageHeight);
+
+        if (flipTransform.isIdentity()) {
+            logger.info("Identity transform - no coordinate transformation needed");
+            // Still need to copy objects even if no transform
+            Collection<PathObject> allObjects = sourceHierarchy.getFlattenedObjectList(null);
+            List<PathObject> copiedObjects = new ArrayList<>();
+            for (PathObject obj : allObjects) {
+                if (obj.getROI() != null) {
+                    copiedObjects.add(obj.duplicate());
+                }
+            }
+            destHierarchy.addPathObjects(copiedObjects, false);
+            destHierarchy.fireHierarchyUpdate();
+            logger.info("Copied {} objects without transformation", copiedObjects.size());
+            return;
+        }
+
+        logger.info("Transform matrix: {}", formatTransformMatrix(flipTransform));
+
+        // Validate transform is invertible (QuPath best practice)
+        try {
+            flipTransform.createInverse();
+        } catch (Exception e) {
+            logger.error("Transform is not invertible - cannot proceed with transformation: {}", e.getMessage());
+            return;
+        }
+
+        // Get all objects from source hierarchy (excluding root object)
+        Collection<PathObject> allObjects = sourceHierarchy.getFlattenedObjectList(null);
+        List<PathObject> transformedObjects = new ArrayList<>();
+        int transformedCount = 0;
+
+        for (PathObject obj : allObjects) {
+            if (obj.getROI() != null && !obj.isRootObject()) {
+                try {
+                    // Use QuPath's official PathObjectTools.transformObject method
+                    // This preserves object IDs, classifications, and measurements
+                    PathObject transformedObj = PathObjectTools.transformObject(obj, flipTransform, true);
+
+                    if (transformedObj != null) {
+                        transformedObjects.add(transformedObj);
+                        transformedCount++;
+
+                        logger.debug("Transformed {} from ({}, {}) to ({}, {})",
+                                obj.getDisplayedName(),
+                                obj.getROI().getCentroidX(), obj.getROI().getCentroidY(),
+                                transformedObj.getROI().getCentroidX(), transformedObj.getROI().getCentroidY());
+                    }
+
+                } catch (Exception e) {
+                    logger.warn("Failed to transform object {}: {}", obj.getDisplayedName(), e.getMessage());
+                }
+            }
+        }
+
+        // Add all transformed objects to destination hierarchy at once (more efficient)
+        if (!transformedObjects.isEmpty()) {
+            destHierarchy.addPathObjects(transformedObjects, false);
+            // Fire hierarchy update to notify listeners and update spatial cache
+            destHierarchy.fireHierarchyUpdate();
+        }
+
+        logger.info("Successfully transformed {} objects to destination hierarchy", transformedCount);
+    }
+
+    /**
+     * Creates a flip transform following QuPath coordinate system conventions.
+     * Origin (0,0) is at top-left corner of full-resolution image.
+     */
+    private static AffineTransform createFlipTransform(boolean flipX, boolean flipY,
+                                                       double imageWidth, double imageHeight) {
+        AffineTransform transform = new AffineTransform();
+
+        if (flipX && flipY) {
+            // Combined X and Y flip: scale by -1,-1 then translate by width,height
+            transform.scale(-1.0, -1.0);
+            transform.translate(-imageWidth, -imageHeight);
+        } else if (flipX) {
+            // Horizontal flip: scale by -1,1 then translate by width,0
+            transform.scale(-1.0, 1.0);
+            transform.translate(-imageWidth, 0.0);
+        } else if (flipY) {
+            // Vertical flip: scale by 1,-1 then translate by 0,height
+            transform.scale(1.0, -1.0);
+            transform.translate(0.0, -imageHeight);
+        }
+        // If no flips, return identity transform
+
+        return transform;
+    }
+
+    /**
+     * Formats transform matrix for readable logging.
+     */
+    private static String formatTransformMatrix(AffineTransform transform) {
+        return String.format("[%.3f, %.3f, %.3f, %.3f, %.3f, %.3f]",
+                transform.getScaleX(), transform.getShearX(), transform.getShearY(),
+                transform.getScaleY(), transform.getTranslateX(), transform.getTranslateY());
     }
 
     // ==================== TRANSFORM CALCULATION FUNCTIONS ====================
