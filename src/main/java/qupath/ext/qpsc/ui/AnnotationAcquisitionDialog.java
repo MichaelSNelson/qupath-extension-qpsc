@@ -12,6 +12,8 @@ import javafx.scene.paint.Color;
 import javafx.stage.Modality;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import qupath.ext.qpsc.modality.ModalityHandler;
+import qupath.ext.qpsc.modality.ModalityRegistry;
 import qupath.ext.qpsc.preferences.PersistentPreferences;
 import qupath.lib.gui.QuPathGUI;
 import qupath.lib.objects.PathObject;
@@ -38,15 +40,20 @@ public class AnnotationAcquisitionDialog {
      *
      * @param availableClasses Initial set of annotation classes in the current image
      * @param preselectedClasses Classes selected from previous runs
+     * @param modality The imaging modality for modality-specific UI components
      * @return CompletableFuture with selected classes and whether to proceed
      */
     public static CompletableFuture<AcquisitionResult> showDialog(
             Set<String> availableClasses,
-            List<String> preselectedClasses) {
+            List<String> preselectedClasses,
+            String modality) {
 
         CompletableFuture<AcquisitionResult> future = new CompletableFuture<>();
 
         Platform.runLater(() -> {
+            // Get modality handler and optional UI component
+            ModalityHandler handler = ModalityRegistry.getHandler(modality);
+            Optional<ModalityHandler.BoundingBoxUI> modalityUI = handler.createBoundingBoxUI();
             Dialog<AcquisitionResult> dialog = new Dialog<>();
             dialog.initModality(Modality.NONE); // Non-modal as requested
             dialog.setTitle("Annotation Acquisition");
@@ -82,7 +89,7 @@ public class AnnotationAcquisitionDialog {
 
             // Tab 1: Acquisition Summary (main tab)
             Tab summaryTab = new Tab("Acquire Regions");
-            VBox summaryContent = createSummaryContent(selectedClasses);
+            VBox summaryContent = createSummaryContent(selectedClasses, modalityUI);
             summaryTab.setContent(summaryContent);
 
             // Tab 2: Class Selection
@@ -157,7 +164,16 @@ public class AnnotationAcquisitionDialog {
                     if (rememberCb != null && rememberCb.isSelected()) {
                         PersistentPreferences.setSelectedAnnotationClasses(new ArrayList<>(selectedClasses));
                     }
-                    return new AcquisitionResult(new ArrayList<>(selectedClasses), true);
+
+                    // Get angle overrides from modality UI if present
+                    Map<String, Double> angleOverrides = modalityUI
+                            .map(ModalityHandler.BoundingBoxUI::getAngleOverrides)
+                            .orElse(null);
+                    if (angleOverrides != null) {
+                        logger.info("User overrode angles: {}", angleOverrides);
+                    }
+
+                    return new AcquisitionResult(new ArrayList<>(selectedClasses), true, angleOverrides);
                 } else {
                     // Cancel was clicked
                     return new AcquisitionResult(Collections.emptyList(), false);
@@ -186,7 +202,8 @@ public class AnnotationAcquisitionDialog {
     /**
      * Creates the summary content showing what will be acquired.
      */
-    private static VBox createSummaryContent(ObservableList<String> selectedClasses) {
+    private static VBox createSummaryContent(ObservableList<String> selectedClasses,
+                                              Optional<ModalityHandler.BoundingBoxUI> modalityUI) {
         VBox content = new VBox(15);
         content.setPadding(new Insets(20));
 
@@ -227,6 +244,11 @@ public class AnnotationAcquisitionDialog {
         buttonBox.getChildren().add(refreshBtn);
 
         content.getChildren().addAll(annotationList, countLabel, buttonBox, new Separator(), infoLabel);
+
+        // Add modality-specific UI if present (e.g., PPM angle overrides)
+        modalityUI.ifPresent(ui -> {
+            content.getChildren().add(ui.getNode());
+        });
 
         return content;
     }
@@ -408,10 +430,16 @@ public class AnnotationAcquisitionDialog {
     public static class AcquisitionResult {
         public final List<String> selectedClasses;
         public final boolean proceed;
+        public final Map<String, Double> angleOverrides;
 
         public AcquisitionResult(List<String> selectedClasses, boolean proceed) {
+            this(selectedClasses, proceed, null);
+        }
+
+        public AcquisitionResult(List<String> selectedClasses, boolean proceed, Map<String, Double> angleOverrides) {
             this.selectedClasses = selectedClasses;
             this.proceed = proceed;
+            this.angleOverrides = angleOverrides;
         }
     }
 }

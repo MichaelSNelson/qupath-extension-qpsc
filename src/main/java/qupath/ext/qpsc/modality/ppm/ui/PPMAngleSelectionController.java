@@ -429,12 +429,20 @@ public class PPMAngleSelectionController {
             message.append("\nRecommendation: Use the background settings exposure times for optimal results,");
             message.append(" or collect new background images with your selected exposure times.");
 
-            warning.setContentText(message.toString());
+            // Use a TextArea with scrolling instead of setContentText for long messages
+            TextArea textArea = new TextArea(message.toString());
+            textArea.setEditable(false);
+            textArea.setWrapText(true);
+            textArea.setPrefRowCount(20);
+            textArea.setPrefColumnCount(70);
+
+            // Set the TextArea as the expandable content
+            warning.getDialogPane().setContent(textArea);
             warning.setResizable(true);
 
             // Make dialog larger to accommodate content
-            warning.getDialogPane().setPrefWidth(600);
-            warning.getDialogPane().setPrefHeight(400);
+            warning.getDialogPane().setPrefWidth(650);
+            warning.getDialogPane().setPrefHeight(500);
 
             // Make the dialog modal and always on top
             warning.initModality(javafx.stage.Modality.APPLICATION_MODAL);

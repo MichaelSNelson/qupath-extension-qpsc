@@ -145,18 +145,24 @@ public class AcquisitionManager {
         // Get preferences
         List<String> preselected = PersistentPreferences.getSelectedAnnotationClasses();
 
-        // Show selection dialog
-        return AnnotationAcquisitionDialog.showDialog(existingClassNames, preselected)
+        // Show selection dialog with modality for modality-specific UI
+        return AnnotationAcquisitionDialog.showDialog(existingClassNames, preselected, state.sample.modality())
                 .thenApply(result -> {
                     if (!result.proceed || result.selectedClasses.isEmpty()) {
                         logger.info("Acquisition cancelled or no classes selected");
                         return false;
                     }
 
-                    // Store selected classes in state
+                    // Store selected classes and angle overrides in state
                     state.selectedAnnotationClasses = result.selectedClasses;
                     logger.info("User selected {} classes for acquisition: {}",
                             result.selectedClasses.size(), result.selectedClasses);
+
+                    // Store angle overrides if provided
+                    if (result.angleOverrides != null && !result.angleOverrides.isEmpty()) {
+                        state.angleOverrides = result.angleOverrides;
+                        logger.info("User provided angle overrides: {}", result.angleOverrides);
+                    }
 
                     return true;
                 });
@@ -166,15 +172,73 @@ public class AcquisitionManager {
      *
      * <p>For polarized light imaging or other multi-angle acquisitions, this method
      * retrieves the configured rotation angles and decimal exposure times.
+     * If the user provided angle overrides in the annotation dialog, those will be
+     * applied following the BoundingBoxWorkflow pattern.
      *
      * @return CompletableFuture containing list of rotation angles with exposure settings
      */
     private CompletableFuture<List<AngleExposure>> getRotationAngles() {
         ModalityHandler handler = ModalityRegistry.getHandler(state.sample.modality());
-        logger.info("Getting rotation angles for modality: {} with hardware: obj={}, det={}", 
+        logger.info("Getting rotation angles for modality: {} with hardware: obj={}, det={}",
                 state.sample.modality(), state.sample.objective(), state.sample.detector());
 
-        return handler.getRotationAngles(state.sample.modality(), state.sample.objective(), state.sample.detector());
+        // Load profile-specific exposure defaults for PPM modality
+        if ("ppm".equals(state.sample.modality())) {
+            try {
+                qupath.ext.qpsc.modality.ppm.PPMPreferences.loadExposuresForProfile(
+                        state.sample.objective(), state.sample.detector());
+            } catch (Exception e) {
+                logger.warn("Failed to load PPM exposure defaults for {}/{}: {}",
+                        state.sample.objective(), state.sample.detector(), e.getMessage());
+            }
+        }
+
+        // Handle angle overrides if provided (following BoundingBoxWorkflow pattern)
+        if (state.angleOverrides != null && !state.angleOverrides.isEmpty() && "ppm".equals(state.sample.modality())) {
+            logger.info("Applying angle overrides from user dialog: {}", state.angleOverrides);
+
+            // For PPM with overrides, get the default angles first, apply overrides, then show dialog with corrected angles
+            qupath.ext.qpsc.modality.ppm.RotationManager rotationManager =
+                new qupath.ext.qpsc.modality.ppm.RotationManager(state.sample.modality(), state.sample.objective(), state.sample.detector());
+
+            // Get the default angles (this won't show any dialog since we're using the new method)
+            return rotationManager.getDefaultAnglesWithExposure(state.sample.modality())
+                .thenCompose(defaultAngles -> {
+                    // Apply overrides to the default angles
+                    List<AngleExposure> overriddenAngles =
+                        handler.applyAngleOverrides(defaultAngles, state.angleOverrides);
+
+                    // Extract the overridden plus/minus angles for the dialog
+                    double plusAngle = 7.0;  // fallback
+                    double minusAngle = -7.0; // fallback
+                    double uncrossedAngle = 90.0; // fallback
+
+                    for (AngleExposure ae : overriddenAngles) {
+                        if (ae.ticks() > 0 && ae.ticks() < 45) plusAngle = ae.ticks();
+                        else if (ae.ticks() < 0) minusAngle = ae.ticks();
+                        else if (ae.ticks() >= 45) uncrossedAngle = ae.ticks();
+                    }
+
+                    // Now show the dialog with the correct angles
+                    return qupath.ext.qpsc.modality.ppm.ui.PPMAngleSelectionController.showDialog(
+                        plusAngle, minusAngle, uncrossedAngle,
+                        state.sample.modality(), state.sample.objective(), state.sample.detector())
+                        .thenApply(result -> {
+                            if (result == null) {
+                                logger.info("User cancelled angle selection dialog - acquisition will be cancelled");
+                                throw new RuntimeException("ANGLE_SELECTION_CANCELLED");
+                            }
+                            List<AngleExposure> finalAngles = new ArrayList<>();
+                            for (qupath.ext.qpsc.modality.ppm.ui.PPMAngleSelectionController.AngleExposure ae : result.angleExposures) {
+                                finalAngles.add(new AngleExposure(ae.angle, ae.exposureMs));
+                            }
+                            return finalAngles;
+                        });
+                });
+        } else {
+            // Normal flow - no overrides or not PPM
+            return handler.getRotationAngles(state.sample.modality(), state.sample.objective(), state.sample.detector());
+        }
     }
 
     /**

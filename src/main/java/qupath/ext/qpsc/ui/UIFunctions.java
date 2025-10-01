@@ -405,6 +405,7 @@ public class UIFunctions {
         HBox buttonBox = new HBox(10);
         buttonBox.setAlignment(Pos.CENTER);
 
+        CountDownLatch latch = new CountDownLatch(1);
         AtomicBoolean result = new AtomicBoolean(false);
 
         Button confirmButton = new Button("Current Position is Accurate");
@@ -412,6 +413,7 @@ public class UIFunctions {
         confirmButton.setOnAction(e -> {
             result.set(true);
             stage.close();
+            latch.countDown();
         });
 
         Button cancelButton = new Button("Cancel acquisition");
@@ -419,6 +421,7 @@ public class UIFunctions {
         cancelButton.setOnAction(e -> {
             result.set(false);
             stage.close();
+            latch.countDown();
         });
 
         buttonBox.getChildren().addAll(confirmButton, cancelButton);
@@ -427,10 +430,21 @@ public class UIFunctions {
         Scene scene = new Scene(layout, 350, 150);
         stage.setScene(scene);
 
-        stage.setOnCloseRequest(e -> result.set(false));
+        stage.setOnCloseRequest(e -> {
+            result.set(false);
+            latch.countDown();
+        });
 
         stage.centerOnScreen();
-        stage.showAndWait();
+        stage.show();
+
+        // Wait for user response without blocking the UI thread
+        try {
+            latch.await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
 
         return result.get();
     }

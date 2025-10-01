@@ -237,13 +237,15 @@ public class TileProcessingUtilities {
 
                             // Add to project with metadata if available
                             if (finalMetadata != null) {
+                                // Stitched images from microscope don't need flipping - they come with correct orientation
                                 QPProjectFunctions.addImageToProjectWithMetadata(
                                         project,
                                         new File(pathToImport),
                                         finalMetadata.parentEntry,
                                         finalMetadata.xOffset,
                                         finalMetadata.yOffset,
-                                        finalMetadata.isFlipped,
+                                        false,  // isFlippedX - stitched images don't need flipping
+                                        false,  // isFlippedY - stitched images don't need flipping
                                         finalMetadata.sampleName);
                             } else {
                                 QPProjectFunctions.addImageToProject(
@@ -400,13 +402,15 @@ public class TileProcessingUtilities {
                 try {
                     // Add to project with metadata if available
                     if (finalMetadata != null) {
+                        // Stitched images from microscope don't need flipping - they come with correct orientation
                         QPProjectFunctions.addImageToProjectWithMetadata(
                                 project,
                                 new File(lastProcessedPath),
                                 finalMetadata.parentEntry,
                                 finalMetadata.xOffset,
                                 finalMetadata.yOffset,
-                                finalMetadata.isFlipped,
+                                false,  // isFlippedX - stitched images don't need flipping
+                                false,  // isFlippedY - stitched images don't need flipping
                                 finalMetadata.sampleName);
                     } else {
                         QPProjectFunctions.addImageToProject(

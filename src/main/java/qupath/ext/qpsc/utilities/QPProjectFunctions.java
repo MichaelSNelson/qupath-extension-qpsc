@@ -116,7 +116,8 @@ public class QPProjectFunctions {
                             imageFile,
                             null, // no parent
                             0, 0, // TODO: Calculate actual offsets from slide corner
-                            isSlideFlippedX || isSlideFlippedY,
+                            isSlideFlippedX,
+                            isSlideFlippedY,
                             sampleLabel
                     );
 
@@ -396,7 +397,8 @@ public class QPProjectFunctions {
      * @param parentEntry Optional parent entry for metadata inheritance
      * @param xOffset X offset from slide corner in microns
      * @param yOffset Y offset from slide corner in microns
-     * @param isFlipped Whether the image has been flipped
+     * @param isFlippedX Whether the image has been flipped horizontally
+     * @param isFlippedY Whether the image has been flipped vertically
      * @param sampleName The sample name
      * @return The newly created ProjectImageEntry, or null on failure
      */
@@ -406,7 +408,8 @@ public class QPProjectFunctions {
             ProjectImageEntry<BufferedImage> parentEntry,
             double xOffset,
             double yOffset,
-            boolean isFlipped,
+            boolean isFlippedX,
+            boolean isFlippedY,
             String sampleName) throws IOException {
 
         if (project == null) {
@@ -417,10 +420,10 @@ public class QPProjectFunctions {
         logger.info("Adding image with metadata: {} (parent={}, offset=({},{}), flipped={}, sample={})",
                 imageFile.getName(),
                 parentEntry != null ? parentEntry.getImageName() : "none",
-                xOffset, yOffset, isFlipped, sampleName);
+                xOffset, yOffset, isFlippedX || isFlippedY, sampleName);
 
         // First add the image using existing logic (preserves original method)
-        boolean success = addImageToProject(imageFile, project, false, false);
+        boolean success = addImageToProject(imageFile, project, isFlippedX, isFlippedY);
         if (!success) {
             return null;
         }
@@ -435,7 +438,7 @@ public class QPProjectFunctions {
         if (newEntry != null) {
             // Apply metadata
             ImageMetadataManager.applyImageMetadata(
-                    newEntry, parentEntry, xOffset, yOffset, isFlipped, sampleName
+                    newEntry, parentEntry, xOffset, yOffset, isFlippedX || isFlippedY, sampleName
             );
 
             // Save project

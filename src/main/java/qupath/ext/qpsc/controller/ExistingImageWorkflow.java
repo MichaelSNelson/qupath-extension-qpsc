@@ -554,6 +554,7 @@ public class ExistingImageWorkflow {
         public boolean useExistingSlideAlignment = false;
         public double pixelSize;
         public List<String> selectedAnnotationClasses = Arrays.asList("Tissue", "Scanned Area", "Bounding Box");
+        public java.util.Map<String, Double> angleOverrides; // User-specified angle overrides for modality
 
     }
 }
