@@ -75,7 +75,7 @@ public class StitchingBlockingDialog {
         dialog.setResizable(false);
 
         // Set owner to QuPath main window for proper modality
-        Stage owner = Stage.getWindows().stream()
+        Stage owner = Window.getWindows().stream()
                 .filter(window -> window instanceof Stage && window.isShowing())
                 .map(window -> (Stage) window)
                 .filter(stage -> stage.getTitle() != null && stage.getTitle().contains("QuPath"))
