@@ -23,6 +23,8 @@ import qupath.ext.qpsc.utilities.TransformationFunctions;
 import qupath.fx.dialogs.Dialogs;
 import qupath.lib.gui.QuPathGUI;
 import qupath.lib.objects.PathObject;
+
+import java.util.ArrayList;
 import qupath.lib.objects.classes.PathClass;
 import qupath.lib.projects.Project;
 import qupath.lib.scripting.QP;

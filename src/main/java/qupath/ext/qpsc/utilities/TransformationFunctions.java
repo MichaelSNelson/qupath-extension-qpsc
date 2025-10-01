@@ -173,8 +173,10 @@ public class TransformationFunctions {
             Collection<PathObject> allObjects = sourceHierarchy.getFlattenedObjectList(null);
             List<PathObject> copiedObjects = new ArrayList<>();
             for (PathObject obj : allObjects) {
-                if (obj.getROI() != null) {
-                    copiedObjects.add(obj.duplicate());
+                if (obj.getROI() != null && !obj.isRootObject()) {
+                    // Use PathObjectTools.transformObject with null transform to copy without transformation
+                    PathObject copied = PathObjectTools.transformObject(obj, null, true, true);
+                    copiedObjects.add(copied);
                 }
             }
             destHierarchy.addPathObjects(copiedObjects, false);
