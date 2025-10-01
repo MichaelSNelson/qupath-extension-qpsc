@@ -67,7 +67,17 @@ public class AnnotationAcquisitionDialog {
             });
 
             // Create observable list for selected classes
-            ObservableList<String> selectedClasses = FXCollections.observableArrayList(preselectedClasses);
+            // If no preselected classes, default to selecting any available default classes that have annotations
+            List<String> initialSelection = new ArrayList<>(preselectedClasses);
+            if (initialSelection.isEmpty()) {
+                for (String defaultClass : DEFAULT_CLASSES) {
+                    if (availableClasses.contains(defaultClass)) {
+                        initialSelection.add(defaultClass);
+                        logger.info("Auto-selecting default class with annotations: {}", defaultClass);
+                    }
+                }
+            }
+            ObservableList<String> selectedClasses = FXCollections.observableArrayList(initialSelection);
 
             // Create observable set for all available classes (will be updated dynamically)
             ObservableList<String> allAvailableClasses = FXCollections.observableArrayList(availableClasses);
@@ -227,6 +237,7 @@ public class AnnotationAcquisitionDialog {
 
         // Update content when selected classes change
         selectedClasses.addListener((javafx.collections.ListChangeListener<String>) change -> {
+            logger.debug("Selected classes changed: {}", selectedClasses);
             updateSummaryDisplay(selectedClasses, annotationList, countLabel);
         });
 
@@ -293,9 +304,12 @@ public class AnnotationAcquisitionDialog {
 
             // Update selected classes when checkbox changes
             cb.selectedProperty().addListener((obs, wasSelected, isSelected) -> {
+                logger.debug("Checkbox for '{}' changed: {} -> {}", className, wasSelected, isSelected);
                 if (isSelected && !selectedClasses.contains(className)) {
+                    logger.debug("Adding '{}' to selected classes", className);
                     selectedClasses.add(className);
                 } else if (!isSelected) {
+                    logger.debug("Removing '{}' from selected classes", className);
                     selectedClasses.remove(className);
                 }
             });
