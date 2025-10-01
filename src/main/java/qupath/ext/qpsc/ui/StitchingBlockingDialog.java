@@ -96,18 +96,25 @@ public class StitchingBlockingDialog {
         // Configure close button warning
         Button closeButton = (Button) dialog.getDialogPane().lookupButton(dismissButton);
         closeButton.setOnAction(event -> {
+            logger.info("Dismiss button clicked, isComplete={}", isComplete.get());
             if (!isComplete.get()) {
                 // Always consume the event first to prevent immediate closing
                 event.consume();
+                logger.info("Event consumed, showing dismiss warning");
 
                 // Show warning dialog asynchronously to avoid deadlock
                 showDismissWarningAsync(confirmed -> {
+                    logger.info("Dismiss warning callback received, confirmed={}", confirmed);
                     if (confirmed) {
                         // User confirmed - close the stitching dialog
+                        logger.info("User confirmed dismiss, closing dialog");
                         dialog.close();
+                    } else {
+                        logger.info("User cancelled dismiss, dialog remains open");
                     }
-                    // If not confirmed, do nothing - dialog remains open
                 });
+            } else {
+                logger.info("Stitching complete, allowing dialog to close normally");
             }
         });
         
@@ -216,11 +223,14 @@ public class StitchingBlockingDialog {
         });
 
         // Show asynchronously and handle result via callback
+        logger.info("Showing dismiss warning dialog");
         warning.show();
+        logger.info("Dismiss warning dialog shown (non-blocking)");
 
         // Set up result converter to call callback when dialog closes
         warning.setOnHidden(e -> {
             boolean confirmed = warning.getResult() == ButtonType.YES;
+            logger.info("Dismiss warning dialog closed, result={}", confirmed ? "YES" : "NO");
             callback.accept(confirmed);
         });
     }
@@ -238,6 +248,21 @@ public class StitchingBlockingDialog {
         }
         
         StitchingBlockingDialog blockingDialog = new StitchingBlockingDialog(sampleName);
+
+        // Handle window close request (X button)
+        blockingDialog.dialog.setOnCloseRequest(event -> {
+            logger.info("Window close request (X button), isComplete={}", blockingDialog.isComplete.get());
+            if (!blockingDialog.isComplete.get()) {
+                event.consume();
+                logger.info("Close request consumed, showing warning");
+                blockingDialog.showDismissWarningAsync(confirmed -> {
+                    if (confirmed) {
+                        logger.info("User confirmed close via X button");
+                        blockingDialog.dialog.close();
+                    }
+                });
+            }
+        });
 
         // Show dialog non-blocking (modality will block interface, but not this thread)
         blockingDialog.dialog.show();
@@ -313,12 +338,12 @@ public class StitchingBlockingDialog {
                     dialog.close();
                 }
                 
-                // Show error dialog
+                // Show error dialog (use show() to avoid blocking)
                 Alert errorAlert = new Alert(Alert.AlertType.ERROR);
                 errorAlert.setTitle("Stitching Error");
                 errorAlert.setHeaderText("Stitching operation failed");
                 errorAlert.setContentText("An error occurred during stitching:\n\n" + errorMessage);
-                errorAlert.showAndWait();
+                errorAlert.show();
             }
         });
     }
