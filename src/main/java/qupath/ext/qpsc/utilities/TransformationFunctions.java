@@ -179,8 +179,7 @@ public class TransformationFunctions {
                     copiedObjects.add(copied);
                 }
             }
-            destHierarchy.addPathObjects(copiedObjects, false);
-            destHierarchy.fireHierarchyUpdate();
+            destHierarchy.addObjects(copiedObjects);
             logger.info("Copied {} objects without transformation", copiedObjects.size());
             return;
         }
@@ -225,9 +224,8 @@ public class TransformationFunctions {
 
         // Add all transformed objects to destination hierarchy at once (more efficient)
         if (!transformedObjects.isEmpty()) {
-            destHierarchy.addPathObjects(transformedObjects, false);
+            destHierarchy.addObjects(transformedObjects);
             // Fire hierarchy update to notify listeners and update spatial cache
-            destHierarchy.fireHierarchyUpdate();
         }
 
         logger.info("Successfully transformed {} objects to destination hierarchy", transformedCount);
