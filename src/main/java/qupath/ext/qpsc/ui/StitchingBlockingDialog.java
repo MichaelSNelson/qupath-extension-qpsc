@@ -97,10 +97,17 @@ public class StitchingBlockingDialog {
         Button closeButton = (Button) dialog.getDialogPane().lookupButton(dismissButton);
         closeButton.setOnAction(event -> {
             if (!isComplete.get()) {
-                boolean confirmed = showDismissWarning();
-                if (!confirmed) {
-                    event.consume(); // Prevent dialog from closing
-                }
+                // Always consume the event first to prevent immediate closing
+                event.consume();
+
+                // Show warning dialog asynchronously to avoid deadlock
+                showDismissWarningAsync(confirmed -> {
+                    if (confirmed) {
+                        // User confirmed - close the stitching dialog
+                        dialog.close();
+                    }
+                    // If not confirmed, do nothing - dialog remains open
+                });
             }
         });
         
@@ -165,12 +172,13 @@ public class StitchingBlockingDialog {
     
     /**
      * Shows a warning dialog when user attempts to dismiss the stitching dialog.
-     * 
-     * @return true if user confirms dismissal, false otherwise
+     * Uses non-blocking approach to avoid deadlock with modal parent dialog.
+     *
+     * @param callback Consumer that receives true if user confirms, false otherwise
      */
-    private boolean showDismissWarning() {
+    private void showDismissWarningAsync(java.util.function.Consumer<Boolean> callback) {
         logger.warn("User attempting to dismiss stitching blocking dialog");
-        
+
         Alert warning = new Alert(Alert.AlertType.WARNING);
         warning.setTitle("Dismiss Stitching Dialog");
         warning.setHeaderText("Are you sure you want to dismiss this dialog?");
@@ -186,7 +194,7 @@ public class StitchingBlockingDialog {
         warning.getButtonTypes().setAll(ButtonType.YES, ButtonType.NO);
         warning.setResizable(true);
 
-        // Make the dialog modal and always on top
+        // Make the dialog modal relative to the stitching dialog
         warning.initModality(Modality.APPLICATION_MODAL);
         warning.initOwner(dialog.getOwner());
 
@@ -207,7 +215,14 @@ public class StitchingBlockingDialog {
             }
         });
 
-        return warning.showAndWait().orElse(ButtonType.NO) == ButtonType.YES;
+        // Show asynchronously and handle result via callback
+        warning.show();
+
+        // Set up result converter to call callback when dialog closes
+        warning.setOnHidden(e -> {
+            boolean confirmed = warning.getResult() == ButtonType.YES;
+            callback.accept(confirmed);
+        });
     }
     
     /**
