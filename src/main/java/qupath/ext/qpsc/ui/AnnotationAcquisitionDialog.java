@@ -55,27 +55,16 @@ public class AnnotationAcquisitionDialog {
             ModalityHandler handler = ModalityRegistry.getHandler(modality);
             Optional<ModalityHandler.BoundingBoxUI> modalityUI = handler.createBoundingBoxUI();
             Dialog<AcquisitionResult> dialog = new Dialog<>();
-            dialog.initModality(Modality.NONE); // Non-modal as requested
+            dialog.initModality(Modality.NONE);
             dialog.setTitle("Annotation Acquisition");
             dialog.setHeaderText(null);
-            
-            // Make dialog always on top
-            if (dialog.getDialogPane().getScene() != null) {
-                javafx.stage.Window window = dialog.getDialogPane().getScene().getWindow();
-                if (window instanceof javafx.stage.Stage stage) {
+
+            // Set always-on-top to keep dialog visible during annotation editing
+            dialog.getDialogPane().sceneProperty().addListener((obs, oldScene, newScene) -> {
+                if (newScene != null && newScene.getWindow() instanceof javafx.stage.Stage stage) {
                     stage.setAlwaysOnTop(true);
                 }
-            } else {
-                // Set up listener for when scene is available
-                dialog.getDialogPane().sceneProperty().addListener((obs, oldScene, newScene) -> {
-                    if (newScene != null) {
-                        javafx.stage.Window window = newScene.getWindow();
-                        if (window instanceof javafx.stage.Stage stage) {
-                            stage.setAlwaysOnTop(true);
-                        }
-                    }
-                });
-            }
+            });
 
             // Create observable list for selected classes
             ObservableList<String> selectedClasses = FXCollections.observableArrayList(preselectedClasses);
@@ -190,10 +179,18 @@ public class AnnotationAcquisitionDialog {
             // Set initial focus to summary tab
             Platform.runLater(() -> tabPane.getSelectionModel().select(summaryTab));
 
-            dialog.showAndWait().ifPresentOrElse(
-                    result -> future.complete(result),
-                    () -> future.complete(new AcquisitionResult(Collections.emptyList(), false))
-            );
+            // Use show() instead of showAndWait() to prevent blocking the JavaFX thread
+            // This allows the hierarchy listener to function properly when user edits annotations
+            dialog.setOnCloseRequest(e -> {
+                AcquisitionResult result = dialog.getResult();
+                if (result != null) {
+                    future.complete(result);
+                } else {
+                    future.complete(new AcquisitionResult(Collections.emptyList(), false));
+                }
+            });
+
+            dialog.show();
         });
 
         return future;
