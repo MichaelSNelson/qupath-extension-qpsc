@@ -118,7 +118,8 @@ public class QPProjectFunctions {
                             0, 0, // TODO: Calculate actual offsets from slide corner
                             isSlideFlippedX,
                             isSlideFlippedY,
-                            sampleLabel
+                            sampleLabel,
+                            null  // no modality handler available in this context
                     );
 
                     if (matchingImage != null) {
