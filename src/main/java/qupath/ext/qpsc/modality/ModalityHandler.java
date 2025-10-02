@@ -161,15 +161,45 @@ public interface ModalityHandler {
     }
 
     /**
+     * Returns the preferred QuPath ImageType for images acquired with this modality.
+     *
+     * <p>This method allows modalities to specify how QuPath should classify images from this
+     * acquisition mode. The ImageType affects how QuPath handles color deconvolution, cell detection,
+     * and other analysis operations.</p>
+     *
+     * <p>The default implementation returns {@code Optional.empty()}, indicating that QuPath should
+     * auto-detect the image type based on the image characteristics. Modalities that require a
+     * specific image type (e.g., polarized light microscopy should use BRIGHTFIELD_H_E) should
+     * override this method to return the appropriate type.</p>
+     *
+     * <p>Common use cases:</p>
+     * <ul>
+     *   <li><strong>PPM/Brightfield:</strong> Return BRIGHTFIELD_H_E to ensure proper color handling</li>
+     *   <li><strong>Fluorescence:</strong> Return FLUORESCENCE for multi-channel fluorescence imaging</li>
+     *   <li><strong>Custom modalities:</strong> Return OTHER for non-standard imaging modes</li>
+     * </ul>
+     *
+     * @return an {@code Optional} containing the preferred {@code ImageData.ImageType}, or
+     *         {@code Optional.empty()} to use QuPath's automatic detection
+     * @implNote Override this method if your modality has specific requirements for how images
+     *           should be classified. This is particularly important for modalities like polarized
+     *           light microscopy where auto-detection may incorrectly classify images as fluorescence
+     * @see qupath.lib.images.ImageData.ImageType
+     */
+    default Optional<qupath.lib.images.ImageData.ImageType> getImageType() {
+        return Optional.empty();
+    }
+
+    /**
      * Generates a filename-safe suffix string for the specified rotation angle.
-     * 
-     * <p>This method creates human-readable suffixes used in image filenames to distinguish 
-     * acquisitions at different rotation angles. The suffix is appended to base filenames 
-     * during the acquisition process to create unique identifiers for each angle in a 
+     *
+     * <p>This method creates human-readable suffixes used in image filenames to distinguish
+     * acquisitions at different rotation angles. The suffix is appended to base filenames
+     * during the acquisition process to create unique identifiers for each angle in a
      * multi-angle sequence.</p>
-     * 
-     * <p>The default implementation simply converts the angle to a string representation, 
-     * but modalities may override this to provide more intuitive naming conventions. 
+     *
+     * <p>The default implementation simply converts the angle to a string representation,
+     * but modalities may override this to provide more intuitive naming conventions.
      * Common patterns include:</p>
      * <ul>
      *   <li><strong>Sign prefixes:</strong> "p45" for +45°, "m45" for -45°</li>
@@ -177,17 +207,17 @@ public interface ModalityHandler {
      *   <li><strong>Ordinal naming:</strong> "angle1", "angle2" for sequence position</li>
      *   <li><strong>Descriptive names:</strong> "parallel", "perpendicular" for specific angles</li>
      * </ul>
-     * 
-     * <p><strong>Filename Safety:</strong> The returned string must be safe for use in filenames 
-     * across different operating systems. Avoid characters like {@code / \ : * ? " < > |} and 
+     *
+     * <p><strong>Filename Safety:</strong> The returned string must be safe for use in filenames
+     * across different operating systems. Avoid characters like {@code / \ : * ? " < > |} and
      * consider length limitations for very long angle sequences.</p>
-     * 
+     *
      * @param angle the rotation angle value in the same units used by {@link AngleExposure#ticks()}.
      *              Typically represents physical rotation in degrees or encoder ticks
      * @return a filename-safe string suffix representing the angle. Must not be null or empty.
      *         Should be unique within the angle set to avoid filename collisions
-     * @implNote Keep suffixes concise but descriptive. Consider the total filename length when 
-     *           combined with base names and extensions. Use consistent formatting across all 
+     * @implNote Keep suffixes concise but descriptive. Consider the total filename length when
+     *           combined with base names and extensions. Use consistent formatting across all
      *           angles in a modality
      * @see AngleExposure#ticks()
      */

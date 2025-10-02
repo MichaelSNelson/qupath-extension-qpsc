@@ -216,7 +216,8 @@ public class ProjectHelper {
                                 new File(imagePath),
                                 gui.getProject(),
                                 flippedX,
-                                flippedY
+                                flippedY,
+                                null  // No modality info available here - use auto-detection
                         );
 
                         gui.refreshProject();

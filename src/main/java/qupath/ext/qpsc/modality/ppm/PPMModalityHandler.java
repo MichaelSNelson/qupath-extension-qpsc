@@ -3,10 +3,12 @@ package qupath.ext.qpsc.modality.ppm;
 import qupath.ext.qpsc.modality.AngleExposure;
 import qupath.ext.qpsc.modality.ModalityHandler;
 import qupath.ext.qpsc.modality.ppm.ui.PPMBoundingBoxUI;
+import qupath.lib.images.ImageData;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -58,12 +60,27 @@ public class PPMModalityHandler implements ModalityHandler {
     }
 
     /**
+     * Returns BRIGHTFIELD_H_E as the preferred image type for PPM acquisitions.
+     *
+     * <p>PPM images are brightfield images captured at different polarization angles.
+     * While QuPath's auto-detection might incorrectly classify them as fluorescence
+     * (especially for images with dark backgrounds), PPM images should always be
+     * treated as brightfield H&E for proper color handling and analysis.</p>
+     *
+     * @return BRIGHTFIELD_H_E image type for all PPM acquisitions
+     */
+    @Override
+    public Optional<ImageData.ImageType> getImageType() {
+        return Optional.of(ImageData.ImageType.BRIGHTFIELD_H_E);
+    }
+
+    /**
      * Creates the PPM-specific UI component for angle parameter customization.
-     * 
+     *
      * <p>Returns a {@link PPMBoundingBoxUI} that allows users to override the default
      * plus and minus angles while preserving the original exposure times. This enables
      * fine-tuning of polarization angles for different sample types.</p>
-     * 
+     *
      * @return a PPM bounding box UI component for angle override controls
      */
     @Override

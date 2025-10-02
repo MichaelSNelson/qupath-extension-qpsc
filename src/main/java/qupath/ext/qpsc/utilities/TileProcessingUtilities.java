@@ -246,13 +246,15 @@ public class TileProcessingUtilities {
                                         finalMetadata.yOffset,
                                         false,  // isFlippedX - stitched images don't need flipping
                                         false,  // isFlippedY - stitched images don't need flipping
-                                        finalMetadata.sampleName);
+                                        finalMetadata.sampleName,
+                                        modalityHandler);
                             } else {
                                 QPProjectFunctions.addImageToProject(
                                         new File(pathToImport),
                                         project,
                                         false,
-                                        false);
+                                        false,
+                                        modalityHandler);
                             }
 
                             logger.info("Successfully imported {} to project", new File(pathToImport).getName());
@@ -425,13 +427,15 @@ public class TileProcessingUtilities {
                                 finalMetadata.yOffset,
                                 false,  // isFlippedX - stitched images don't need flipping
                                 false,  // isFlippedY - stitched images don't need flipping
-                                finalMetadata.sampleName);
+                                finalMetadata.sampleName,
+                                modalityHandler);
                     } else {
                         QPProjectFunctions.addImageToProject(
                                 new File(lastProcessedPath),
                                 project,
                                 false,
-                                false);
+                                false,
+                                modalityHandler);
                     }
 
                     logger.info("Successfully added image to project");

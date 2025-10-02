@@ -420,7 +420,8 @@ public class MicroscopeAlignmentWorkflow {
                             new File(imagePath),
                             project,
                             flipX,
-                            flipY
+                            flipY,
+                            null  // No modality info in alignment workflow - use auto-detection
                     );
 
                     gui.refreshProject();

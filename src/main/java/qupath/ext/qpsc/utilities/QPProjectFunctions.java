@@ -400,6 +400,7 @@ public class QPProjectFunctions {
      * @param isFlippedX Whether the image has been flipped horizontally
      * @param isFlippedY Whether the image has been flipped vertically
      * @param sampleName The sample name
+     * @param modalityHandler Optional modality handler for determining image type
      * @return The newly created ProjectImageEntry, or null on failure
      */
     public static ProjectImageEntry<BufferedImage> addImageToProjectWithMetadata(
@@ -410,20 +411,22 @@ public class QPProjectFunctions {
             double yOffset,
             boolean isFlippedX,
             boolean isFlippedY,
-            String sampleName) throws IOException {
+            String sampleName,
+            qupath.ext.qpsc.modality.ModalityHandler modalityHandler) throws IOException {
 
         if (project == null) {
             logger.error("Cannot add image: project is null");
             return null;
         }
 
-        logger.info("Adding image with metadata: {} (parent={}, offset=({},{}), flipped={}, sample={})",
+        logger.info("Adding image with metadata: {} (parent={}, offset=({},{}), flipped={}, sample={}, modality={})",
                 imageFile.getName(),
                 parentEntry != null ? parentEntry.getImageName() : "none",
-                xOffset, yOffset, isFlippedX || isFlippedY, sampleName);
+                xOffset, yOffset, isFlippedX || isFlippedY, sampleName,
+                modalityHandler != null ? modalityHandler.getClass().getSimpleName() : "auto-detect");
 
         // First add the image using existing logic (preserves original method)
-        boolean success = addImageToProject(imageFile, project, isFlippedX, isFlippedY);
+        boolean success = addImageToProject(imageFile, project, isFlippedX, isFlippedY, modalityHandler);
         if (!success) {
             return null;
         }
@@ -587,11 +590,22 @@ public class QPProjectFunctions {
     private static ImageData.ImageType determineImageType(
             File imageFile,
             ImageServer<BufferedImage> server,
-            ImageData<BufferedImage> imageData) {
+            ImageData<BufferedImage> imageData,
+            qupath.ext.qpsc.modality.ModalityHandler modalityHandler) {
 
         String fileName = imageFile.getName().toLowerCase();
 
-        // Check if this is a PPM or BF modality based on the filename
+        // First check if modality handler specifies a preferred image type
+        if (modalityHandler != null) {
+            java.util.Optional<ImageData.ImageType> modalityType = modalityHandler.getImageType();
+            if (modalityType.isPresent()) {
+                logger.info("Using modality-specified image type {} for: {} (modality={})",
+                        modalityType.get(), fileName, modalityHandler.getClass().getSimpleName());
+                return modalityType.get();
+            }
+        }
+
+        // Fallback: Check if this is a PPM or BF modality based on the filename
         // PPM files typically contain "ppm" in the name
         // BF (brightfield) files typically contain "bf" or "90" (90 degree angle)
         if (fileName.contains("ppm") ||
@@ -651,7 +665,8 @@ public class QPProjectFunctions {
             File imageFile,
             Project<BufferedImage> project,
             boolean isSlideFlippedX,
-            boolean isSlideFlippedY) throws IOException {
+            boolean isSlideFlippedY,
+            qupath.ext.qpsc.modality.ModalityHandler modalityHandler) throws IOException {
 
         // Validate project parameter
         if (project == null) {
@@ -679,7 +694,7 @@ public class QPProjectFunctions {
             ImageData<BufferedImage> imageData = entry.readImageData();
 
             // Determine and set the image type using our unified method
-            var imageType = determineImageType(imageFile, server, imageData);
+            var imageType = determineImageType(imageFile, server, imageData, modalityHandler);
             imageData.setImageType(imageType);
 
             // Set a user-friendly name for the image in the project
