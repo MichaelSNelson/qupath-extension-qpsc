@@ -152,10 +152,11 @@ public class StitchingHelper {
         );
 
         // Create blocking dialog on JavaFX thread before starting stitching
+        final String operationId = sample.sampleName() + " - " + annotation.getName();
         final StitchingBlockingDialog[] dialogRef = {null};
         try {
             Platform.runLater(() -> {
-                dialogRef[0] = StitchingBlockingDialog.show(sample.sampleName() + " - " + annotation.getName());
+                dialogRef[0] = StitchingBlockingDialog.show(operationId);
             });
             // Wait briefly for dialog creation
             Thread.sleep(100);
@@ -172,9 +173,9 @@ public class StitchingHelper {
             return CompletableFuture.runAsync(() -> {
                 try {
                     String annotationName = annotation.getName();
-                    
+
                     if (blockingDialog != null) {
-                        blockingDialog.updateStatus("Initializing multi-angle stitching for " + annotationName + "...");
+                        blockingDialog.updateStatus(operationId, "Initializing multi-angle stitching for " + annotationName + "...");
                     }
 
                     logger.info("Performing batch stitching for {} with {} angles",
@@ -191,9 +192,9 @@ public class StitchingHelper {
                     // Create enhanced parameters map for UtilityFunctions
                     Map<String, Object> stitchParams = new HashMap<>();
                     stitchParams.put("metadata", metadata);
-                    
+
                     if (blockingDialog != null) {
-                        blockingDialog.updateStatus("Processing " + angleExposures.size() + " angles for " + annotationName + "...");
+                        blockingDialog.updateStatus(operationId, "Processing " + angleExposures.size() + " angles for " + annotationName + "...");
                     }
 
                     // Process each angle individually using directory isolation to prevent cross-matching
@@ -223,9 +224,9 @@ public class StitchingHelper {
                         AngleExposure angleExposure = angleExposures.get(i);
                         String angleStr = String.valueOf(angleExposure.ticks());
                         logger.info("Processing angle {} of {} - angle directory: {}", i + 1, angleExposures.size(), angleStr);
-                        
+
                         if (blockingDialog != null) {
-                            blockingDialog.updateStatus("Processing angle " + angleStr + " (" + (i + 1) + "/" + angleExposures.size() + ") for " + annotationName + "...");
+                            blockingDialog.updateStatus(operationId, "Processing angle " + angleStr + " (" + (i + 1) + "/" + angleExposures.size() + ") for " + annotationName + "...");
                         }
                         
                         try {
@@ -265,7 +266,7 @@ public class StitchingHelper {
                     
                     // Process birefringence image if it exists
                     if (blockingDialog != null) {
-                        blockingDialog.updateStatus("Checking for birefringence results for " + annotationName + "...");
+                        blockingDialog.updateStatus(operationId, "Checking for birefringence results for " + annotationName + "...");
                     }
 
                     // Scan for any birefringence directory (ends with .biref)
@@ -302,9 +303,9 @@ public class StitchingHelper {
                         } catch (IOException e) {
                             logger.warn("Could not list birefringence directory contents: {}", e.getMessage());
                         }
-                        
+
                         if (blockingDialog != null) {
-                            blockingDialog.updateStatus("Processing birefringence image for " + annotationName + "...");
+                            blockingDialog.updateStatus(operationId, "Processing birefringence image for " + annotationName + "...");
                         }
                         
                         try {
@@ -344,7 +345,7 @@ public class StitchingHelper {
 
                     // Process sum image if it exists
                     if (blockingDialog != null) {
-                        blockingDialog.updateStatus("Checking for sum results for " + annotationName + "...");
+                        blockingDialog.updateStatus(operationId, "Checking for sum results for " + annotationName + "...");
                     }
 
                     // Scan for any sum directory (ends with .sum)
@@ -383,7 +384,7 @@ public class StitchingHelper {
                         }
 
                         if (blockingDialog != null) {
-                            blockingDialog.updateStatus("Processing sum image for " + annotationName + "...");
+                            blockingDialog.updateStatus(operationId, "Processing sum image for " + annotationName + "...");
                         }
 
                         try {
@@ -440,9 +441,9 @@ public class StitchingHelper {
             return CompletableFuture.runAsync(() -> {
                 try {
                     String annotationName = annotation.getName();
-                    
+
                     if (blockingDialog != null) {
-                        blockingDialog.updateStatus("Initializing single stitching for " + annotationName + "...");
+                        blockingDialog.updateStatus(operationId, "Initializing single stitching for " + annotationName + "...");
                     }
 
                     logger.info("Stitching single acquisition for {}", annotationName);
@@ -456,9 +457,9 @@ public class StitchingHelper {
                     // Create enhanced parameters map
                     Map<String, Object> stitchParams = new HashMap<>();
                     stitchParams.put("metadata", metadata);
-                    
+
                     if (blockingDialog != null) {
-                        blockingDialog.updateStatus("Processing single acquisition for " + annotationName + "...");
+                        blockingDialog.updateStatus(operationId, "Processing single acquisition for " + annotationName + "...");
                     }
 
                     // Check if we have exactly one angle (tiles are in angle subfolder)
@@ -544,10 +545,11 @@ public class StitchingHelper {
         );
 
         // Create blocking dialog on JavaFX thread before starting stitching
+        final String operationId = sample.sampleName() + " - " + regionName;
         final StitchingBlockingDialog[] dialogRef = {null};
         try {
             Platform.runLater(() -> {
-                dialogRef[0] = StitchingBlockingDialog.show(sample.sampleName() + " - " + regionName);
+                dialogRef[0] = StitchingBlockingDialog.show(operationId);
             });
             // Wait briefly for dialog creation
             Thread.sleep(100);
@@ -563,7 +565,7 @@ public class StitchingHelper {
             return CompletableFuture.runAsync(() -> {
                 try {
                     if (blockingDialog != null) {
-                        blockingDialog.updateStatus("Initializing multi-angle stitching for " + regionName + "...");
+                        blockingDialog.updateStatus(operationId, "Initializing multi-angle stitching for " + regionName + "...");
                     }
 
                     logger.info("Performing batch stitching for {} with {} angles",
@@ -580,9 +582,9 @@ public class StitchingHelper {
                     // Create enhanced parameters map for UtilityFunctions
                     Map<String, Object> stitchParams = new HashMap<>();
                     stitchParams.put("metadata", metadata);
-                    
+
                     if (blockingDialog != null) {
-                        blockingDialog.updateStatus("Processing " + angleExposures.size() + " angles for " + regionName + "...");
+                        blockingDialog.updateStatus(operationId, "Processing " + angleExposures.size() + " angles for " + regionName + "...");
                     }
 
                     // Process each angle individually using directory isolation to prevent cross-matching
@@ -612,9 +614,9 @@ public class StitchingHelper {
                         AngleExposure angleExposure = angleExposures.get(i);
                         String angleStr = String.valueOf(angleExposure.ticks());
                         logger.info("Processing angle {} of {} - angle directory: {}", i + 1, angleExposures.size(), angleStr);
-                        
+
                         if (blockingDialog != null) {
-                            blockingDialog.updateStatus("Processing angle " + angleStr + " (" + (i + 1) + "/" + angleExposures.size() + ") for " + regionName + "...");
+                            blockingDialog.updateStatus(operationId, "Processing angle " + angleStr + " (" + (i + 1) + "/" + angleExposures.size() + ") for " + regionName + "...");
                         }
                         
                         try {
@@ -651,10 +653,10 @@ public class StitchingHelper {
                     }
                     
                     logger.info("Completed processing {} angles. Successfully stitched {} images.", angleExposures.size(), stitchedImages.size());
-                    
+
                     // Process birefringence image if it exists
                     if (blockingDialog != null) {
-                        blockingDialog.updateStatus("Checking for birefringence results for " + regionName + "...");
+                        blockingDialog.updateStatus(operationId, "Checking for birefringence results for " + regionName + "...");
                     }
 
                     // Scan for any birefringence directory (ends with .biref)
@@ -691,9 +693,9 @@ public class StitchingHelper {
                         } catch (IOException e) {
                             logger.warn("Could not list birefringence directory contents: {}", e.getMessage());
                         }
-                        
+
                         if (blockingDialog != null) {
-                            blockingDialog.updateStatus("Processing birefringence image for " + regionName + "...");
+                            blockingDialog.updateStatus(operationId, "Processing birefringence image for " + regionName + "...");
                         }
                         
                         try {
@@ -733,7 +735,7 @@ public class StitchingHelper {
 
                     // Process sum image if it exists
                     if (blockingDialog != null) {
-                        blockingDialog.updateStatus("Checking for sum results for " + regionName + "...");
+                        blockingDialog.updateStatus(operationId, "Checking for sum results for " + regionName + "...");
                     }
 
                     // Scan for any sum directory (ends with .sum)
@@ -772,7 +774,7 @@ public class StitchingHelper {
                         }
 
                         if (blockingDialog != null) {
-                            blockingDialog.updateStatus("Processing sum image for " + regionName + "...");
+                            blockingDialog.updateStatus(operationId, "Processing sum image for " + regionName + "...");
                         }
 
                         try {
@@ -803,14 +805,14 @@ public class StitchingHelper {
                             regionName, outPath);
 
                     if (blockingDialog != null) {
-                        blockingDialog.updateStatus("Stitching completed for " + regionName);
+                        blockingDialog.updateStatus(operationId, "Stitching completed for " + regionName);
                         blockingDialog.close();
                     }
 
                 } catch (Exception e) {
                     logger.error("Multi-angle stitching failed for region {}", regionName, e);
                     if (blockingDialog != null) {
-                        blockingDialog.updateStatus("Stitching failed: " + e.getMessage());
+                        blockingDialog.updateStatus(operationId, "Stitching failed: " + e.getMessage());
                         blockingDialog.close();
                     }
                     throw new RuntimeException(e);
@@ -824,7 +826,7 @@ public class StitchingHelper {
             return CompletableFuture.runAsync(() -> {
                 try {
                     if (blockingDialog != null) {
-                        blockingDialog.updateStatus("Stitching " + regionName + "...");
+                        blockingDialog.updateStatus(operationId, "Stitching " + regionName + "...");
                     }
 
                     logger.info("Metadata - offset: ({}, {}) µm, flipped: {}, parent: {}",
@@ -862,14 +864,14 @@ public class StitchingHelper {
                             regionName, outPath);
 
                     if (blockingDialog != null) {
-                        blockingDialog.updateStatus("Stitching completed for " + regionName);
+                        blockingDialog.updateStatus(operationId, "Stitching completed for " + regionName);
                         blockingDialog.close();
                     }
 
                 } catch (Exception e) {
                     logger.error("Single-angle stitching failed for region {}", regionName, e);
                     if (blockingDialog != null) {
-                        blockingDialog.updateStatus("Stitching failed: " + e.getMessage());
+                        blockingDialog.updateStatus(operationId, "Stitching failed: " + e.getMessage());
                         blockingDialog.close();
                     }
                     throw new RuntimeException(e);
