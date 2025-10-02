@@ -701,10 +701,11 @@ public class QPProjectFunctions {
             // Set a user-friendly name for the image in the project
             entry.setImageName(imageFile.getName());
 
+            // Save the image data to persist the image type setting
+            entry.saveImageData(imageData);
+
             // Sync changes
             project.syncChanges();
-            // Note: Avoid calling saveImageData here to prevent save dialogs
-            // The image data will be automatically saved when needed
 
             logger.info("Successfully added image to project with all associated images");
             return true;
@@ -757,10 +758,11 @@ public class QPProjectFunctions {
 
         entry.setImageName(imageFile.getName());
 
+        // Save the image data to persist the image type setting
+        entry.saveImageData(imageData);
+
         // Save the changes
         project.syncChanges();
-        // Note: Avoid calling saveImageData here to prevent save dialogs
-        // The image data will be automatically saved when needed
 
         logger.info("Successfully added flipped image to project (associated images not preserved)");
         return true;
