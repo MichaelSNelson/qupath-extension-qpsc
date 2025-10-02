@@ -215,8 +215,7 @@ public class ExistingImageWorkflow {
                                             // Save image data immediately after loading to prevent save prompts
                                             try {
                                                 ImageData<BufferedImage> currentData = gui.getImageData();
-                                                ProjectImageEntry<BufferedImage> currentEntry =
-                                                    gui.getProject().getEntry(currentData);
+                                                //currentEntry = gui.getProject().getEntry(currentData);
                                                 if (currentData != null && currentEntry != null) {
                                                     currentEntry.saveImageData(currentData);
                                                     logger.info("Saved flipped image data after loading to prevent save prompts");
