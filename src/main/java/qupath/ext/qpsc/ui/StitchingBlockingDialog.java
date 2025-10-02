@@ -14,7 +14,9 @@ import javafx.util.Duration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -53,26 +55,29 @@ import java.util.concurrent.atomic.AtomicReference;
  * </pre>
  */
 public class StitchingBlockingDialog {
-    
+
     private static final Logger logger = LoggerFactory.getLogger(StitchingBlockingDialog.class);
-    
+
+    // Singleton instance for managing all concurrent stitching operations
+    private static StitchingBlockingDialog instance = null;
+    private static final Object instanceLock = new Object();
+
     private final Dialog<Void> dialog = new Dialog<>();
-    private final Label statusLabel = new Label();
+    private final ListView<String> statusListView = new ListView<>();
+    private final Label countLabel = new Label();
     private final ProgressIndicator progressIndicator = new ProgressIndicator();
+
+    // Track active stitching operations by ID
+    private final Map<String, String> activeOperations = new ConcurrentHashMap<>();
     private final AtomicBoolean isComplete = new AtomicBoolean(false);
     
     /**
-     * Private constructor - use static show() method to create instances.
-     * 
-     * @param sampleName The name of the sample being stitched
+     * Private constructor - use static show() method to access singleton instance.
      */
-    private StitchingBlockingDialog(String sampleName) {
-        // Initialize status label text
-        statusLabel.setText("Please wait while " + sampleName + " is being stitched.");
-        
+    private StitchingBlockingDialog() {
         // Configure dialog properties
         dialog.setTitle("Stitching in Progress");
-        dialog.setHeaderText("Processing " + sampleName);
+        dialog.setHeaderText("Processing stitching operations...");
         dialog.initModality(Modality.APPLICATION_MODAL);
         dialog.setResizable(false);
 
@@ -88,7 +93,7 @@ public class StitchingBlockingDialog {
         }
         
         // Create content
-        VBox content = createDialogContent(sampleName);
+        VBox content = createDialogContent();
         dialog.getDialogPane().setContent(content);
         
         // Add buttons
@@ -123,60 +128,86 @@ public class StitchingBlockingDialog {
         // Set default button to minimize accidental dismissal
         closeButton.setDefaultButton(false);
         closeButton.setCancelButton(true);
-        
-        logger.info("Created stitching blocking dialog for sample: {}", sampleName);
+
+        logger.info("Created stitching blocking dialog singleton");
     }
     
     /**
-     * Creates the main content for the dialog.
-     * 
-     * @param sampleName The sample being processed
+     * Creates the main content for the dialog showing all active stitching operations.
+     *
      * @return VBox containing the dialog content
      */
-    private VBox createDialogContent(String sampleName) {
+    private VBox createDialogContent() {
         VBox content = new VBox(15);
         content.setPadding(new Insets(20));
         content.setAlignment(Pos.CENTER);
-        content.setPrefWidth(400);
-        
+        content.setPrefWidth(450);
+
         // Main message
-        Label mainMessage = new Label("Stitching operation in progress...");
+        Label mainMessage = new Label("Stitching operations in progress...");
         mainMessage.setStyle("-fx-font-size: 14px; -fx-font-weight: bold;");
-        
-        // Progress indicator (already initialized)
+
+        // Progress indicator
         progressIndicator.setPrefSize(60, 60);
-        
-        // Status label (already initialized)
-        statusLabel.setWrapText(true);
-        statusLabel.setMaxWidth(350);
-        statusLabel.setStyle("-fx-text-alignment: center;");
-        
+
+        // Count label
+        countLabel.setStyle("-fx-font-size: 12px; -fx-font-weight: bold;");
+        updateCountLabel();
+
+        // Status list view showing all active operations
+        statusListView.setPrefHeight(150);
+        statusListView.setStyle("-fx-font-size: 11px;");
+
         // Warning message
         Label warningMessage = new Label(
                 "⚠️ WARNING: Interacting with QuPath during stitching may cause errors or crashes. " +
                 "Please wait for stitching to complete.");
         warningMessage.setWrapText(true);
-        warningMessage.setMaxWidth(350);
+        warningMessage.setMaxWidth(400);
         warningMessage.setStyle("-fx-text-fill: orange; -fx-font-style: italic; -fx-text-alignment: center;");
-        
+
         // Instructions
         Label instructions = new Label(
-                "This dialog will close automatically when stitching is complete. " +
+                "This dialog will close automatically when all stitching operations complete. " +
                 "You may dismiss it at your own risk if necessary.");
         instructions.setWrapText(true);
-        instructions.setMaxWidth(350);
+        instructions.setMaxWidth(400);
         instructions.setStyle("-fx-text-fill: gray; -fx-font-size: 11px; -fx-text-alignment: center;");
-        
+
         content.getChildren().addAll(
                 mainMessage,
                 progressIndicator,
-                statusLabel,
+                countLabel,
+                statusListView,
                 new Separator(),
                 warningMessage,
                 instructions
         );
-        
+
         return content;
+    }
+
+    /**
+     * Updates the count label with the current number of active operations.
+     */
+    private void updateCountLabel() {
+        int count = activeOperations.size();
+        if (count == 1) {
+            countLabel.setText("1 operation in progress");
+        } else {
+            countLabel.setText(count + " operations in progress");
+        }
+    }
+
+    /**
+     * Updates the status list view with current operations.
+     */
+    private void updateStatusList() {
+        Platform.runLater(() -> {
+            statusListView.getItems().clear();
+            activeOperations.values().forEach(status -> statusListView.getItems().add("• " + status));
+            updateCountLabel();
+        });
     }
     
     /**
@@ -280,116 +311,201 @@ public class StitchingBlockingDialog {
     }
     
     /**
-     * Shows the stitching blocking dialog for the specified sample.
+     * Registers a new stitching operation and shows/updates the singleton dialog.
      * This method should be called on the JavaFX Application Thread.
-     * 
-     * @param sampleName The name of the sample being stitched
-     * @return StitchingBlockingDialog instance for controlling the dialog
+     *
+     * @param operationId Unique identifier for this stitching operation
+     * @param displayName Display name for this operation (e.g., "Sample123 - Tissue_1")
+     * @return Singleton StitchingBlockingDialog instance for controlling the operation
      */
-    public static StitchingBlockingDialog show(String sampleName) {
+    public static StitchingBlockingDialog show(String operationId, String displayName) {
         if (!Platform.isFxApplicationThread()) {
             throw new IllegalStateException("StitchingBlockingDialog.show() must be called on JavaFX Application Thread");
         }
-        
-        StitchingBlockingDialog blockingDialog = new StitchingBlockingDialog(sampleName);
 
-        // Handle window close request (X button)
-        blockingDialog.dialog.setOnCloseRequest(event -> {
-            logger.info("Window close request (X button), isComplete={}", blockingDialog.isComplete.get());
-            if (!blockingDialog.isComplete.get()) {
-                event.consume();
-                logger.info("Close request consumed, showing warning");
-                blockingDialog.showDismissWarningAsync(confirmed -> {
-                    if (confirmed) {
-                        logger.info("User confirmed close via X button");
-                        blockingDialog.dialog.close();
+        synchronized (instanceLock) {
+            // Create singleton instance if it doesn't exist
+            if (instance == null) {
+                instance = new StitchingBlockingDialog();
+
+                // Handle window close request (X button)
+                instance.dialog.setOnCloseRequest(event -> {
+                    logger.info("Window close request (X button), isComplete={}", instance.isComplete.get());
+                    if (!instance.isComplete.get()) {
+                        event.consume();
+                        logger.info("Close request consumed, showing warning");
+                        instance.showDismissWarningAsync(confirmed -> {
+                            if (confirmed) {
+                                logger.info("User confirmed close via X button");
+                                instance.forceClose();
+                            }
+                        });
                     }
                 });
-            }
-        });
 
-        // Show dialog non-blocking (modality will block interface, but not this thread)
-        blockingDialog.dialog.show();
+                // Show dialog non-blocking (modality will block interface, but not this thread)
+                instance.dialog.show();
 
-        // Ensure dialog is always on top and stays visible
-        Platform.runLater(() -> {
-            if (blockingDialog.dialog.getDialogPane().getScene() != null &&
-                blockingDialog.dialog.getDialogPane().getScene().getWindow() instanceof Stage stage) {
-                stage.setAlwaysOnTop(true);
-                stage.toFront();
-                stage.requestFocus();
-
-                // Add a periodic timer to keep dialog on top during stitching
-                Timeline keepOnTop = new Timeline(new KeyFrame(Duration.seconds(2), e -> {
-                    if (!blockingDialog.isComplete.get() && stage.isShowing()) {
+                // Ensure dialog is always on top and stays visible
+                Platform.runLater(() -> {
+                    if (instance.dialog.getDialogPane().getScene() != null &&
+                        instance.dialog.getDialogPane().getScene().getWindow() instanceof Stage stage) {
+                        stage.setAlwaysOnTop(true);
                         stage.toFront();
-                        stage.setAlwaysOnTop(true); // Re-apply in case it was lost
+                        stage.requestFocus();
+
+                        // Add a periodic timer to keep dialog on top during stitching
+                        Timeline keepOnTop = new Timeline(new KeyFrame(Duration.seconds(2), e -> {
+                            if (!instance.isComplete.get() && stage.isShowing()) {
+                                stage.toFront();
+                                stage.setAlwaysOnTop(true); // Re-apply in case it was lost
+                            }
+                        }));
+                        keepOnTop.setCycleCount(Timeline.INDEFINITE);
+                        keepOnTop.play();
+
+                        // Stop the timer when dialog closes
+                        stage.setOnHiding(e -> keepOnTop.stop());
                     }
-                }));
-                keepOnTop.setCycleCount(Timeline.INDEFINITE);
-                keepOnTop.play();
+                });
 
-                // Stop the timer when dialog closes
-                stage.setOnHiding(e -> keepOnTop.stop());
+                logger.info("Created and showing stitching blocking dialog");
             }
-        });
 
-        logger.info("Showing stitching blocking dialog for sample: {}", sampleName);
-        return blockingDialog;
+            // Add this operation to tracking
+            instance.activeOperations.put(operationId, displayName);
+            instance.updateStatusList();
+            logger.info("Registered stitching operation: {} ({})", operationId, displayName);
+
+            return instance;
+        }
+    }
+
+    /**
+     * Convenience method for backward compatibility - uses operationId as displayName.
+     */
+    public static StitchingBlockingDialog show(String sampleName) {
+        return show(sampleName, sampleName);
     }
     
     /**
-     * Updates the status message displayed in the dialog.
+     * Updates the status message for a specific operation.
      * This method is thread-safe and can be called from any thread.
-     * 
+     *
+     * @param operationId The ID of the operation to update
      * @param status The new status message
      */
-    public void updateStatus(String status) {
-        Platform.runLater(() -> {
-            if (statusLabel != null && !isComplete.get()) {
-                statusLabel.setText(status);
-                logger.debug("Updated stitching dialog status: {}", status);
-            }
-        });
+    public void updateStatus(String operationId, String status) {
+        if (activeOperations.containsKey(operationId)) {
+            activeOperations.put(operationId, status);
+            updateStatusList();
+            logger.debug("Updated stitching status for {}: {}", operationId, status);
+        }
     }
-    
+
     /**
-     * Closes the dialog indicating successful completion.
+     * Marks an operation as complete and removes it from tracking.
+     * Closes the dialog if no operations remain.
      * This method is thread-safe and can be called from any thread.
+     *
+     * @param operationId The ID of the completed operation
      */
-    public void close() {
+    public void completeOperation(String operationId) {
         Platform.runLater(() -> {
-            if (!isComplete.getAndSet(true)) {
-                logger.info("Closing stitching blocking dialog - operation completed successfully");
-                if (dialog.isShowing()) {
-                    dialog.close();
+            if (activeOperations.remove(operationId) != null) {
+                logger.info("Operation completed: {}", operationId);
+                updateStatusList();
+
+                // Close dialog if no operations remain
+                if (activeOperations.isEmpty()) {
+                    logger.info("All stitching operations complete - closing dialog");
+                    if (!isComplete.getAndSet(true) && dialog.isShowing()) {
+                        dialog.close();
+                        synchronized (instanceLock) {
+                            instance = null; // Reset singleton for future use
+                        }
+                    }
                 }
             }
         });
     }
-    
+
     /**
-     * Closes the dialog with an error message.
+     * Marks an operation as failed with an error message.
      * This method is thread-safe and can be called from any thread.
-     * 
-     * @param errorMessage The error message to log
+     *
+     * @param operationId The ID of the failed operation
+     * @param errorMessage The error message to log and display
      */
-    public void closeWithError(String errorMessage) {
+    public void failOperation(String operationId, String errorMessage) {
         Platform.runLater(() -> {
-            if (!isComplete.getAndSet(true)) {
-                logger.error("Closing stitching blocking dialog due to error: {}", errorMessage);
-                if (dialog.isShowing()) {
-                    dialog.close();
-                }
-                
+            if (activeOperations.remove(operationId) != null) {
+                logger.error("Operation failed ({}): {}", operationId, errorMessage);
+
                 // Show error dialog (use show() to avoid blocking)
                 Alert errorAlert = new Alert(Alert.AlertType.ERROR);
                 errorAlert.setTitle("Stitching Error");
                 errorAlert.setHeaderText("Stitching operation failed");
-                errorAlert.setContentText("An error occurred during stitching:\n\n" + errorMessage);
+                errorAlert.setContentText("Operation: " + operationId + "\n\nError:\n" + errorMessage);
                 errorAlert.show();
+
+                updateStatusList();
+
+                // Close dialog if no operations remain
+                if (activeOperations.isEmpty()) {
+                    logger.info("No stitching operations remain - closing dialog");
+                    if (!isComplete.getAndSet(true) && dialog.isShowing()) {
+                        dialog.close();
+                        synchronized (instanceLock) {
+                            instance = null; // Reset singleton for future use
+                        }
+                    }
+                }
             }
         });
+    }
+
+    /**
+     * Forces the dialog to close immediately, clearing all operations.
+     * Use only when user explicitly dismisses the dialog.
+     */
+    private void forceClose() {
+        Platform.runLater(() -> {
+            logger.warn("Force closing stitching dialog with {} operations still active", activeOperations.size());
+            activeOperations.clear();
+            if (!isComplete.getAndSet(true) && dialog.isShowing()) {
+                dialog.close();
+                synchronized (instanceLock) {
+                    instance = null; // Reset singleton for future use
+                }
+            }
+        });
+    }
+
+    /**
+     * Legacy method for backward compatibility - completes the operation.
+     * @deprecated Use completeOperation(operationId) instead
+     */
+    @Deprecated
+    public void close() {
+        // For backward compatibility, complete the first operation or close if empty
+        if (!activeOperations.isEmpty()) {
+            String firstId = activeOperations.keySet().iterator().next();
+            completeOperation(firstId);
+        }
+    }
+
+    /**
+     * Legacy method for backward compatibility - fails the operation with error.
+     * @deprecated Use failOperation(operationId, errorMessage) instead
+     */
+    @Deprecated
+    public void closeWithError(String errorMessage) {
+        // For backward compatibility, fail the first operation or close if empty
+        if (!activeOperations.isEmpty()) {
+            String firstId = activeOperations.keySet().iterator().next();
+            failOperation(firstId, errorMessage);
+        }
     }
     
     /**
