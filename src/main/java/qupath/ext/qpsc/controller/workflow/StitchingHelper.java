@@ -413,18 +413,18 @@ public class StitchingHelper {
 
                     logger.info("Batch stitching completed for {}, output: {}",
                             annotationName, outPath);
-                    
-                    // Close blocking dialog on success
+
+                    // Mark operation as complete
                     if (blockingDialog != null) {
-                        blockingDialog.close();
+                        blockingDialog.completeOperation(operationId);
                     }
 
                 } catch (Exception e) {
                     logger.error("Stitching failed for {}", annotation.getName(), e);
-                    
-                    // Close blocking dialog with error
+
+                    // Mark operation as failed
                     if (blockingDialog != null) {
-                        blockingDialog.closeWithError(e.getMessage());
+                        blockingDialog.failOperation(operationId, e.getMessage());
                     } else {
                         Platform.runLater(() ->
                                 UIFunctions.notifyUserOfError(
@@ -487,18 +487,18 @@ public class StitchingHelper {
 
                     logger.info("Stitching completed for {}, output: {}",
                             annotationName, outPath);
-                    
-                    // Close blocking dialog on success
+
+                    // Mark operation as complete
                     if (blockingDialog != null) {
-                        blockingDialog.close();
+                        blockingDialog.completeOperation(operationId);
                     }
 
                 } catch (Exception e) {
                     logger.error("Stitching failed for {}", annotation.getName(), e);
-                    
-                    // Close blocking dialog with error
+
+                    // Mark operation as failed
                     if (blockingDialog != null) {
-                        blockingDialog.closeWithError(e.getMessage());
+                        blockingDialog.failOperation(operationId, e.getMessage());
                     } else {
                         Platform.runLater(() ->
                                 UIFunctions.notifyUserOfError(
@@ -805,15 +805,13 @@ public class StitchingHelper {
                             regionName, outPath);
 
                     if (blockingDialog != null) {
-                        blockingDialog.updateStatus(operationId, "Stitching completed for " + regionName);
-                        blockingDialog.close();
+                        blockingDialog.completeOperation(operationId);
                     }
 
                 } catch (Exception e) {
                     logger.error("Multi-angle stitching failed for region {}", regionName, e);
                     if (blockingDialog != null) {
-                        blockingDialog.updateStatus(operationId, "Stitching failed: " + e.getMessage());
-                        blockingDialog.close();
+                        blockingDialog.failOperation(operationId, e.getMessage());
                     }
                     throw new RuntimeException(e);
                 }
@@ -864,15 +862,13 @@ public class StitchingHelper {
                             regionName, outPath);
 
                     if (blockingDialog != null) {
-                        blockingDialog.updateStatus(operationId, "Stitching completed for " + regionName);
-                        blockingDialog.close();
+                        blockingDialog.completeOperation(operationId);
                     }
 
                 } catch (Exception e) {
                     logger.error("Single-angle stitching failed for region {}", regionName, e);
                     if (blockingDialog != null) {
-                        blockingDialog.updateStatus(operationId, "Stitching failed: " + e.getMessage());
-                        blockingDialog.close();
+                        blockingDialog.failOperation(operationId, e.getMessage());
                     }
                     throw new RuntimeException(e);
                 }
