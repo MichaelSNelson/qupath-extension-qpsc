@@ -60,9 +60,13 @@ public class AnnotationAcquisitionDialog {
             dialog.setHeaderText(null);
 
             // Set always-on-top to keep dialog visible during annotation editing
-            dialog.getDialogPane().sceneProperty().addListener((obs, oldScene, newScene) -> {
-                if (newScene != null && newScene.getWindow() instanceof javafx.stage.Stage stage) {
+            // Use setOnShown to ensure stage is available when we set alwaysOnTop
+            dialog.setOnShown(e -> {
+                if (dialog.getDialogPane().getScene() != null &&
+                    dialog.getDialogPane().getScene().getWindow() instanceof javafx.stage.Stage stage) {
                     stage.setAlwaysOnTop(true);
+                    stage.toFront();
+                    logger.info("Set annotation dialog to always on top");
                 }
             });
 
@@ -219,11 +223,13 @@ public class AnnotationAcquisitionDialog {
         headerLabel.setStyle("-fx-font-size: 14px; -fx-font-weight: bold;");
         content.getChildren().add(headerLabel);
 
-        // Annotation list
+        // Annotation list - allow it to grow to fill available space
         ListView<String> annotationList = new ListView<>();
         annotationList.setId("annotationList");
-        annotationList.setPrefHeight(250);
+        annotationList.setPrefHeight(200);
         annotationList.setStyle("-fx-font-size: 12px;");
+        // Allow the list to grow and take available vertical space
+        VBox.setVgrow(annotationList, Priority.ALWAYS);
 
         // Count label
         Label countLabel = new Label();
