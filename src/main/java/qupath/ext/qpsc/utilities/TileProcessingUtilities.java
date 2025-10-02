@@ -260,6 +260,20 @@ public class TileProcessingUtilities {
                             // Optionally open the first image
                             if (allOmeTiffs[0].getName().equals(originalName)) {
                                 logger.debug("Opening first image in viewer");
+
+                                // Save current image data before opening new image to prevent save prompts
+                                try {
+                                    var currentData = qupathGUI.getImageData();
+                                    var currentEntry = currentData != null ? project.getEntry(currentData) : null;
+                                    if (currentData != null && currentEntry != null) {
+                                        currentEntry.saveImageData(currentData);
+                                        logger.info("Saved current image data before opening stitched image");
+                                    }
+                                } catch (Exception saveEx) {
+                                    logger.warn("Could not save current image data before opening stitched image: {}",
+                                        saveEx.getMessage());
+                                }
+
                                 List<ProjectImageEntry<BufferedImage>> images = project.getImageList();
                                 images.stream()
                                         .filter(e -> new File(e.getImageName()).getName()
@@ -421,6 +435,19 @@ public class TileProcessingUtilities {
                     }
 
                     logger.info("Successfully added image to project");
+
+                    // Save current image data before opening new image to prevent save prompts
+                    try {
+                        var currentData = qupathGUI.getImageData();
+                        var currentEntry = currentData != null ? project.getEntry(currentData) : null;
+                        if (currentData != null && currentEntry != null) {
+                            currentEntry.saveImageData(currentData);
+                            logger.info("Saved current image data before opening stitched image");
+                        }
+                    } catch (Exception saveEx) {
+                        logger.warn("Could not save current image data before opening stitched image: {}",
+                            saveEx.getMessage());
+                    }
 
                     // Find and open the newly added entry
                     List<ProjectImageEntry<BufferedImage>> images = project.getImageList();
