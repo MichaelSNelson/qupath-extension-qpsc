@@ -15,7 +15,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * StitchingBlockingDialog - Modal dialog that blocks QuPath interface during stitching operations
@@ -179,59 +181,101 @@ public class StitchingBlockingDialog {
     
     /**
      * Shows a warning dialog when user attempts to dismiss the stitching dialog.
-     * Uses non-blocking approach to avoid deadlock with modal parent dialog.
+     * Uses background thread with CountDownLatch to show modal dialog without blocking JavaFX thread.
      *
      * @param callback Consumer that receives true if user confirms, false otherwise
      */
     private void showDismissWarningAsync(java.util.function.Consumer<Boolean> callback) {
         logger.warn("User attempting to dismiss stitching blocking dialog");
 
-        Alert warning = new Alert(Alert.AlertType.WARNING);
-        warning.setTitle("Dismiss Stitching Dialog");
-        warning.setHeaderText("Are you sure you want to dismiss this dialog?");
-        warning.setContentText(
-                "Stitching is still in progress. Dismissing this dialog and interacting with QuPath " +
-                "while stitching is ongoing may cause:\n\n" +
-                "• Application crashes or freezes\n" +
-                "• Corrupted stitching results\n" +
-                "• Loss of acquisition data\n\n" +
-                "It is strongly recommended to wait for stitching to complete.\n\n" +
-                "Do you still want to proceed at your own risk?");
+        // Use background thread to avoid blocking JavaFX thread with showAndWait()
+        CompletableFuture.runAsync(() -> {
+            // Create and configure warning dialog on JavaFX thread
+            java.util.concurrent.atomic.AtomicReference<Alert> warningRef = new java.util.concurrent.atomic.AtomicReference<>();
+            java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
 
-        warning.getButtonTypes().setAll(ButtonType.YES, ButtonType.NO);
-        warning.setResizable(true);
+            Platform.runLater(() -> {
+                Alert warning = new Alert(Alert.AlertType.WARNING);
+                warning.setTitle("Dismiss Stitching Dialog");
+                warning.setHeaderText("Are you sure you want to dismiss this dialog?");
+                warning.setContentText(
+                        "Stitching is still in progress. Dismissing this dialog and interacting with QuPath " +
+                        "while stitching is ongoing may cause:\n\n" +
+                        "• Application crashes or freezes\n" +
+                        "• Corrupted stitching results\n" +
+                        "• Loss of acquisition data\n\n" +
+                        "It is strongly recommended to wait for stitching to complete.\n\n" +
+                        "Do you still want to proceed at your own risk?");
 
-        // Make the dialog modal relative to the stitching dialog
-        warning.initModality(Modality.APPLICATION_MODAL);
-        warning.initOwner(dialog.getOwner());
+                warning.getButtonTypes().setAll(ButtonType.YES, ButtonType.NO);
+                warning.setResizable(true);
 
-        // Make NO the default button
-        Button noButton = (Button) warning.getDialogPane().lookupButton(ButtonType.NO);
-        noButton.setDefaultButton(true);
+                // Make the dialog modal relative to the stitching dialog
+                warning.initModality(Modality.APPLICATION_MODAL);
+                warning.initOwner(dialog.getOwner());
 
-        Button yesButton = (Button) warning.getDialogPane().lookupButton(ButtonType.YES);
-        yesButton.setDefaultButton(false);
-        yesButton.setStyle("-fx-base: #ff6b6b;"); // Red color to indicate danger
+                // Make NO the default button
+                Button noButton = (Button) warning.getDialogPane().lookupButton(ButtonType.NO);
+                noButton.setDefaultButton(true);
 
-        // Set always on top using a different approach
-        Platform.runLater(() -> {
-            if (warning.getDialogPane().getScene() != null &&
-                warning.getDialogPane().getScene().getWindow() instanceof Stage warningStage) {
-                warningStage.setAlwaysOnTop(true);
-                warningStage.toFront();
+                Button yesButton = (Button) warning.getDialogPane().lookupButton(ButtonType.YES);
+                yesButton.setDefaultButton(false);
+                yesButton.setStyle("-fx-base: #ff6b6b;"); // Red color to indicate danger
+
+                // Set always on top
+                warning.getDialogPane().sceneProperty().addListener((obs, oldScene, newScene) -> {
+                    if (newScene != null && newScene.getWindow() instanceof Stage warningStage) {
+                        warningStage.setAlwaysOnTop(true);
+                        warningStage.toFront();
+                    }
+                });
+
+                warningRef.set(warning);
+                latch.countDown();
+            });
+
+            // Wait for dialog creation
+            try {
+                latch.await();
+            } catch (InterruptedException e) {
+                logger.error("Interrupted waiting for warning dialog creation", e);
+                Platform.runLater(() -> callback.accept(false));
+                return;
             }
-        });
 
-        // Show asynchronously and handle result via callback
-        logger.info("Showing dismiss warning dialog");
-        warning.show();
-        logger.info("Dismiss warning dialog shown (non-blocking)");
+            // Show dialog and wait for result on JavaFX thread
+            java.util.concurrent.atomic.AtomicBoolean result = new java.util.concurrent.atomic.AtomicBoolean(false);
+            java.util.concurrent.CountDownLatch resultLatch = new java.util.concurrent.CountDownLatch(1);
 
-        // Set up result converter to call callback when dialog closes
-        warning.setOnHidden(e -> {
-            boolean confirmed = warning.getResult() == ButtonType.YES;
-            logger.info("Dismiss warning dialog closed, result={}", confirmed ? "YES" : "NO");
-            callback.accept(confirmed);
+            Platform.runLater(() -> {
+                logger.info("Showing dismiss warning dialog");
+                Alert warning = warningRef.get();
+                warning.showAndWait().ifPresentOrElse(
+                    buttonType -> {
+                        boolean confirmed = buttonType == ButtonType.YES;
+                        logger.info("Dismiss warning dialog closed, result={}", confirmed ? "YES" : "NO");
+                        result.set(confirmed);
+                        resultLatch.countDown();
+                    },
+                    () -> {
+                        logger.info("Dismiss warning dialog closed without selection");
+                        result.set(false);
+                        resultLatch.countDown();
+                    }
+                );
+            });
+
+            // Wait for result
+            try {
+                resultLatch.await();
+            } catch (InterruptedException e) {
+                logger.error("Interrupted waiting for warning dialog result", e);
+                Platform.runLater(() -> callback.accept(false));
+                return;
+            }
+
+            // Call callback on JavaFX thread
+            Platform.runLater(() -> callback.accept(result.get()));
         });
     }
     
