@@ -70,6 +70,7 @@ public class StitchingBlockingDialog {
     // Track active stitching operations by ID
     private final Map<String, String> activeOperations = new ConcurrentHashMap<>();
     private final AtomicBoolean isComplete = new AtomicBoolean(false);
+    private final AtomicBoolean showingWarning = new AtomicBoolean(false);
     
     /**
      * Private constructor - use static show() method to access singleton instance.
@@ -213,10 +214,17 @@ public class StitchingBlockingDialog {
     /**
      * Shows a warning dialog when user attempts to dismiss the stitching dialog.
      * Uses background thread with CountDownLatch to show modal dialog without blocking JavaFX thread.
+     * Prevents duplicate warning dialogs from being shown simultaneously.
      *
      * @param callback Consumer that receives true if user confirms, false otherwise
      */
     private void showDismissWarningAsync(java.util.function.Consumer<Boolean> callback) {
+        // Prevent multiple warning dialogs from being shown at once
+        if (!showingWarning.compareAndSet(false, true)) {
+            logger.info("Warning dialog already showing - ignoring duplicate dismiss request");
+            return;
+        }
+
         logger.warn("User attempting to dismiss stitching blocking dialog");
 
         // Use background thread to avoid blocking JavaFX thread with showAndWait()
@@ -270,6 +278,7 @@ public class StitchingBlockingDialog {
                 latch.await();
             } catch (InterruptedException e) {
                 logger.error("Interrupted waiting for warning dialog creation", e);
+                showingWarning.set(false);
                 Platform.runLater(() -> callback.accept(false));
                 return;
             }
@@ -301,12 +310,16 @@ public class StitchingBlockingDialog {
                 resultLatch.await();
             } catch (InterruptedException e) {
                 logger.error("Interrupted waiting for warning dialog result", e);
+                showingWarning.set(false);
                 Platform.runLater(() -> callback.accept(false));
                 return;
             }
 
-            // Call callback on JavaFX thread
-            Platform.runLater(() -> callback.accept(result.get()));
+            // Call callback on JavaFX thread and reset warning flag
+            Platform.runLater(() -> {
+                callback.accept(result.get());
+                showingWarning.set(false);
+            });
         });
     }
     
