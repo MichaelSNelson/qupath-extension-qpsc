@@ -71,10 +71,10 @@ public class TilingRequest {
     /** Name of the imaging modality (e.g., "BF_10x_1") */
     private String modalityName;
 
-    /** Width of a single camera frame in microns */
+    /** Width of a single camera frame (units depend on context: pixels for QuPath, microns for bounding box) */
     private double frameWidth;
 
-    /** Height of a single camera frame in microns */
+    /** Height of a single camera frame (units depend on context: pixels for QuPath, microns for bounding box) */
     private double frameHeight;
 
     /** Overlap between adjacent tiles as a percentage (0-100) */
@@ -97,6 +97,9 @@ public class TilingRequest {
 
     /** Annotation objects for region-based tiling (mutually exclusive with boundingBox) */
     private List<PathObject> annotations;
+
+    /** Pixel size in microns for coordinate conversion (required for annotation workflows, use 1.0 for bounding box) */
+    private double pixelSizeMicrons = -1.0;  // -1.0 indicates not set
 
     // Builder pattern implementation
     /**
@@ -139,15 +142,17 @@ public class TilingRequest {
         }
 
         /**
-         * Sets the camera frame dimensions in microns.
-         * These values determine the physical area covered by each tile.
-         * 
-         * @param width the frame width in microns, must be positive
-         * @param height the frame height in microns, must be positive
+         * Sets the camera frame dimensions.
+         * Units depend on workflow: pixels for annotation-based tiling (QuPath coordinates),
+         * microns for bounding box-based tiling (physical stage coordinates).
+         * Use pixelSizeMicrons() to specify conversion factor for annotation workflows.
+         *
+         * @param width the frame width, must be positive
+         * @param height the frame height, must be positive
          * @return this builder instance for method chaining
          */
         public Builder frameSize(double width, double height) {
-            logger.debug("Setting frame size: {}x{} microns", width, height);
+            logger.debug("Setting frame size: {}x{}", width, height);
             if (width <= 0 || height <= 0) {
                 logger.warn("Frame dimensions must be positive: width={}, height={} - this will cause build validation to fail", width, height);
             }
@@ -237,7 +242,7 @@ public class TilingRequest {
         /**
          * Sets annotation objects for region-based tiling.
          * Mutually exclusive with bounding box - only one tiling mode can be used.
-         * 
+         *
          * @param annotations list of QuPath annotation objects, must not be null or empty
          * @return this builder instance for method chaining
          */
@@ -250,6 +255,22 @@ public class TilingRequest {
                 logger.warn("Annotations list is null or empty - this will cause build validation to fail");
             }
             request.annotations = annotations;
+            return this;
+        }
+
+        /**
+         * Sets the pixel size for coordinate conversion between pixels and microns.
+         * This is used to convert QuPath pixel coordinates to physical stage coordinates.
+         *
+         * @param pixelSizeMicrons the pixel size in microns, must be positive
+         * @return this builder instance for method chaining
+         */
+        public Builder pixelSizeMicrons(double pixelSizeMicrons) {
+            logger.debug("Setting pixel size: {} microns", pixelSizeMicrons);
+            if (pixelSizeMicrons <= 0) {
+                logger.warn("Pixel size must be positive: {} - this will cause incorrect coordinate conversion", pixelSizeMicrons);
+            }
+            request.pixelSizeMicrons = pixelSizeMicrons;
             return this;
         }
 
@@ -291,12 +312,28 @@ public class TilingRequest {
                 logger.error("Build validation failed: {}", error);
                 throw new IllegalStateException(error);
             }
-            
+
+            // Validate pixel size is set for annotation workflows
+            if (request.hasAnnotations() && request.pixelSizeMicrons <= 0) {
+                String error = "Pixel size must be set for annotation-based workflows. " +
+                        "Check that the image metadata contains valid pixel calibration, " +
+                        "or verify the microscope configuration file has correct pixel size settings.";
+                logger.error("Build validation failed: {}", error);
+                throw new IllegalStateException(error);
+            }
+
+            // For bounding box workflows, default to 1.0 if not explicitly set
+            if (request.hasBoundingBox() && request.pixelSizeMicrons < 0) {
+                request.pixelSizeMicrons = 1.0;
+                logger.debug("Bounding box workflow: using pixelSizeMicrons=1.0 (no conversion)");
+            }
+
             // Log successful build with summary
             String tilingMode = request.hasBoundingBox() ? "bounding box" : "annotations";
-            logger.debug("Successfully built TilingRequest: modality={}, mode={}, frameSize={}x{}, overlap={}%", 
-                request.modalityName, tilingMode, request.frameWidth, request.frameHeight, request.overlapPercent);
-            
+            logger.debug("Successfully built TilingRequest: modality={}, mode={}, frameSize={}x{}, overlap={}%, pixelSize={}",
+                request.modalityName, tilingMode, request.frameWidth, request.frameHeight,
+                request.overlapPercent, request.pixelSizeMicrons);
+
             return request;
         }
     }
@@ -378,10 +415,17 @@ public class TilingRequest {
     
     /**
      * Gets the annotation objects for region-based tiling.
-     * 
+     *
      * @return the list of annotations, or null if bounding box tiling is used
      */
     public List<PathObject> getAnnotations() { return annotations; }
+
+    /**
+     * Gets the pixel size in microns for coordinate conversion.
+     *
+     * @return the pixel size in microns
+     */
+    public double getPixelSizeMicrons() { return pixelSizeMicrons; }
 
     /**
      * Checks if this request is for bounding box-based tiling.

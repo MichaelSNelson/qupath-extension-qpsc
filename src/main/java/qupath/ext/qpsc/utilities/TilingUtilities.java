@@ -220,14 +220,17 @@ public class TilingUtilities {
 
         logger.info("Tile grid configuration:");
         logger.info("  Area: ({}, {}) to ({}, {})", startX, startY, startX + width, startY + height);
-        logger.info("  Frame size: {} x {}", request.getFrameWidth(), request.getFrameHeight());
+        logger.info("  Frame size: {} x {} (in input units)", request.getFrameWidth(), request.getFrameHeight());
         logger.info("  Step size: {} x {} ({}% overlap)", xStep, yStep, request.getOverlapPercent());
         logger.info("  Grid: {} columns x {} rows", nCols, nRows);
+        logger.info("  Pixel size for coordinate conversion: {} µm/px", request.getPixelSizeMicrons());
         logger.info("  X-axis inverted: {}, Y-axis inverted: {}", request.isInvertX(), request.isInvertY());
 
         // Prepare output structures
-        List<String> configLines = new ArrayList<>();
-        configLines.add("dim = 2");
+        List<String> configLinesMicrons = new ArrayList<>();  // For microscope (stage coordinates)
+        List<String> configLinesPixels = new ArrayList<>();   // For QuPath (pixel coordinates)
+        configLinesMicrons.add("dim = 2");
+        configLinesPixels.add("dim = 2");
         List<PathObject> detectionTiles = new ArrayList<>();
         int tileIndex = 0;
         int skippedTiles = 0;
@@ -269,8 +272,18 @@ public class TilingUtilities {
                     continue;
                 }
 
-                // Add to configuration file
-                configLines.add(String.format("%d.tif; ; (%.3f, %.3f)",
+                // Add to configuration files
+                // 1. TileConfiguration.txt - microscope stage coordinates in microns
+                double centroidXMicrons = tileROI.getCentroidX() * request.getPixelSizeMicrons();
+                double centroidYMicrons = tileROI.getCentroidY() * request.getPixelSizeMicrons();
+                configLinesMicrons.add(String.format("%d.tif; ; (%.3f, %.3f)",
+                        tileIndex,
+                        centroidXMicrons,
+                        centroidYMicrons
+                ));
+
+                // 2. TileConfiguration_QP.txt - QuPath pixel coordinates (for stitching back into QuPath)
+                configLinesPixels.add(String.format("%d.tif; ; (%.3f, %.3f)",
                         tileIndex,
                         tileROI.getCentroidX(),
                         tileROI.getCentroidY()
@@ -301,11 +314,18 @@ public class TilingUtilities {
 
         logger.info("Generated {} tiles, skipped {} tiles outside ROI", tileIndex, skippedTiles);
 
-        // Write configuration file
+        // Write both configuration files
         Path configFilePath = Paths.get(configPath);
         Files.createDirectories(configFilePath.getParent());
-        Files.write(configFilePath, configLines, StandardCharsets.UTF_8);
-        logger.info("Wrote tile configuration to: {}", configPath);
+
+        // Write TileConfiguration.txt - microscope stage coordinates (for acquisition)
+        Files.write(configFilePath, configLinesMicrons, StandardCharsets.UTF_8);
+        logger.info("Wrote microscope tile configuration to: {}", configPath);
+
+        // Write TileConfiguration_QP.txt - QuPath pixel coordinates (for stitching)
+        Path configFilePathQP = Paths.get(configFilePath.getParent().toString(), "TileConfiguration_QP.txt");
+        Files.write(configFilePathQP, configLinesPixels, StandardCharsets.UTF_8);
+        logger.info("Wrote QuPath tile configuration to: {}", configFilePathQP);
 
         // Add detection objects to QuPath hierarchy
         if (!detectionTiles.isEmpty()) {
@@ -375,7 +395,7 @@ public class TilingUtilities {
         double imagePixelSize = gui.getImageData().getServer()
                 .getPixelCalibration().getAveragedPixelSizeMicrons();
 
-        // Convert to image pixels
+        // Convert to image pixels for QuPath visualization and tile calculation
         double frameWidthPixels = frameWidthMicrons / imagePixelSize;
         double frameHeightPixels = frameHeightMicrons / imagePixelSize;
 
@@ -386,20 +406,23 @@ public class TilingUtilities {
 
         logger.info("Frame size in QuPath pixels: {} x {} ({}% overlap)",
                 frameWidthPixels, frameHeightPixels, overlapPercent);
+        logger.info("Pixel size: {} microns/pixel", imagePixelSize);
 
         // Validate tile counts before creation
         validateAnnotationTileCounts(annotations, frameWidthPixels, frameHeightPixels, overlapPercent);
 
-        // Create new tiles
+        // Create new tiles - frameSize is in PIXELS for tile visualization,
+        // pixelSizeMicrons is used to convert coordinates to microns for TileConfiguration.txt
         TilingRequest request = new TilingRequest.Builder()
                 .outputFolder(tempTileDirectory)
                 .modalityName(modeWithIndex)
-                .frameSize(frameWidthPixels, frameHeightPixels)
+                .frameSize(frameWidthPixels, frameHeightPixels)  // In pixels for tile ROI creation
                 .overlapPercent(overlapPercent)
                 .annotations(annotations)
                 .invertAxes(invertedX, invertedY)
                 .createDetections(true)
                 .addBuffer(true)
+                .pixelSizeMicrons(imagePixelSize)  // For converting tile coordinates to microns
                 .build();
 
         createTiles(request);
