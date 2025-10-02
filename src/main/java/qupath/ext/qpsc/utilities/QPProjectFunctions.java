@@ -752,7 +752,7 @@ public class QPProjectFunctions {
         ImageData<BufferedImage> imageData = entry.readImageData();
 
         // Determine and set the image type using our unified method
-        var imageType = determineImageType(imageFile, flipped, imageData);
+        var imageType = determineImageType(imageFile, flipped, imageData, modalityHandler);
         imageData.setImageType(imageType);
 
         entry.setImageName(imageFile.getName());
