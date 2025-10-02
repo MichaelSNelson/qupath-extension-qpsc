@@ -388,7 +388,9 @@ public class StitchingBlockingDialog {
             // Add this operation to tracking
             instance.activeOperations.put(operationId, displayName);
             instance.updateStatusList();
-            logger.info("Registered stitching operation: {} ({})", operationId, displayName);
+            logger.info("Registered stitching operation: {} ({}), total operations: {}",
+                       operationId, displayName, instance.activeOperations.size());
+            logger.info("Current operations map: {}", instance.activeOperations.keySet());
 
             return instance;
         }
@@ -424,21 +426,29 @@ public class StitchingBlockingDialog {
      * @param operationId The ID of the completed operation
      */
     public void completeOperation(String operationId) {
+        logger.info("completeOperation called for: {}, current operations: {}", operationId, activeOperations.keySet());
         Platform.runLater(() -> {
             if (activeOperations.remove(operationId) != null) {
-                logger.info("Operation completed: {}", operationId);
+                logger.info("Operation completed and removed: {}, remaining: {}", operationId, activeOperations.size());
                 updateStatusList();
 
                 // Close dialog if no operations remain
                 if (activeOperations.isEmpty()) {
-                    logger.info("All stitching operations complete - closing dialog");
+                    logger.info("All stitching operations complete - closing dialog, isComplete={}, isShowing={}",
+                               isComplete.get(), dialog.isShowing());
                     if (!isComplete.getAndSet(true) && dialog.isShowing()) {
+                        logger.info("Closing dialog now");
                         dialog.close();
                         synchronized (instanceLock) {
                             instance = null; // Reset singleton for future use
                         }
+                    } else {
+                        logger.warn("Dialog NOT closed - isComplete was already {} or dialog not showing", isComplete.get());
                     }
                 }
+            } else {
+                logger.warn("Operation {} not found in activeOperations map! Current operations: {}",
+                           operationId, activeOperations.keySet());
             }
         });
     }

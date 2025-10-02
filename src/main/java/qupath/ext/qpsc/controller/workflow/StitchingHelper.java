@@ -33,7 +33,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Helper class for image stitching operations.
@@ -154,12 +156,19 @@ public class StitchingHelper {
         // Create blocking dialog on JavaFX thread before starting stitching
         final String operationId = sample.sampleName() + " - " + annotation.getName();
         final StitchingBlockingDialog[] dialogRef = {null};
+        final CountDownLatch dialogLatch = new CountDownLatch(1);
         try {
             Platform.runLater(() -> {
-                dialogRef[0] = StitchingBlockingDialog.show(operationId);
+                try {
+                    dialogRef[0] = StitchingBlockingDialog.show(operationId);
+                } finally {
+                    dialogLatch.countDown();
+                }
             });
-            // Wait briefly for dialog creation
-            Thread.sleep(100);
+            // Wait for dialog creation to complete (max 5 seconds)
+            if (!dialogLatch.await(5, TimeUnit.SECONDS)) {
+                logger.warn("Timeout waiting for stitching blocking dialog creation");
+            }
         } catch (Exception e) {
             logger.warn("Failed to create stitching blocking dialog", e);
         }
@@ -547,12 +556,19 @@ public class StitchingHelper {
         // Create blocking dialog on JavaFX thread before starting stitching
         final String operationId = sample.sampleName() + " - " + regionName;
         final StitchingBlockingDialog[] dialogRef = {null};
+        final CountDownLatch dialogLatch = new CountDownLatch(1);
         try {
             Platform.runLater(() -> {
-                dialogRef[0] = StitchingBlockingDialog.show(operationId);
+                try {
+                    dialogRef[0] = StitchingBlockingDialog.show(operationId);
+                } finally {
+                    dialogLatch.countDown();
+                }
             });
-            // Wait briefly for dialog creation
-            Thread.sleep(100);
+            // Wait for dialog creation to complete (max 5 seconds)
+            if (!dialogLatch.await(5, TimeUnit.SECONDS)) {
+                logger.warn("Timeout waiting for stitching blocking dialog creation");
+            }
         } catch (Exception e) {
             logger.warn("Failed to create stitching blocking dialog", e);
         }
