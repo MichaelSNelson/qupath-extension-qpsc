@@ -255,7 +255,7 @@ public class ExistingImageWorkflow {
                                                 try {
                                                     ImageData<BufferedImage> currentData = gui.getImageData();
                                                     if (currentData != null) {
-                                                        ProjectImageEntry<BufferedImage> currentEntry = project.getEntry(currentData);
+                                                        //ProjectImageEntry<BufferedImage> currentEntry = project.getEntry(currentData);
                                                         if (currentEntry != null && currentEntry.equals(flippedEntry)) {
                                                             logger.warn("Image loaded but listener didn't fire - completing anyway");
                                                             loadFuture.complete(true);
