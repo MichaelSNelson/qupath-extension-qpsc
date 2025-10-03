@@ -274,8 +274,32 @@ public class ExistingAlignmentPath {
      * @return AffineTransform mapping full-res pixels to stage micrometers
      */
     private AffineTransform createFullResToStageTransform(GreenBoxContext context) {
-        // Get base macro-to-stage transform
-        AffineTransform macroToStage = state.alignmentChoice.selectedTransform().getTransform();
+        // Get the saved transform
+        AffineTransform savedTransform = state.alignmentChoice.selectedTransform().getTransform();
+
+        // Detect if this is a slide-specific alignment (full-res → stage) or a preset (macro → stage)
+        // Slide-specific alignments have scale close to the full-res pixel size (~0.25 µm/px)
+        // Macro → stage transforms have scale close to the macro pixel size (~81 µm/px)
+        double transformScale = savedTransform.getScaleX();
+        double fullResPixelSize = gui.getImageData().getServer()
+                .getPixelCalibration().getAveragedPixelSizeMicrons();
+
+        // If transform scale is close to full-res pixel size, it's already a full-res → stage transform
+        boolean isSlideSpecific = Math.abs(transformScale - fullResPixelSize) < 1.0;
+
+        if (isSlideSpecific) {
+            logger.info("Using slide-specific alignment (already full-res → stage)");
+            logger.info("  Transform scale: {} µm/px (matches full-res pixel size: {})",
+                    transformScale, fullResPixelSize);
+            return new AffineTransform(savedTransform);
+        }
+
+        // Otherwise, it's a macro → stage transform, so build full-res → stage
+        logger.info("Using saved preset (macro → stage), building full-res → stage transform");
+        logger.info("  Macro transform scale: {} µm/px, Full-res pixel size: {}",
+                transformScale, fullResPixelSize);
+
+        AffineTransform macroToStage = savedTransform;
 
         // Get image dimensions and detect data bounds
         int reportedWidth = gui.getImageData().getServer().getWidth();
@@ -284,8 +308,6 @@ public class ExistingAlignmentPath {
         Rectangle dataBounds = detectDataBounds(context, reportedWidth, reportedHeight);
 
         // Calculate pixel-based scaling
-        double fullResPixelSize = gui.getImageData().getServer()
-                .getPixelCalibration().getAveragedPixelSizeMicrons();
         double pixelSizeRatio = fullResPixelSize / state.pixelSize;
 
         // Create transform
