@@ -201,6 +201,8 @@ public class StitchingHelper {
                     // Create enhanced parameters map for UtilityFunctions
                     Map<String, Object> stitchParams = new HashMap<>();
                     stitchParams.put("metadata", metadata);
+                    stitchParams.put("blockingDialog", blockingDialog);
+                    stitchParams.put("operationId", operationId);
 
                     if (blockingDialog != null) {
                         blockingDialog.updateStatus(operationId, "Processing " + angleExposures.size() + " angles for " + annotationName + "...");
@@ -423,10 +425,7 @@ public class StitchingHelper {
                     logger.info("Batch stitching completed for {}, output: {}",
                             annotationName, outPath);
 
-                    // Mark operation as complete
-                    if (blockingDialog != null) {
-                        blockingDialog.completeOperation(operationId);
-                    }
+                    // Note: Dialog completion is handled in TileProcessingUtilities after project import
 
                 } catch (Exception e) {
                     logger.error("Stitching failed for {}", annotation.getName(), e);
@@ -497,10 +496,7 @@ public class StitchingHelper {
                     logger.info("Stitching completed for {}, output: {}",
                             annotationName, outPath);
 
-                    // Mark operation as complete
-                    if (blockingDialog != null) {
-                        blockingDialog.completeOperation(operationId);
-                    }
+                    // Note: Dialog completion is handled in TileProcessingUtilities after project import
 
                 } catch (Exception e) {
                     logger.error("Stitching failed for {}", annotation.getName(), e);
@@ -598,6 +594,8 @@ public class StitchingHelper {
                     // Create enhanced parameters map for UtilityFunctions
                     Map<String, Object> stitchParams = new HashMap<>();
                     stitchParams.put("metadata", metadata);
+                    stitchParams.put("blockingDialog", blockingDialog);
+                    stitchParams.put("operationId", operationId);
 
                     if (blockingDialog != null) {
                         blockingDialog.updateStatus(operationId, "Processing " + angleExposures.size() + " angles for " + regionName + "...");
@@ -820,9 +818,7 @@ public class StitchingHelper {
                     logger.info("Batch stitching completed for {}, output: {}",
                             regionName, outPath);
 
-                    if (blockingDialog != null) {
-                        blockingDialog.completeOperation(operationId);
-                    }
+                    // Note: Dialog completion is handled in TileProcessingUtilities after project import
 
                 } catch (Exception e) {
                     logger.error("Multi-angle stitching failed for region {}", regionName, e);
@@ -855,6 +851,8 @@ public class StitchingHelper {
                     // Create enhanced parameters map for UtilityFunctions
                     Map<String, Object> stitchParams = new HashMap<>();
                     stitchParams.put("metadata", metadata);
+                    stitchParams.put("blockingDialog", blockingDialog);
+                    stitchParams.put("operationId", operationId);
 
                     // For single angle, use the region name as the matching pattern
                     String matchingPattern = regionName;
@@ -877,9 +875,7 @@ public class StitchingHelper {
                     logger.info("Single-angle stitching completed for {}, output: {}",
                             regionName, outPath);
 
-                    if (blockingDialog != null) {
-                        blockingDialog.completeOperation(operationId);
-                    }
+                    // Note: Dialog completion is handled in TileProcessingUtilities after project import
 
                 } catch (Exception e) {
                     logger.error("Single-angle stitching failed for region {}", regionName, e);

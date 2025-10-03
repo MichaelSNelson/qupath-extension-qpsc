@@ -469,6 +469,17 @@ public class TileProcessingUtilities {
                     qupathGUI.refreshProject();
                     logger.info("Project refreshed successfully");
 
+                    // Close blocking dialog if provided
+                    if (stitchParams != null && stitchParams.containsKey("blockingDialog")) {
+                        qupath.ext.qpsc.ui.StitchingBlockingDialog dialog =
+                            (qupath.ext.qpsc.ui.StitchingBlockingDialog) stitchParams.get("blockingDialog");
+                        String operationId = (String) stitchParams.get("operationId");
+                        if (dialog != null && operationId != null) {
+                            logger.info("Completing stitching dialog operation after project import");
+                            dialog.completeOperation(operationId);
+                        }
+                    }
+
                     // Notify success
                     qupath.fx.dialogs.Dialogs.showInfoNotification(
                             res.getString("stitching.success.title"),
