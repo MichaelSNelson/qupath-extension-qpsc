@@ -16,6 +16,7 @@ import qupath.lib.images.ImageData;
 import qupath.lib.images.servers.ImageServer;
 import qupath.lib.images.servers.ImageServers;
 import qupath.lib.images.servers.TransformedServerBuilder;
+import qupath.lib.images.servers.RotatedImageServer.Rotation;
 import qupath.lib.objects.hierarchy.PathObjectHierarchy;
 import qupath.lib.projects.Project;
 import qupath.lib.projects.ProjectIO;
@@ -501,7 +502,7 @@ public class QPProjectFunctions {
         // Apply the flip transformations
         if (flipX && flipY) {
             // Both flips: rotate 180 degrees
-            builder = builder.rotate(180);
+            builder = builder.rotate(Rotation.ROTATE_180);
         } else if (flipX) {
             // Horizontal flip only
             builder = builder.flipHorizontal();
