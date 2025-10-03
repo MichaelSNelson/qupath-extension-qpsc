@@ -458,8 +458,12 @@ public class MicroscopeController {
         double fovWidth = dimensions[0] * pixelSize;
         double fovHeight = dimensions[1] * pixelSize;
 
-        logger.info("Camera FOV for {}: {:.1f} x {:.1f} µm ({}x{} pixels @ {} µm/pixel)",
-                modality, fovWidth, fovHeight, dimensions[0], dimensions[1], pixelSize);
+        logger.info("CRITICAL FOV CALCULATION:");
+        logger.info("  Modality: {}, Objective: {}, Detector: {}", matchedModalityName, objectiveId, detectorId);
+        logger.info("  Pixel size from config: {} µm/pixel", pixelSize);
+        logger.info("  Detector dimensions: {}x{} pixels", dimensions[0], dimensions[1]);
+        logger.info("  Calculated FOV: {} x {} µm", fovWidth, fovHeight);
+        logger.info("  FOV calculation: {}px * {}µm/px = {}µm width", dimensions[0], pixelSize, fovWidth);
 
         return new double[]{fovWidth, fovHeight};
     }
