@@ -337,31 +337,23 @@ public class MicroscopeController {
         }
     }
 
-
     /**
-     * Calculates camera field of view for a specific modality from configuration files.
-     * This method reads pixel size and detector dimensions from the config to compute FOV,
-     * avoiding the need to query the server which doesn't know the active objective.
+     * Calculates camera field of view using explicit hardware configuration.
+     * This method is preferred when the objective and detector are already known
+     * (e.g., from sample setup), as it avoids ambiguity from multiple matching profiles.
      *
-     * @param modality The imaging modality (e.g., "bf_10x", "bf_40x", "ppm_20x")
+     * @param modality The imaging modality (e.g., "bf_10x", "ppm_20x")
+     * @param objectiveId The objective identifier from configuration
+     * @param detectorId The detector identifier from configuration
      * @return Array containing [width, height] in microns
      * @throws IOException if configuration is missing or invalid
      */
-    public double[] getCameraFOVFromConfig(String modality) throws IOException {
-        logger.info("Calculating camera FOV from config for modality: {}", modality);
+    public double[] getCameraFOVFromConfig(String modality, String objectiveId, String detectorId) throws IOException {
+        logger.info("Calculating camera FOV from config with explicit hardware");
+        logger.info("  Modality: {}, Objective: {}, Detector: {}", modality, objectiveId, detectorId);
 
         String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
         MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(configPath);
-
-        // Find the acquisition profile for this modality to get objective and detector
-        List<Object> profiles = mgr.getList("acq_profiles_new", "profiles");
-        if (profiles == null || profiles.isEmpty()) {
-            throw new IOException("No acquisition profiles defined in configuration");
-        }
-
-        String objectiveId = null;
-        String detectorId = null;
-        String matchedModalityName = null;
 
         // Handle indexed modality names (e.g., "bf_10x_1" -> "bf_10x")
         String baseModality = modality;
@@ -369,82 +361,12 @@ public class MicroscopeController {
             baseModality = baseModality.substring(0, baseModality.lastIndexOf('_'));
         }
 
-        // Search for a matching profile
-        for (Object profileObj : profiles) {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> profile = (Map<String, Object>) profileObj;
-
-            String profileModality = (String) profile.get("modality");
-
-            // Check various matching patterns
-            if (profileModality != null &&
-                    (profileModality.equals(baseModality) ||
-                            profileModality.equals(modality) ||
-                            modality.startsWith(profileModality))) {
-
-                objectiveId = (String) profile.get("objective");
-                detectorId = (String) profile.get("detector");
-                matchedModalityName = profileModality;
-
-                // If we found both, we can break
-                if (objectiveId != null && detectorId != null) {
-                    logger.debug("Found profile match: modality={}, objective={}, detector={}",
-                            profileModality, objectiveId, detectorId);
-                    break;
-                }
-            }
-        }
-
-        // If we couldn't find a complete profile, try to infer from modality name
-        if (objectiveId == null || detectorId == null) {
-            // As a fallback, try to find any profile with this modality type
-            String modalityType = baseModality.split("_")[0]; // e.g., "bf" or "ppm"
-
-            for (Object profileObj : profiles) {
-                @SuppressWarnings("unchecked")
-                Map<String, Object> profile = (Map<String, Object>) profileObj;
-
-                String profileModality = (String) profile.get("modality");
-                if (profileModality != null && profileModality.startsWith(modalityType)) {
-                    if (detectorId == null) {
-                        detectorId = (String) profile.get("detector");
-                    }
-                    // Try to match objective by magnification in modality name
-                    if (objectiveId == null && baseModality.contains("10x")) {
-                        String tempObjective = (String) profile.get("objective");
-                        if (tempObjective != null && tempObjective.contains("10X")) {
-                            objectiveId = tempObjective;
-                            matchedModalityName = profileModality;
-                        }
-                    } else if (objectiveId == null && baseModality.contains("20x")) {
-                        String tempObjective = (String) profile.get("objective");
-                        if (tempObjective != null && tempObjective.contains("20X")) {
-                            objectiveId = tempObjective;
-                            matchedModalityName = profileModality;
-                        }
-                    } else if (objectiveId == null && baseModality.contains("40x")) {
-                        String tempObjective = (String) profile.get("objective");
-                        if (tempObjective != null && tempObjective.contains("40X")) {
-                            objectiveId = tempObjective;
-                            matchedModalityName = profileModality;
-                        }
-                    }
-                }
-            }
-        }
-
-        if (objectiveId == null || detectorId == null || matchedModalityName == null) {
-            throw new IOException(String.format(
-                    "Could not find acquisition profile for modality '%s'. Please check configuration.",
-                    modality));
-        }
-
-        // Get pixel size using the three-parameter method
-        double pixelSize = mgr.getModalityPixelSize(matchedModalityName, objectiveId, detectorId);
+        // Get pixel size using the explicit hardware configuration
+        double pixelSize = mgr.getModalityPixelSize(baseModality, objectiveId, detectorId);
         if (pixelSize <= 0) {
             throw new IOException(String.format(
                     "Invalid pixel size (%.4f) for modality '%s' with objective '%s' and detector '%s'",
-                    pixelSize, matchedModalityName, objectiveId, detectorId));
+                    pixelSize, baseModality, objectiveId, detectorId));
         }
 
         // Get detector dimensions
@@ -458,8 +380,7 @@ public class MicroscopeController {
         double fovWidth = dimensions[0] * pixelSize;
         double fovHeight = dimensions[1] * pixelSize;
 
-        logger.info("CRITICAL FOV CALCULATION:");
-        logger.info("  Modality: {}, Objective: {}, Detector: {}", matchedModalityName, objectiveId, detectorId);
+        logger.info("CRITICAL FOV CALCULATION (explicit hardware):");
         logger.info("  Pixel size from config: {} µm/pixel", pixelSize);
         logger.info("  Detector dimensions: {}x{} pixels", dimensions[0], dimensions[1]);
         logger.info("  Calculated FOV: {} x {} µm", fovWidth, fovHeight);
@@ -467,6 +388,7 @@ public class MicroscopeController {
 
         return new double[]{fovWidth, fovHeight};
     }
+
     /**
      * Checks if the socket client is connected.
      *

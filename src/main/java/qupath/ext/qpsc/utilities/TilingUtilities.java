@@ -376,7 +376,12 @@ public class TilingUtilities {
         String modalityBase = sampleSetup.modality().replaceAll("(_\\d+)$", "");
         removeExistingModalityTiles(gui, modalityBase);
 
-        double[] fovMicrons = MicroscopeController.getInstance().getCameraFOVFromConfig(sampleSetup.modality());
+        // Get FOV using the explicit hardware configuration from sample setup
+        // This ensures we use the correct detector (e.g., JAI vs TELEDYNE) that was selected by the user
+        double[] fovMicrons = MicroscopeController.getInstance().getCameraFOVFromConfig(
+                sampleSetup.modality(),
+                sampleSetup.objective(),
+                sampleSetup.detector());
         double frameWidthMicrons = fovMicrons[0];
         double frameHeightMicrons = fovMicrons[1];
 
