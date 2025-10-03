@@ -549,6 +549,21 @@ public class QPProjectFunctions {
         // Set the image type to match the original
         flippedData.setImageType(imageType);
 
+        // CRITICAL: Verify and log pixel calibration
+        // TransformedServerBuilder should preserve calibration, but let's verify
+        double originalPixelSize = originalServer.getPixelCalibration().getAveragedPixelSizeMicrons();
+        double flippedPixelSize = flippedServer.getPixelCalibration().getAveragedPixelSizeMicrons();
+
+        logger.info("Pixel calibration check:");
+        logger.info("  Original: {} µm/pixel", originalPixelSize);
+        logger.info("  Flipped:  {} µm/pixel", flippedPixelSize);
+
+        if (Math.abs(originalPixelSize - flippedPixelSize) > 0.001) {
+            logger.warn("CRITICAL: Pixel calibration mismatch detected!");
+            logger.warn("  This will cause incorrect tile sizes during acquisition");
+            logger.warn("  Original={} µm/px, Flipped={} µm/px", originalPixelSize, flippedPixelSize);
+        }
+
         // Get hierarchies for transformation
         PathObjectHierarchy originalHierarchy = originalData.getHierarchy();
         PathObjectHierarchy flippedHierarchy = flippedData.getHierarchy();
