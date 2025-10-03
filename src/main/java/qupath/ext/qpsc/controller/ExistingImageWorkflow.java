@@ -206,31 +206,10 @@ public class ExistingImageWorkflow {
                                 // Refresh project UI first
                                 gui.refreshProject();
 
-                                // Register the callback BEFORE opening the image
-                                QPProjectFunctions.onImageLoadedInViewer(gui,
-                                        flippedEntry.getImageName(),
-                                        () -> {
-                                            logger.info("Flipped image loaded successfully via callback");
-
-                                            // Save image data immediately after loading to prevent save prompts
-                                            try {
-                                                ImageData<BufferedImage> currentData = gui.getImageData();
-                                                //currentEntry = gui.getProject().getEntry(currentData);
-                                                if (currentData != null && currentEntry != null) {
-                                                    currentEntry.saveImageData(currentData);
-                                                    logger.info("Saved flipped image data after loading to prevent save prompts");
-                                                }
-                                            } catch (Exception saveEx) {
-                                                logger.warn("Could not save flipped image data after loading: {}",
-                                                    saveEx.getMessage());
-                                            }
-
-                                            loadFuture.complete(true);
-                                        }
-                                );
-
-                                // Add a backup listener in case the callback mechanism fails
-                                javafx.beans.value.ChangeListener<ImageData<BufferedImage>> backupListener =
+                                // Create a listener that detects when the flipped image is loaded
+                                // IMPORTANT: We check by ProjectImageEntry reference, not by name/path
+                                // because TransformedServer paths may not match the entry name
+                                javafx.beans.value.ChangeListener<ImageData<BufferedImage>> loadListener =
                                         new javafx.beans.value.ChangeListener<ImageData<BufferedImage>>() {
                                             @Override
                                             public void changed(
@@ -238,19 +217,26 @@ public class ExistingImageWorkflow {
                                                     ImageData<BufferedImage> oldValue,
                                                     ImageData<BufferedImage> newValue) {
 
-                                                if (newValue != null &&
-                                                        newValue.getServer().getPath().contains(flippedEntry.getImageName())) {
-                                                    logger.info("Flipped image loaded via backup listener");
-                                                    // Remove this listener
-                                                    gui.getViewer().imageDataProperty().removeListener(this);
-                                                    // Complete the future if not already done
-                                                    loadFuture.complete(true);
+                                                if (newValue != null && !loadFuture.isDone()) {
+                                                    // Check if this is our flipped entry by comparing with project entries
+                                                    try {
+                                                        ProjectImageEntry<BufferedImage> currentEntry = project.getEntry(newValue);
+                                                        if (currentEntry != null && currentEntry.equals(flippedEntry)) {
+                                                            logger.info("Flipped image loaded successfully - detected by entry match");
+                                                            // Remove this listener
+                                                            gui.getViewer().imageDataProperty().removeListener(this);
+                                                            // Complete the future
+                                                            loadFuture.complete(true);
+                                                        }
+                                                    } catch (Exception e) {
+                                                        logger.debug("Error checking image entry: {}", e.getMessage());
+                                                    }
                                                 }
                                             }
                                         };
 
-                                // Add the backup listener
-                                gui.getViewer().imageDataProperty().addListener(backupListener);
+                                // Add the listener
+                                gui.getViewer().imageDataProperty().addListener(loadListener);
 
                                 // Now open the image
                                 logger.info("Opening image entry: {}", flippedEntry.getImageName());
@@ -259,20 +245,33 @@ public class ExistingImageWorkflow {
                                 // Set up timeout handler
                                 CompletableFuture.delayedExecutor(30, TimeUnit.SECONDS).execute(() -> {
                                     if (!loadFuture.isDone()) {
-                                        // Remove backup listener
-                                        Platform.runLater(() ->
-                                                gui.getViewer().imageDataProperty().removeListener(backupListener)
-                                        );
+                                        // Check one more time if image actually loaded (must be on JavaFX thread)
+                                        Platform.runLater(() -> {
+                                            if (!loadFuture.isDone()) {
+                                                // Remove the listener
+                                                gui.getViewer().imageDataProperty().removeListener(loadListener);
 
-                                        // Check one more time if image actually loaded
-                                        if (gui.getImageData() != null &&
-                                                gui.getImageData().getServer().getPath().contains(flippedEntry.getImageName())) {
-                                            logger.warn("Image loaded but listeners didn't fire - completing anyway");
-                                            loadFuture.complete(true);
-                                        } else {
-                                            loadFuture.completeExceptionally(
-                                                    new TimeoutException("Image failed to load within 30 seconds"));
-                                        }
+                                                // Check if image actually loaded by comparing entries
+                                                try {
+                                                    ImageData<BufferedImage> currentData = gui.getImageData();
+                                                    if (currentData != null) {
+                                                        ProjectImageEntry<BufferedImage> currentEntry = project.getEntry(currentData);
+                                                        if (currentEntry != null && currentEntry.equals(flippedEntry)) {
+                                                            logger.warn("Image loaded but listener didn't fire - completing anyway");
+                                                            loadFuture.complete(true);
+                                                            return;
+                                                        }
+                                                    }
+                                                } catch (Exception e) {
+                                                    logger.debug("Error in timeout check: {}", e.getMessage());
+                                                }
+
+                                                // Image truly didn't load
+                                                logger.error("Image failed to load within 30 seconds");
+                                                loadFuture.completeExceptionally(
+                                                        new TimeoutException("Image failed to load within 30 seconds"));
+                                            }
+                                        });
                                     }
                                 });
 
