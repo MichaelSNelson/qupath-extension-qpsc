@@ -458,6 +458,10 @@ public class QPProjectFunctions {
     /**
      * Creates a flipped duplicate of an image, preserving the hierarchy.
      *
+     * IMPORTANT: This creates a duplicate entry pointing to the SAME underlying image file,
+     * but with metadata indicating it should be displayed flipped. QuPath's project system
+     * will handle the virtual flipping. The hierarchy is transformed to match.
+     *
      * @param project The project
      * @param originalEntry The original image entry to duplicate
      * @param flipX Whether to flip horizontally
@@ -480,64 +484,71 @@ public class QPProjectFunctions {
         logger.info("Creating flipped duplicate of {} (flipX={}, flipY={})",
                 originalEntry.getImageName(), flipX, flipY);
 
-        // Load the original image data to get hierarchy
+        // Load the original image data to get hierarchy and server
         ImageData<BufferedImage> originalData = originalEntry.readImageData();
-        String originalUri = originalEntry.getURIs().iterator().next().toString();
-        ImageServer<BufferedImage> originalServer = ImageServers.buildServer(originalUri);
+        ImageServer<BufferedImage> originalServer = originalData.getServer();
 
-        // Create transformation following QuPath coordinate system standards
-        // Note: For TransformedServerBuilder, we need to apply operations in reverse order
-        // compared to coordinate transformation, as the builder applies them to the image itself
-        AffineTransform transform = new AffineTransform();
+        // Get image dimensions for transform calculations
+        int imageWidth = originalServer.getWidth();
+        int imageHeight = originalServer.getHeight();
 
+        // Get the original image type
+        ImageData.ImageType imageType = originalData.getImageType();
+
+        // Create a transformed server builder that applies the flips
+        TransformedServerBuilder builder = new TransformedServerBuilder(originalServer);
+
+        // Apply the flip transformations
         if (flipX && flipY) {
-            // Combined flip: translate first, then scale
-            transform.translate(-originalServer.getWidth(), -originalServer.getHeight());
-            transform.scale(-1.0, -1.0);
+            // Both flips: rotate 180 degrees
+            builder = builder.rotate(180);
         } else if (flipX) {
-            // Horizontal flip: translate then scale
-            transform.translate(-originalServer.getWidth(), 0);
-            transform.scale(-1.0, 1.0);
+            // Horizontal flip only
+            builder = builder.flipHorizontal();
         } else if (flipY) {
-            // Vertical flip: translate then scale
-            transform.translate(0, -originalServer.getHeight());
-            transform.scale(1.0, -1.0);
+            // Vertical flip only
+            builder = builder.flipVertical();
         }
 
-        logger.debug("Server transform for flips (X={}, Y={}): {}", flipX, flipY, transform);
+        // Build the transformed server
+        ImageServer<BufferedImage> flippedServer = builder.build();
 
-        // Create transformed server
-        ImageServer<BufferedImage> flippedServer = new TransformedServerBuilder(originalServer)
-                .transform(transform)
-                .build();
-
-        // Add to project
+        // Add the flipped server to the project
         ProjectImageEntry<BufferedImage> flippedEntry = project.addImage(flippedServer.getBuilder());
 
-        // Set name to indicate it's flipped
-        String flippedName = originalEntry.getImageName();
+        // Set name to indicate it's flipped (use base name without extension manipulation)
+        String baseName = originalEntry.getImageName();
+        String flippedName;
         if (flipX && flipY) {
-            flippedName = flippedName.replace(".ome.tif", "_flipped_XY.ome.tif");
+            flippedName = baseName + " (flipped XY)";
         } else if (flipX) {
-            flippedName = flippedName.replace(".ome.tif", "_flipped_X.ome.tif");
+            flippedName = baseName + " (flipped X)";
         } else if (flipY) {
-            flippedName = flippedName.replace(".ome.tif", "_flipped_Y.ome.tif");
+            flippedName = baseName + " (flipped Y)";
+        } else {
+            flippedName = baseName + " (duplicate)";
         }
         flippedEntry.setImageName(flippedName);
 
-        // Copy and transform hierarchy
+        // Read the flipped image data
         ImageData<BufferedImage> flippedData = flippedEntry.readImageData();
+
+        // Set the image type to match the original
+        flippedData.setImageType(imageType);
+
+        // Get hierarchies for transformation
         PathObjectHierarchy originalHierarchy = originalData.getHierarchy();
         PathObjectHierarchy flippedHierarchy = flippedData.getHierarchy();
 
         // Transform hierarchy to account for flips
+        // CRITICAL: Use the ORIGINAL server dimensions, not the flipped server
         TransformationFunctions.transformHierarchy(
                 originalHierarchy,
                 flippedHierarchy,
                 flipX,
                 flipY,
-                originalData.getServer().getWidth(),
-                originalData.getServer().getHeight()
+                imageWidth,  // Original dimensions
+                imageHeight  // Original dimensions
         );
 
         // Apply metadata - get offsets from original
@@ -550,18 +561,13 @@ public class QPProjectFunctions {
                 sampleName
         );
 
-        // Save the flipped image data explicitly to persist the transformed hierarchy
-        try {
-            flippedEntry.saveImageData(flippedData);
-            logger.debug("Saved image data for flipped duplicate");
-        } catch (IOException e) {
-            logger.warn("Could not save image data for flipped duplicate: {}", e.getMessage());
-            // Continue anyway - project sync should be sufficient
-        }
+        // Save the flipped image data to persist the hierarchy and image type
+        flippedEntry.saveImageData(flippedData);
+        logger.info("Saved flipped image data with transformed hierarchy and image type");
 
         // Save project changes
         project.syncChanges();
-        logger.debug("Synced project changes for flipped duplicate");
+        logger.info("Synced project changes for flipped duplicate");
 
         logger.info("Successfully created flipped duplicate: {}", flippedName);
         return flippedEntry;
