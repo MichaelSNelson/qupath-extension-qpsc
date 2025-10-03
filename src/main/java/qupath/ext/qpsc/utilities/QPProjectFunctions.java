@@ -499,27 +499,27 @@ public class QPProjectFunctions {
         ImageData.ImageType imageType = originalData.getImageType();
 
         // Build the transformed server using the correct transform order for TransformedServerBuilder
-        // TransformedServerBuilder applies transforms to the IMAGE PIXELS, not coordinates
-        // So we need the INVERSE of what we'd use for coordinate transformation
+        // Based on QuPath forum example: https://forum.image.sc/t/flipping-an-image-in-qupaths-gui/85110
+        // Order: scale first, then translate
         TransformedServerBuilder builder = new TransformedServerBuilder(originalServer);
 
         if (flipX && flipY) {
             // Both flips
             AffineTransform transform = new AffineTransform();
-            transform.translate(imageWidth, imageHeight);
             transform.scale(-1.0, -1.0);
+            transform.translate(-imageWidth, -imageHeight);
             builder = builder.transform(transform);
         } else if (flipX) {
-            // Horizontal flip
+            // Horizontal flip only
             AffineTransform transform = new AffineTransform();
-            transform.translate(imageWidth, 0);
             transform.scale(-1.0, 1.0);
+            transform.translate(-imageWidth, 0);
             builder = builder.transform(transform);
         } else if (flipY) {
-            // Vertical flip
+            // Vertical flip only
             AffineTransform transform = new AffineTransform();
-            transform.translate(0, imageHeight);
             transform.scale(1.0, -1.0);
+            transform.translate(0, -imageHeight);
             builder = builder.transform(transform);
         }
 
