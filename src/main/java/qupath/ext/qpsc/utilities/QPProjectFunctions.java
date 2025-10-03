@@ -16,7 +16,6 @@ import qupath.lib.images.ImageData;
 import qupath.lib.images.servers.ImageServer;
 import qupath.lib.images.servers.ImageServers;
 import qupath.lib.images.servers.TransformedServerBuilder;
-import qupath.lib.images.servers.RotatedImageServer.Rotation;
 import qupath.lib.objects.hierarchy.PathObjectHierarchy;
 import qupath.lib.projects.Project;
 import qupath.lib.projects.ProjectIO;
@@ -459,9 +458,12 @@ public class QPProjectFunctions {
     /**
      * Creates a flipped duplicate of an image, preserving the hierarchy.
      *
-     * IMPORTANT: This creates a duplicate entry pointing to the SAME underlying image file,
-     * but with metadata indicating it should be displayed flipped. QuPath's project system
-     * will handle the virtual flipping. The hierarchy is transformed to match.
+     * IMPORTANT: This does NOT create a separate flipped file. Instead, it adds the SAME
+     * underlying image file to the project again but with flips applied via TransformedServerBuilder.
+     * The hierarchy objects are transformed to match the flipped coordinate system.
+     *
+     * NOTE: TransformedServerBuilder creates a virtual transformation - the actual pixel data
+     * comes from the original file, but QuPath applies the transformation when rendering.
      *
      * @param project The project
      * @param originalEntry The original image entry to duplicate
@@ -496,19 +498,29 @@ public class QPProjectFunctions {
         // Get the original image type
         ImageData.ImageType imageType = originalData.getImageType();
 
-        // Create a transformed server builder that applies the flips
+        // Build the transformed server using the correct transform order for TransformedServerBuilder
+        // TransformedServerBuilder applies transforms to the IMAGE PIXELS, not coordinates
+        // So we need the INVERSE of what we'd use for coordinate transformation
         TransformedServerBuilder builder = new TransformedServerBuilder(originalServer);
 
-        // Apply the flip transformations
         if (flipX && flipY) {
-            // Both flips: rotate 180 degrees
-            builder = builder.rotate(Rotation.ROTATE_180);
+            // Both flips
+            AffineTransform transform = new AffineTransform();
+            transform.translate(imageWidth, imageHeight);
+            transform.scale(-1.0, -1.0);
+            builder = builder.transform(transform);
         } else if (flipX) {
-            // Horizontal flip only
-            builder = builder.flipHorizontal();
+            // Horizontal flip
+            AffineTransform transform = new AffineTransform();
+            transform.translate(imageWidth, 0);
+            transform.scale(-1.0, 1.0);
+            builder = builder.transform(transform);
         } else if (flipY) {
-            // Vertical flip only
-            builder = builder.flipVertical();
+            // Vertical flip
+            AffineTransform transform = new AffineTransform();
+            transform.translate(0, imageHeight);
+            transform.scale(1.0, -1.0);
+            builder = builder.transform(transform);
         }
 
         // Build the transformed server
@@ -517,7 +529,7 @@ public class QPProjectFunctions {
         // Add the flipped server to the project
         ProjectImageEntry<BufferedImage> flippedEntry = project.addImage(flippedServer.getBuilder());
 
-        // Set name to indicate it's flipped (use base name without extension manipulation)
+        // Set name to indicate it's flipped
         String baseName = originalEntry.getImageName();
         String flippedName;
         if (flipX && flipY) {
@@ -542,14 +554,14 @@ public class QPProjectFunctions {
         PathObjectHierarchy flippedHierarchy = flippedData.getHierarchy();
 
         // Transform hierarchy to account for flips
-        // CRITICAL: Use the ORIGINAL server dimensions, not the flipped server
+        // Use the ORIGINAL (unflipped) server dimensions for transformation
         TransformationFunctions.transformHierarchy(
                 originalHierarchy,
                 flippedHierarchy,
                 flipX,
                 flipY,
-                imageWidth,  // Original dimensions
-                imageHeight  // Original dimensions
+                imageWidth,
+                imageHeight
         );
 
         // Apply metadata - get offsets from original
