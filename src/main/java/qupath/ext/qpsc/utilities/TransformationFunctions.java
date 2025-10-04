@@ -815,7 +815,7 @@ public class TransformationFunctions {
                 double[] coords = transformQuPathFullResToStage(new double[]{x, y}, transform);
                 if (filename.equals("0.tif")) {
                     logger.info("  Output (stage µm): ({}, {})", coords[0], coords[1]);
-                    logger.info("  Implied pixel size: {} µm/pixel",
+                    logger.info("  Transform verification: stage_x/qp_x = {} µm/pixel (should match transform scale)",
                             Math.abs(coords[0] / x));
                 }
                 String transformedLine = String.format("%s; ; (%.3f, %.3f)",

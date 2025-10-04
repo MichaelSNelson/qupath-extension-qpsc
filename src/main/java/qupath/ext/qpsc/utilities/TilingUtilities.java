@@ -227,9 +227,11 @@ public class TilingUtilities {
         logger.info("  X-axis inverted: {}, Y-axis inverted: {}", request.isInvertX(), request.isInvertY());
 
         // Prepare output structures
-        List<String> configLinesMicrons = new ArrayList<>();  // For microscope (stage coordinates)
+        // NOTE: Both files start with pixel coordinates. TileConfiguration.txt will be transformed
+        // to stage coordinates later by TransformationFunctions.transformTileConfiguration()
+        List<String> configLinesForTransform = new ArrayList<>();  // For transformation to stage
         List<String> configLinesPixels = new ArrayList<>();   // For QuPath (pixel coordinates)
-        configLinesMicrons.add("dim = 2");
+        configLinesForTransform.add("dim = 2");
         configLinesPixels.add("dim = 2");
         List<PathObject> detectionTiles = new ArrayList<>();
         int tileIndex = 0;
@@ -273,13 +275,13 @@ public class TilingUtilities {
                 }
 
                 // Add to configuration files
-                // 1. TileConfiguration.txt - microscope stage coordinates in microns
-                double centroidXMicrons = tileROI.getCentroidX() * request.getPixelSizeMicrons();
-                double centroidYMicrons = tileROI.getCentroidY() * request.getPixelSizeMicrons();
-                configLinesMicrons.add(String.format("%d.tif; ; (%.3f, %.3f)",
+                // 1. TileConfiguration.txt - QuPath pixel coordinates (will be transformed to stage later)
+                // NOTE: These are in PIXELS, not microns! The transformation to stage coordinates
+                // happens later in TransformationFunctions.transformTileConfiguration()
+                configLinesForTransform.add(String.format("%d.tif; ; (%.3f, %.3f)",
                         tileIndex,
-                        centroidXMicrons,
-                        centroidYMicrons
+                        tileROI.getCentroidX(),
+                        tileROI.getCentroidY()
                 ));
 
                 // 2. TileConfiguration_QP.txt - QuPath pixel coordinates (for stitching back into QuPath)
@@ -318,9 +320,9 @@ public class TilingUtilities {
         Path configFilePath = Paths.get(configPath);
         Files.createDirectories(configFilePath.getParent());
 
-        // Write TileConfiguration.txt - microscope stage coordinates (for acquisition)
-        Files.write(configFilePath, configLinesMicrons, StandardCharsets.UTF_8);
-        logger.info("Wrote microscope tile configuration to: {}", configPath);
+        // Write TileConfiguration.txt - QuPath pixel coordinates (will be transformed to stage later)
+        Files.write(configFilePath, configLinesForTransform, StandardCharsets.UTF_8);
+        logger.info("Wrote tile configuration (pixels, pre-transform) to: {}", configPath);
 
         // Write TileConfiguration_QP.txt - QuPath pixel coordinates (for stitching)
         Path configFilePathQP = Paths.get(configFilePath.getParent().toString(), "TileConfiguration_QP.txt");
