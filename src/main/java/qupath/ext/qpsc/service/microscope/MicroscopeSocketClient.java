@@ -295,9 +295,18 @@ public class MicroscopeSocketClient implements AutoCloseable {
      *
      * @return Array containing [x, y] coordinates in microns
      * @throws IOException if communication fails
+     * @throws MicroscopeHardwareException if hardware error occurs
      */
     public double[] getStageXY() throws IOException {
         byte[] response = executeCommand(Command.GETXY, null, 8);
+
+        // Check for hardware error response
+        String responseStr = new String(response, StandardCharsets.UTF_8);
+        if (responseStr.startsWith("HW_ERROR")) {
+            throw new MicroscopeHardwareException(
+                "Hardware error getting XY position. Check that MicroManager is running and the XY stage is loaded."
+            );
+        }
 
         ByteBuffer buffer = ByteBuffer.wrap(response);
         buffer.order(ByteOrder.BIG_ENDIAN);
@@ -314,9 +323,18 @@ public class MicroscopeSocketClient implements AutoCloseable {
      *
      * @return Z coordinate in microns
      * @throws IOException if communication fails
+     * @throws MicroscopeHardwareException if hardware error occurs
      */
     public double getStageZ() throws IOException {
         byte[] response = executeCommand(Command.GETZ, null, 4);
+
+        // Check for hardware error response
+        String responseStr = new String(response, StandardCharsets.UTF_8);
+        if (responseStr.startsWith("HWERR")) {
+            throw new MicroscopeHardwareException(
+                "Hardware error getting Z position. Check that MicroManager is running and the Z stage is loaded."
+            );
+        }
 
         ByteBuffer buffer = ByteBuffer.wrap(response);
         buffer.order(ByteOrder.BIG_ENDIAN);
@@ -331,9 +349,18 @@ public class MicroscopeSocketClient implements AutoCloseable {
      *
      * @return Rotation angle in ticks (double the angle)
      * @throws IOException if communication fails
+     * @throws MicroscopeHardwareException if hardware error occurs
      */
     public double getStageR() throws IOException {
         byte[] response = executeCommand(Command.GETR, null, 4);
+
+        // Check for hardware error response
+        String responseStr = new String(response, StandardCharsets.UTF_8);
+        if (responseStr.startsWith("HWERR")) {
+            throw new MicroscopeHardwareException(
+                "Hardware error getting rotation angle. Check that MicroManager is running and the rotation stage is loaded."
+            );
+        }
 
         ByteBuffer buffer = ByteBuffer.wrap(response);
         buffer.order(ByteOrder.BIG_ENDIAN);

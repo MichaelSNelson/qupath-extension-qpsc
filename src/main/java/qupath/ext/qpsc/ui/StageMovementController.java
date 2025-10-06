@@ -102,6 +102,7 @@ public class StageMovementController {
                 logger.debug("Initialized XY fields with current position: X={}, Y={}", xy[0], xy[1]);
             } catch (Exception e) {
                 logger.warn("Failed to retrieve current XY stage position: {}", e.getMessage());
+                MicroscopeErrorHandler.handleException(e, "get current XY stage position");
             }
 
             try {
@@ -110,6 +111,7 @@ public class StageMovementController {
                 logger.debug("Initialized Z field with current position: {}", z);
             } catch (Exception e) {
                 logger.warn("Failed to retrieve current Z stage position: {}", e.getMessage());
+                // Don't show error again if XY already failed (same root cause)
             }
 
             try {
@@ -118,6 +120,7 @@ public class StageMovementController {
                 logger.debug("Initialized R field with current position: {}", r);
             } catch (Exception e) {
                 logger.warn("Failed to retrieve current R stage position: {}", e.getMessage());
+                // Don't show error again if XY already failed (same root cause)
             }
 
             // Get config manager for bounds checking
