@@ -617,6 +617,11 @@ public class QPProjectFunctions {
      *   <li>Contains "brightfield" - Explicit brightfield naming</li>
      * </ul>
      *
+     * <p>Filename patterns that force OTHER type:</p>
+     * <ul>
+     *   <li>Contains "biref" - Birefringence images (16-bit single-channel)</li>
+     * </ul>
+     *
      * @param imageFile The image file to check
      * @param server The image server for automatic type estimation
      * @param imageData The image data for automatic type estimation
@@ -629,6 +634,14 @@ public class QPProjectFunctions {
             qupath.ext.qpsc.modality.ModalityHandler modalityHandler) {
 
         String fileName = imageFile.getName().toLowerCase();
+        String filePath = imageFile.getAbsolutePath().toLowerCase();
+
+        // Check for birefringence images first (16-bit single-channel)
+        // These need to be OTHER type, not BRIGHTFIELD_H_E
+        if (fileName.contains("biref") || filePath.contains(".biref")) {
+            logger.info("Setting image type to OTHER for birefringence image: {}", fileName);
+            return ImageData.ImageType.OTHER;
+        }
 
         // First check if modality handler specifies a preferred image type
         if (modalityHandler != null) {
