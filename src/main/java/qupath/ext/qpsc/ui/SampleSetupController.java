@@ -160,11 +160,11 @@ public class SampleSetupController {
             modalityBox.valueProperty().addListener((obs, oldModality, newModality) -> {
                 if (newModality != null) {
                     logger.debug("Modality changed to: {}", newModality);
-                    
+
                     // Get available objectives for this modality
                     Set<String> objectiveIds = configManager.getAvailableObjectivesForModality(newModality);
                     Map<String, String> objectiveNames = configManager.getObjectiveFriendlyNames(objectiveIds);
-                    
+
                     // Create display strings that combine friendly name with ID for clarity
                     List<String> objectiveDisplayItems = objectiveIds.stream()
                             .map(id -> {
@@ -173,18 +173,16 @@ public class SampleSetupController {
                             })
                             .sorted()
                             .collect(Collectors.toList());
-                    
+
                     objectiveBox.getItems().clear();
                     objectiveBox.getItems().addAll(objectiveDisplayItems);
-                    
+
                     // Select first objective if available
+                    // This will trigger the objective listener which populates detectors
                     if (!objectiveDisplayItems.isEmpty()) {
                         objectiveBox.setValue(objectiveDisplayItems.get(0));
                     }
-                    
-                    // Clear detector selection
-                    detectorBox.getItems().clear();
-                    detectorBox.setValue(null);
+                    // Note: No need to clear detectors here - the objective listener handles detector population
                 }
             });
 
