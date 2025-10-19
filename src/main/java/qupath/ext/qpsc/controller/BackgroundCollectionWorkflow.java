@@ -164,12 +164,15 @@ public class BackgroundCollectionWorkflow {
             logger.info("Starting background acquisition with angles: {}, exposures: {}", angles, exposures);
 
             // Call the synchronous background acquisition method
-            socketClient.startBackgroundAcquisition(configFileLocation, finalOutputPath, modality, angles, exposures);
+            // Returns map of final exposures actually used by Python (with adaptive exposure)
+            Map<Double, Double> finalExposures = socketClient.startBackgroundAcquisition(
+                    configFileLocation, finalOutputPath, modality, angles, exposures);
 
-            logger.info("Background acquisition completed successfully");
+            logger.info("Background acquisition completed successfully with {} final exposures",
+                    finalExposures.size());
 
-            // Save background collection defaults
-            saveBackgroundDefaults(finalOutputPath, modality, objective, detector, angleExposures);
+            // Save background collection defaults using actual exposures from server
+            saveBackgroundDefaults(finalOutputPath, modality, objective, detector, angleExposures, finalExposures);
 
             // Show success notification on UI thread
             Platform.runLater(() -> {
@@ -200,16 +203,18 @@ public class BackgroundCollectionWorkflow {
      * Save background collection defaults to a YAML file for future reference.
      * This file contains all the settings used for background acquisition, which is important
      * for ensuring consistent background correction parameters.
-     * 
+     *
      * @param outputPath The directory where background images were saved
      * @param modality The modality used (e.g., "ppm")
      * @param objective The objective ID used
      * @param detector The detector ID used
-     * @param angleExposures The angle-exposure pairs used
+     * @param angleExposures The angle-exposure pairs originally requested (may differ from actual)
+     * @param finalExposures The final exposures actually used by Python server (from adaptive exposure)
      * @throws IOException if file writing fails
      */
     private static void saveBackgroundDefaults(String outputPath, String modality, String objective,
-                                               String detector, List<AngleExposure> angleExposures) throws IOException {
+                                               String detector, List<AngleExposure> angleExposures,
+                                               Map<Double, Double> finalExposures) throws IOException {
 
         java.io.File settingsFile = new java.io.File(outputPath, "background_settings.yml");
 
@@ -241,9 +246,17 @@ public class BackgroundCollectionWorkflow {
             }
         }
 
-        // Add/update with new angles
-        for (AngleExposure ae : angleExposures) {
-            existingAngleExposureMap.put(ae.ticks(), ae.exposureMs());
+        // Add/update with new angles using FINAL exposures from server
+        // Priority: Use finalExposures from Python (adaptive exposure)
+        // Fallback: Use angleExposures if server didn't return exposures (old version)
+        if (finalExposures != null && !finalExposures.isEmpty()) {
+            logger.info("Using {} final exposures from Python server", finalExposures.size());
+            existingAngleExposureMap.putAll(finalExposures);
+        } else {
+            logger.warn("No final exposures from server, using requested exposures (old server version?)");
+            for (AngleExposure ae : angleExposures) {
+                existingAngleExposureMap.put(ae.ticks(), ae.exposureMs());
+            }
         }
 
         // Build YAML in the expected format

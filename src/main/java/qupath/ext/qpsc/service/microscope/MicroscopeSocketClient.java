@@ -6,6 +6,8 @@ import qupath.ext.qpsc.service.AcquisitionCommandBuilder;
 
 import java.nio.charset.StandardCharsets;
 import java.util.function.Consumer;
+import java.util.Map;
+import java.util.HashMap;
 import java.io.*;
 import java.net.*;
 import java.nio.ByteBuffer;
@@ -472,9 +474,11 @@ public class MicroscopeSocketClient implements AutoCloseable {
      * @param modality Modality name (e.g., "ppm")
      * @param angles Angle values in parentheses format (e.g., "(-5.0,0.0,5.0,90.0)")
      * @param exposures Exposure values in parentheses format (e.g., "(120.0,250.0,60.0,1.2)")
+     *                  NOTE: These are ignored by server with adaptive exposure enabled
+     * @return Map of angle (degrees) to final exposure time (ms) used by Python server
      * @throws IOException if communication fails
      */
-    public void startBackgroundAcquisition(String yamlPath, String outputPath, String modality,
+    public Map<Double, Double> startBackgroundAcquisition(String yamlPath, String outputPath, String modality,
                                            String angles, String exposures) throws IOException {
 
         // Build BGACQUIRE-specific command message
@@ -542,12 +546,48 @@ public class MicroscopeSocketClient implements AutoCloseable {
                     } else if (!finalResponse.startsWith("SUCCESS:")) {
                         logger.warn("Unexpected final response: {}", finalResponse);
                     }
-                    // SUCCESS - method completes normally
+
+                    // Parse final exposures from SUCCESS response
+                    // Format: SUCCESS:/path|angle1:exposure1,angle2:exposure2,...
+                    Map<Double, Double> finalExposures = new HashMap<>();
+                    if (finalResponse.startsWith("SUCCESS:")) {
+                        String data = finalResponse.substring(8); // Remove "SUCCESS:"
+                        String[] parts = data.split("\\|");
+
+                        // Check if exposures are included (parts[1])
+                        if (parts.length > 1 && !parts[1].trim().isEmpty()) {
+                            String exposuresStr = parts[1].trim();
+                            logger.info("Parsing final exposures from response: {}", exposuresStr);
+
+                            String[] exposurePairs = exposuresStr.split(",");
+                            for (String pair : exposurePairs) {
+                                String[] angleExposure = pair.split(":");
+                                if (angleExposure.length == 2) {
+                                    try {
+                                        double angle = Double.parseDouble(angleExposure[0].trim());
+                                        double exposure = Double.parseDouble(angleExposure[1].trim());
+                                        finalExposures.put(angle, exposure);
+                                        logger.debug("  Angle {}° -> {}ms", angle, exposure);
+                                    } catch (NumberFormatException e) {
+                                        logger.warn("Failed to parse angle:exposure pair: {}", pair);
+                                    }
+                                }
+                            }
+                            logger.info("Parsed {} final exposure values from server", finalExposures.size());
+                        } else {
+                            logger.warn("No exposure data in response (old server version?)");
+                        }
+
+                        lastActivityTime.set(System.currentTimeMillis());
+                        return finalExposures;
+                    }
                 } else {
                     throw new IOException("No final response received from background acquisition");
                 }
 
+                // Fallback - shouldn't reach here
                 lastActivityTime.set(System.currentTimeMillis());
+                return new HashMap<>();
 
             } catch (IOException | InterruptedException e) {
                 handleIOException(new IOException("Background acquisition error", e));
