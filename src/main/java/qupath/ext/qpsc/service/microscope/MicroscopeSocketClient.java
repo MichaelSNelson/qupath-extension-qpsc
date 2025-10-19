@@ -494,11 +494,13 @@ public class MicroscopeSocketClient implements AutoCloseable {
             ensureConnected();
 
             // Temporarily increase socket timeout for background acquisition
+            // Adaptive exposure requires multiple iterations per angle (typically 2-5, max 10)
+            // With 4 angles, this can take 60-120 seconds. Allow 3 minutes to be safe.
             int originalTimeout = readTimeout;
             try {
                 if (socket != null) {
-                    socket.setSoTimeout(30000); // 30 seconds for background acquisition
-                    logger.debug("Increased socket timeout to 30s for background acquisition");
+                    socket.setSoTimeout(180000); // 3 minutes for background acquisition with adaptive exposure
+                    logger.debug("Increased socket timeout to 180s for background acquisition");
                 }
 
                 // Send BGACQUIRE command (8 bytes)
