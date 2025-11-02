@@ -26,8 +26,10 @@ The extension bridges QuPath, Python-based microscope controllers (e.g., Pycro-M
 - **Flexible Acquisition Workflows**:
     - **Bounding Box Tiling**: Define a region in QuPath, auto-compute acquisition tiles, and trigger microscopy scans.
     - **Existing Image Registration**: Register new tile scans to previously acquired macro images with affine transformation support.
+    - **Background Collection**: Automated flat-field correction image acquisition with adaptive exposure control for consistent background intensities.
+    - **Polarizer Calibration (PPM)**: Automated rotation stage calibration to find crossed polarizer positions via angle sweep and sine curve fitting.
 - **Modality Handlers**: Imaging modes are resolved through pluggable handlers (e.g., PPM). Modalities with no special requirements use a no-op handler.
-- **Integration with Python Controllers**: Robust CLI command execution, heartbeat monitoring, and real-time progress reporting between QuPath and your Python microscope backend.
+- **Integration with Python Controllers**: Robust socket-based communication with real-time progress reporting and heartbeat monitoring between QuPath and your Python microscope backend.
 - **Project & Data Management**: Automatic project creation, tile config, and stitched OME-TIFF integration.
 - **Extensible GUI**: Easily add dialogs for new acquisition/analysis routines.
 - **Error Handling**: User notifications for bounds violations, acquisition errors, and resource validation.
@@ -60,10 +62,16 @@ This extension requires qupath-extension-tiles-to-pyramid to create the pyramida
 
 ### Usage
 
-- **Launch QuPath** and open the “QP Scope” menu.
-- Use “Test Workflow” for stage movement and heartbeat demo.
-- Use “Bounding Box Workflow” to acquire a defined region with automatic tiling.
-- Use “Existing Image Workflow” to register new high-res scans to a pre-existing macro image, using affine transforms and annotation selection.
+- **Launch QuPath** and open the "QP Scope" menu.
+- **Acquisition Workflows**:
+  - **"Start with Bounding Box"**: Acquire a defined region with automatic tiling.
+  - **"Start with Existing Image"**: Register new high-res scans to a pre-existing macro image using affine transforms and annotation selection.
+  - **"Microscope to Microscope Alignment"**: Semi-automated alignment workflow for coordinate transformation between QuPath and microscope coordinates.
+- **Calibration & Utilities**:
+  - **"Collect Background Images"**: Acquire flat-field correction backgrounds with adaptive exposure control. The system automatically adjusts exposure times to reach target intensities for consistent background quality.
+  - **"Polarizer Calibration (PPM)"**: Calibrate PPM rotation stage to determine crossed polarizer positions. Sweeps rotation angles, fits data to sine curve, and generates a report with suggested `config_PPM.yml` angles. Run this only after optical component changes.
+  - **"Basic Stage Control"**: Manual stage movement interface for testing.
+  - **"Server Connection Settings"**: Configure socket communication with Python microscope server.
 
 ---
 Multi-Sample Project Support
@@ -132,6 +140,84 @@ Use descriptive sample names when setting up projects for easier identification
 Sub-images from the same parent will share the same collection number for easy filtering
 
 This metadata system operates transparently in the background, ensuring data integrity while supporting complex multi-sample workflows.
+
+---
+
+## Calibration Workflows
+
+### Background Collection
+
+**Purpose**: Acquire flat-field correction images for improved image quality and quantitative analysis.
+
+**Key Features**:
+- **Adaptive Exposure Control**: Automatically adjusts exposure times to reach target grayscale intensities (e.g., 245 for PPM 90°, 125 for PPM 0°)
+- **Fast Convergence**: Typically achieves target intensity in 2-5 iterations using proportional control algorithm
+- **Accurate Metadata**: Records actual exposure times used (not requested values) for reproducibility
+- **Modality Support**: Works with all imaging modes (PPM, brightfield, etc.)
+
+**When to Use**:
+- Initial microscope setup
+- After light source changes or bulb replacement
+- When image quality degrades
+- For quantitative imaging requiring flat-field correction
+
+**Workflow**:
+1. Position microscope at clean, blank area (uniform background)
+2. Select **"Collect Background Images"** from menu
+3. Choose modality, objective, and output folder
+4. Review/adjust angles and initial exposure estimates
+5. System acquires backgrounds, adjusting exposure automatically
+6. Metadata files saved with actual exposure values for each angle
+
+### Polarizer Calibration (PPM)
+
+**Purpose**: Determine optimal crossed polarizer angles for PPM (Polarized Light Microscopy) imaging.
+
+**Key Features**:
+- **Automated Angle Sweep**: Rotates polarizer through configurable range (default 0-360°)
+- **Sine Curve Fitting**: Uses `scipy` to fit intensity vs. angle data
+- **Minima Detection**: Automatically identifies crossed polarizer positions (local intensity minima)
+- **Comprehensive Report**: Generates text file with calibration results and config suggestions
+
+**When to Use**:
+- After installing or repositioning polarization optics
+- After reseating or replacing rotation stage
+- To validate or update `rotation_angles` in `config_PPM.yml`
+- NOT needed for routine imaging sessions
+
+**Workflow**:
+1. Position microscope at uniform, bright background
+2. Select **"Polarizer Calibration (PPM)..."** from menu
+3. Configure sweep parameters:
+   - Start/End angles (default: 0° to 360°)
+   - Step size (default: 5°; smaller = more accurate but slower)
+   - Exposure time (default: 10ms; keep short to avoid saturation)
+4. Start calibration (~90 seconds for full 360° sweep at 5° steps)
+5. Review generated report containing:
+   - Crossed polarizer angles (for `config_PPM.yml`)
+   - Intensity statistics and dynamic range
+   - Sine fit parameters
+   - Raw data for verification
+6. Update `config_PPM.yml` with suggested crossed angles
+
+**Output Report Includes**:
+```
+CROSSED POLARIZER POSITIONS (MINIMA)
+================================================================================
+Found 4 crossed polarizer positions:
+  Position 1: Angle: -5.20 deg, Intensity: 125.3
+  Position 2: Angle: 0.10 deg, Intensity: 118.7
+  Position 3: Angle: 5.30 deg, Intensity: 126.1
+  Position 4: Angle: 175.00 deg, Intensity: 122.5
+
+CONFIG_PPM.YML UPDATE SUGGESTIONS
+================================================================================
+rotation_angles:
+  - name: 'crossed'
+    angles: [-5.2, 0.1, 5.3, 175.0]
+  - name: 'uncrossed'
+    angles: [90.0]
+```
 
 ---
 

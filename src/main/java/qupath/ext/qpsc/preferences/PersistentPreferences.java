@@ -333,6 +333,12 @@ public class PersistentPreferences {
     private static final StringProperty lastModalitySaved =
             PathPrefs.createPersistentPreference("LastModality", "");
 
+    private static final StringProperty lastObjectiveSaved =
+            PathPrefs.createPersistentPreference("LastObjective", "");
+
+    private static final StringProperty lastDetectorSaved =
+            PathPrefs.createPersistentPreference("LastDetector", "");
+
     public static String getLastSampleName() {
         return lastSampleNameSaved.getValue();
     }
@@ -347,6 +353,22 @@ public class PersistentPreferences {
 
     public static void setLastModality(final String modality) {
         lastModalitySaved.setValue(modality);
+    }
+
+    public static String getLastObjective() {
+        return lastObjectiveSaved.getValue();
+    }
+
+    public static void setLastObjective(final String objective) {
+        lastObjectiveSaved.setValue(objective);
+    }
+
+    public static String getLastDetector() {
+        return lastDetectorSaved.getValue();
+    }
+
+    public static void setLastDetector(final String detector) {
+        lastDetectorSaved.setValue(detector);
     }
 
 

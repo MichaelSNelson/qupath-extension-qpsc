@@ -154,6 +154,10 @@ public class QPScopeController {
                 logger.debug("Launching background collection workflow");
                 BackgroundCollectionWorkflow.run();
             }
+            case "polarizerCalibration" -> {
+                logger.debug("Launching polarizer calibration workflow");
+                PolarizerCalibrationWorkflow.run();
+            }
             case "serverConnection" -> {
                 logger.debug("Launching server connection dialog");
                 ServerConnectionController.showDialog()

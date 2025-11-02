@@ -192,12 +192,12 @@ public class SampleSetupController {
                     // Extract objective ID from display string
                     String objectiveId = extractIdFromDisplayString(newObjective);
                     logger.debug("Objective changed to: {} ({})", newObjective, objectiveId);
-                    
+
                     // Get available detectors for this modality+objective combo
                     Set<String> detectorIds = configManager.getAvailableDetectorsForModalityObjective(
                             modalityBox.getValue(), objectiveId);
                     Map<String, String> detectorNames = configManager.getDetectorFriendlyNames(detectorIds);
-                    
+
                     // Create display strings
                     List<String> detectorDisplayItems = detectorIds.stream()
                             .map(id -> {
@@ -206,12 +206,28 @@ public class SampleSetupController {
                             })
                             .sorted()
                             .collect(Collectors.toList());
-                    
+
                     detectorBox.getItems().clear();
                     detectorBox.getItems().addAll(detectorDisplayItems);
-                    
-                    // Select first detector if available
-                    if (!detectorDisplayItems.isEmpty()) {
+
+                    // Try to restore last used detector
+                    String lastDetector = PersistentPreferences.getLastDetector();
+                    boolean detectorRestored = false;
+                    if (!lastDetector.isEmpty()) {
+                        // Try to find matching detector by ID
+                        for (String displayItem : detectorDisplayItems) {
+                            String id = extractIdFromDisplayString(displayItem);
+                            if (id.equals(lastDetector)) {
+                                detectorBox.setValue(displayItem);
+                                detectorRestored = true;
+                                logger.debug("Restored last detector: {}", lastDetector);
+                                break;
+                            }
+                        }
+                    }
+
+                    // Select first detector if no saved preference or saved one not found
+                    if (!detectorRestored && !detectorDisplayItems.isEmpty()) {
                         detectorBox.setValue(detectorDisplayItems.get(0));
                     }
                 }
@@ -223,13 +239,13 @@ public class SampleSetupController {
                     // Manually trigger the change listener
                     String initialModality = modalityBox.getValue();
                     logger.debug("Triggering initial population for modality: {}", initialModality);
-                    
+
                     // Get available objectives for this modality
                     Set<String> objectiveIds = configManager.getAvailableObjectivesForModality(initialModality);
                     Map<String, String> objectiveNames = configManager.getObjectiveFriendlyNames(objectiveIds);
-                    
+
                     logger.debug("Initial objectives found: {}", objectiveIds);
-                    
+
                     // Create display strings that combine friendly name with ID for clarity
                     List<String> objectiveDisplayItems = objectiveIds.stream()
                             .map(id -> {
@@ -238,12 +254,28 @@ public class SampleSetupController {
                             })
                             .sorted()
                             .collect(Collectors.toList());
-                    
+
                     objectiveBox.getItems().clear();
                     objectiveBox.getItems().addAll(objectiveDisplayItems);
-                    
-                    // Select first objective if available
-                    if (!objectiveDisplayItems.isEmpty()) {
+
+                    // Try to restore last used objective
+                    String lastObjective = PersistentPreferences.getLastObjective();
+                    boolean objectiveRestored = false;
+                    if (!lastObjective.isEmpty()) {
+                        // Try to find matching objective by ID
+                        for (String displayItem : objectiveDisplayItems) {
+                            String id = extractIdFromDisplayString(displayItem);
+                            if (id.equals(lastObjective)) {
+                                objectiveBox.setValue(displayItem);
+                                objectiveRestored = true;
+                                logger.debug("Restored last objective: {}", lastObjective);
+                                break;
+                            }
+                        }
+                    }
+
+                    // Select first objective if no saved preference or saved one not found
+                    if (!objectiveRestored && !objectiveDisplayItems.isEmpty()) {
                         objectiveBox.setValue(objectiveDisplayItems.get(0));
                     }
                 }
@@ -408,9 +440,11 @@ public class SampleSetupController {
                         //TODO maybe set QPPPreferenceDialog to new folder if that changed?
                     }
                     PersistentPreferences.setLastModality(mod);
+                    PersistentPreferences.setLastObjective(obj);
+                    PersistentPreferences.setLastDetector(det);
 
-                    logger.info("Saved sample setup preferences - name: {}, folder: {}, modality: {}",
-                            name, folder.getAbsolutePath(), mod);
+                    logger.info("Saved sample setup preferences - name: {}, folder: {}, modality: {}, objective: {}, detector: {}",
+                            name, folder.getAbsolutePath(), mod, obj, det);
                 }
             });
 
@@ -428,6 +462,8 @@ public class SampleSetupController {
                         // DO NOT save projects folder - it comes from QPPreferenceDialog
                     }
                     PersistentPreferences.setLastModality(mod);
+                    PersistentPreferences.setLastObjective(obj);
+                    PersistentPreferences.setLastDetector(det);
 
                     logger.info("Saved sample setup preferences - name: {}, modality: {}, objective: {}, detector: {}",
                             name, mod, obj, det);

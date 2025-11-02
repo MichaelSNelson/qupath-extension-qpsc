@@ -202,9 +202,20 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 			}
 		});
 
+		// 5) Polarizer calibration (PPM only)
+		MenuItem polarizerCalibrationOption = new MenuItem(res.getString("menu.polarizerCalibration"));
+		polarizerCalibrationOption.setDisable(!configValid);
+		polarizerCalibrationOption.setOnAction(e -> {
+			try {
+				QPScopeController.getInstance().startWorkflow("polarizerCalibration");
+			} catch (IOException ex) {
+				throw new RuntimeException(ex);
+			}
+		});
+
 		// === UTILITY MENU ITEMS ===
 
-		// 5) Basic stage control (test only)
+		// 6) Basic stage control (test only)
 		MenuItem stageControlOption = new MenuItem(res.getString("menu.stagecontrol"));
 		stageControlOption.setOnAction(e ->
 				{
@@ -245,8 +256,9 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 				existingImageOption,
 				alignmentOption,
 				new SeparatorMenuItem(),  // Visual separator
-				// Background collection
+				// Background collection and calibration
 				backgroundCollectionOption,
+				polarizerCalibrationOption,
 				new SeparatorMenuItem(),  // Visual separator
 				// Utilities
 				stageControlOption,

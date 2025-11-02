@@ -5,6 +5,7 @@ docs/
 deploy/
 target/
 log/
+logs/
 
 # IntelliJ
 .idea/

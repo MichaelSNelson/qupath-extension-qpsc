@@ -607,6 +607,111 @@ public class MicroscopeSocketClient implements AutoCloseable {
             }
         }
     }
+
+    /**
+     * Starts a polarizer calibration workflow on the server for PPM rotation stage.
+     * This method uses the POLCAL command with parameters for angle sweep configuration.
+     *
+     * @param yamlPath Path to microscope configuration YAML file
+     * @param outputPath Output directory for calibration report
+     * @param startAngle Starting angle for sweep (degrees)
+     * @param endAngle Ending angle for sweep (degrees)
+     * @param stepSize Step size for angle sweep (degrees)
+     * @param exposureMs Exposure time for images (milliseconds)
+     * @return Path to the generated calibration report file
+     * @throws IOException if communication fails
+     */
+    public String startPolarizerCalibration(String yamlPath, String outputPath,
+                                           double startAngle, double endAngle,
+                                           double stepSize, double exposureMs) throws IOException {
+
+        // Build POLCAL-specific command message
+        String message = String.format("--yaml %s --output %s --start %.1f --end %.1f --step %.1f --exposure %.1f END_MARKER",
+                yamlPath, outputPath, startAngle, endAngle, stepSize, exposureMs);
+        byte[] messageBytes = message.getBytes(StandardCharsets.UTF_8);
+
+        logger.info("Sending polarizer calibration command:");
+        logger.info("  Message length: {} bytes", messageBytes.length);
+        logger.info("  Message content: {}", message);
+
+        synchronized (socketLock) {
+            ensureConnected();
+
+            // Store original timeout
+            int originalTimeout = 0;
+            try {
+                originalTimeout = socket.getSoTimeout();
+                // Increase timeout for calibration (can take several minutes)
+                socket.setSoTimeout(300000); // 5 minutes
+                logger.debug("Increased socket timeout to 5 minutes for calibration");
+            } catch (IOException e) {
+                logger.warn("Failed to adjust socket timeout", e);
+            }
+
+            try {
+                OutputStream output = socket.getOutputStream();
+                InputStream input = socket.getInputStream();
+
+                // Send command
+                output.write("polcal__".getBytes(StandardCharsets.UTF_8));
+                output.write(messageBytes);
+                output.flush();
+
+                logger.info("Command sent, waiting for server response...");
+
+                // Read initial response (STARTED or FAILED)
+                byte[] buffer = new byte[8192];
+                int bytesRead = input.read(buffer);
+                if (bytesRead > 0) {
+                    String response = new String(buffer, 0, bytesRead, StandardCharsets.UTF_8);
+                    logger.info("Received initial server response: {}", response);
+
+                    if (response.startsWith("FAILED:")) {
+                        throw new IOException("Server rejected polarizer calibration: " + response);
+                    } else if (!response.startsWith("STARTED:")) {
+                        logger.warn("Unexpected initial server response: {}", response);
+                    }
+                }
+
+                // Wait for final SUCCESS/FAILED response
+                logger.info("Waiting for polarizer calibration to complete...");
+                bytesRead = input.read(buffer);
+                if (bytesRead > 0) {
+                    String finalResponse = new String(buffer, 0, bytesRead, StandardCharsets.UTF_8);
+                    logger.info("Received final server response: {}", finalResponse);
+
+                    if (finalResponse.startsWith("FAILED:")) {
+                        throw new IOException("Polarizer calibration failed: " + finalResponse.substring(7));
+                    } else if (finalResponse.startsWith("SUCCESS:")) {
+                        // Extract report path from SUCCESS response
+                        String reportPath = finalResponse.substring(8).trim();
+                        logger.info("Polarizer calibration successful. Report: {}", reportPath);
+                        return reportPath;
+                    } else {
+                        throw new IOException("Unexpected final response: " + finalResponse);
+                    }
+                }
+
+                throw new IOException("No response received from server");
+
+            } catch (IOException e) {
+                logger.error("Error during polarizer calibration", e);
+                handleIOException(new IOException("Polarizer calibration error", e));
+                throw new IOException("Polarizer calibration error: " + e.getMessage(), e);
+            } finally {
+                // Restore original timeout
+                if (socket != null) {
+                    try {
+                        socket.setSoTimeout(originalTimeout);
+                        logger.debug("Restored socket timeout to {}ms", originalTimeout);
+                    } catch (IOException e) {
+                        logger.warn("Failed to restore original socket timeout", e);
+                    }
+                }
+            }
+        }
+    }
+
     /**
      * Executes a command and optionally waits for response.
      *
