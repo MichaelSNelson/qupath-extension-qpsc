@@ -174,53 +174,92 @@ This metadata system operates transparently in the background, ensuring data int
 
 ### Polarizer Calibration (PPM)
 
-**Purpose**: Determine optimal crossed polarizer angles for PPM (Polarized Light Microscopy) imaging.
+**Purpose**: Determine exact hardware offset (`ppm_pizstage_offset`) for PPM rotation stage calibration.
 
 **Key Features**:
-- **Automated Angle Sweep**: Rotates polarizer through configurable range (default 0-360°)
-- **Sine Curve Fitting**: Uses `scipy` to fit intensity vs. angle data
-- **Minima Detection**: Automatically identifies crossed polarizer positions (local intensity minima)
-- **Comprehensive Report**: Generates text file with calibration results and config suggestions
+- **Two-Stage Calibration**: Coarse sweep to locate minima, then fine sweep for exact hardware positions
+- **Hardware Position Detection**: Works directly with encoder counts for precise calibration
+- **Automatic Offset Calculation**: Determines the exact hardware position for optical angle reference (0°)
+- **Sine Curve Fitting**: Uses `scipy` to fit intensity vs. angle data for validation
+- **Comprehensive Report**: Generates text file with exact hardware positions and config recommendations
 
 **When to Use**:
-- After installing or repositioning polarization optics
-- After reseating or replacing rotation stage
-- To validate or update `rotation_angles` in `config_PPM.yml`
-- NOT needed for routine imaging sessions
+- **CRITICAL**: After installing or repositioning rotation stage hardware
+- After reseating or replacing the rotation stage motor
+- After optical component changes that affect polarizer alignment
+- To recalibrate `ppm_pizstage_offset` in `config_PPM.yml`
+- **NOT needed** for routine imaging sessions or between samples
+
+**Two-Stage Calibration Process**:
+
+**Stage 1 - Coarse Sweep:**
+- Sweeps full 360° rotation in hardware encoder counts
+- User-defined step size (default: 5°, equivalent to 5000 encoder counts for PI stage)
+- Identifies approximate locations of 2 crossed polarizer minima (180° apart)
+- Takes ~90 seconds at 5° steps
+
+**Stage 2 - Fine Sweep:**
+- Narrow sweep around each detected minimum
+- Very small steps (0.1°, equivalent to 100 encoder counts)
+- Determines exact hardware position of each intensity minimum
+- Takes ~20 seconds per minimum (40 seconds total for 2 minima)
 
 **Workflow**:
 1. Position microscope at uniform, bright background
 2. Select **"Polarizer Calibration (PPM)..."** from menu
-3. Configure sweep parameters:
-   - Start/End angles (default: 0° to 360°)
-   - Step size (default: 5°; smaller = more accurate but slower)
+3. Configure calibration parameters:
+   - Coarse step size (default: 5°; recommended range: 2-10°)
    - Exposure time (default: 10ms; keep short to avoid saturation)
-4. Start calibration (~90 seconds for full 360° sweep at 5° steps)
+4. Start calibration (~2 minutes total for full two-stage calibration)
 5. Review generated report containing:
-   - Crossed polarizer angles (for `config_PPM.yml`)
-   - Intensity statistics and dynamic range
-   - Sine fit parameters
-   - Raw data for verification
-6. Update `config_PPM.yml` with suggested crossed angles
+   - **Exact hardware positions** (encoder counts) for each crossed polarizer minimum
+   - **Recommended `ppm_pizstage_offset` value** (hardware position to use as 0° reference)
+   - Optical angles relative to recommended offset
+   - Intensity statistics and validation data
+   - Raw data from both coarse and fine sweeps
+6. **Update `config_PPM.yml`** with recommended offset value
 
 **Output Report Includes**:
 ```
-CROSSED POLARIZER POSITIONS (MINIMA)
+EXACT HARDWARE POSITIONS (CROSSED POLARIZERS)
 ================================================================================
-Found 4 crossed polarizer positions:
-  Position 1: Angle: -5.20 deg, Intensity: 125.3
-  Position 2: Angle: 0.10 deg, Intensity: 118.7
-  Position 3: Angle: 5.30 deg, Intensity: 126.1
-  Position 4: Angle: 175.00 deg, Intensity: 122.5
+Found 2 crossed polarizer positions:
 
-CONFIG_PPM.YML UPDATE SUGGESTIONS
+  Minimum 1:
+    Hardware Position: 50228.7 encoder counts
+    Optical Angle: 0.00 deg (relative to recommended offset)
+    Intensity: 118.3
+
+  Minimum 2:
+    Hardware Position: 230228.7 encoder counts
+    Optical Angle: 180.00 deg (relative to recommended offset)
+    Intensity: 121.5
+
+Separation between minima: 180000.0 counts (180.0 deg)
+Expected: 180000.0 counts (180.0 deg)
+
+CONFIG_PPM.YML UPDATE RECOMMENDATIONS
 ================================================================================
+CRITICAL: Update ppm_pizstage_offset to the recommended value below.
+This sets the hardware reference position for optical angle 0 deg.
+
+ppm_pizstage_offset: 50228.7
+
+After updating the offset, you can use the following optical angles:
+
 rotation_angles:
   - name: 'crossed'
-    angles: [-5.2, 0.1, 5.3, 175.0]
+    tick: 0   # Reference position (hardware: 50228.7)
+    # OR tick: 180   # Alternate crossed (hardware: 230228.7)
   - name: 'uncrossed'
-    angles: [90.0]
+    tick: 90  # 90 deg from crossed (perpendicular)
 ```
+
+**Important Notes**:
+- This calibration determines the **hardware offset itself**, not just optical angles
+- The offset value is specific to your rotation stage and optical configuration
+- After updating `ppm_pizstage_offset`, the optical angle convention (tick values) remains simple: 0°, 90°, 180°
+- Hardware automatically converts: `hardware_position = (tick * 1000) + ppm_pizstage_offset`
 
 ### Autofocus Settings Editor
 

@@ -168,15 +168,11 @@ public class PolarizerCalibrationWorkflow {
             });
 
             // Calibration parameters
-            Spinner<Double> startAngleSpinner = new Spinner<>(0.0, 360.0, 0.0, 10.0);
-            startAngleSpinner.setEditable(true);
-            startAngleSpinner.setPrefWidth(100);
+            // Two-stage calibration: always uses full 360 deg range
+            // Stage 1: Coarse sweep (user-defined step size)
+            // Stage 2: Fine sweep (0.1 deg steps around each minimum)
 
-            Spinner<Double> endAngleSpinner = new Spinner<>(0.0, 720.0, 360.0, 10.0);
-            endAngleSpinner.setEditable(true);
-            endAngleSpinner.setPrefWidth(100);
-
-            Spinner<Double> stepSizeSpinner = new Spinner<>(0.1, 45.0, 5.0, 1.0);
+            Spinner<Double> stepSizeSpinner = new Spinner<>(0.5, 10.0, 5.0, 0.5);
             stepSizeSpinner.setEditable(true);
             stepSizeSpinner.setPrefWidth(100);
 
@@ -184,23 +180,33 @@ public class PolarizerCalibrationWorkflow {
             exposureSpinner.setEditable(true);
             exposureSpinner.setPrefWidth(100);
 
+            // Info label for calibration description
+            Label descriptionLabel = new Label(
+                "Two-stage calibration:\n" +
+                "1. Coarse sweep: 0-360 deg to locate minima\n" +
+                "2. Fine sweep: 0.1 deg steps for exact positions"
+            );
+            descriptionLabel.setStyle("-fx-font-size: 11px; -fx-text-fill: gray;");
+            descriptionLabel.setWrapText(true);
+
             // Info label for duration estimate
             Label durationLabel = new Label();
             durationLabel.setStyle("-fx-font-size: 11px; -fx-text-fill: gray;");
 
             // Update duration estimate when parameters change
             Runnable updateDuration = () -> {
-                double start = startAngleSpinner.getValue();
-                double end = endAngleSpinner.getValue();
                 double step = stepSizeSpinner.getValue();
-                int numSteps = (int) Math.ceil((end - start) / step) + 1;
-                int durationSec = (int) (numSteps * 0.5);
-                durationLabel.setText(String.format("Estimated duration: %d steps, ~%d seconds",
-                        numSteps, durationSec));
+                // Coarse sweep: 360 deg / step size
+                int coarseSteps = (int) Math.ceil(360.0 / step) + 1;
+                // Fine sweep: Assume 2 minima, each with (step*2) deg range at 0.1 deg steps
+                int fineStepsPerMinimum = (int) Math.ceil((step * 2) / 0.1);
+                int totalFineSteps = fineStepsPerMinimum * 2;  // 2 minima expected
+                int totalSteps = coarseSteps + totalFineSteps;
+                int durationSec = (int) (totalSteps * 0.5);
+                durationLabel.setText(String.format("Estimated: Coarse %d steps + Fine %d steps = ~%d seconds total",
+                        coarseSteps, totalFineSteps, durationSec));
             };
 
-            startAngleSpinner.valueProperty().addListener((obs, old, val) -> updateDuration.run());
-            endAngleSpinner.valueProperty().addListener((obs, old, val) -> updateDuration.run());
             stepSizeSpinner.valueProperty().addListener((obs, old, val) -> updateDuration.run());
 
             // Initial duration estimate
@@ -216,23 +222,20 @@ public class PolarizerCalibrationWorkflow {
             grid.add(new Separator(), 0, row, 3, 1);
             row++;
 
-            Label paramsLabel = new Label("Calibration Parameters:");
+            Label paramsLabel = new Label("Hardware Offset Calibration:");
             paramsLabel.setStyle("-fx-font-weight: bold;");
             grid.add(paramsLabel, 0, row, 3, 1);
             row++;
 
-            grid.add(new Label("Start Angle (deg):"), 0, row);
-            grid.add(startAngleSpinner, 1, row);
-            grid.add(new Label("Full rotation = 0 to 360"), 2, row);
+            grid.add(descriptionLabel, 0, row, 3, 1);
             row++;
 
-            grid.add(new Label("End Angle (deg):"), 0, row);
-            grid.add(endAngleSpinner, 1, row);
+            grid.add(new Separator(), 0, row, 3, 1);
             row++;
 
-            grid.add(new Label("Step Size (deg):"), 0, row);
+            grid.add(new Label("Coarse Step Size (deg):"), 0, row);
             grid.add(stepSizeSpinner, 1, row);
-            grid.add(new Label("Smaller = more accurate"), 2, row);
+            grid.add(new Label("5 deg recommended"), 2, row);
             row++;
 
             grid.add(new Label("Exposure (ms):"), 0, row);
@@ -261,32 +264,24 @@ public class PolarizerCalibrationWorkflow {
                     return;
                 }
 
-                double start = startAngleSpinner.getValue();
-                double end = endAngleSpinner.getValue();
                 double step = stepSizeSpinner.getValue();
 
-                if (end <= start) {
-                    Dialogs.showErrorMessage("Invalid Angle Range",
-                            "End angle must be greater than start angle.");
-                    event.consume();
-                    return;
-                }
-
-                if (step <= 0 || step > (end - start)) {
+                if (step <= 0 || step > 10.0) {
                     Dialogs.showErrorMessage("Invalid Step Size",
-                            "Step size must be positive and smaller than the angle range.");
+                            "Step size must be between 0.5 and 10.0 degrees.");
                     event.consume();
                     return;
                 }
             });
 
             // Result converter
+            // Note: Two-stage calibration always uses 0-360 deg range
             dialog.setResultConverter(button -> {
                 if (button == okType) {
                     return new CalibrationParams(
                             outputField.getText().trim(),
-                            startAngleSpinner.getValue(),
-                            endAngleSpinner.getValue(),
+                            0.0,  // start_angle (not used, always 0)
+                            360.0,  // end_angle (not used, always 360)
                             stepSizeSpinner.getValue(),
                             exposureSpinner.getValue()
                     );
