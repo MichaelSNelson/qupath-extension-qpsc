@@ -1,0 +1,464 @@
+package qupath.ext.qpsc.controller;
+
+import javafx.application.Platform;
+import javafx.geometry.Insets;
+import javafx.geometry.Pos;
+import javafx.scene.control.*;
+import javafx.scene.layout.GridPane;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
+import javafx.scene.layout.VBox;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.yaml.snakeyaml.DumperOptions;
+import org.yaml.snakeyaml.Yaml;
+import qupath.ext.qpsc.preferences.QPPreferenceDialog;
+import qupath.ext.qpsc.utilities.MicroscopeConfigManager;
+import qupath.fx.dialogs.Dialogs;
+
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.*;
+
+/**
+ * AutofocusEditorWorkflow - Configuration editor for per-objective autofocus settings
+ *
+ * <p>This workflow provides a GUI for editing autofocus parameters stored in autofocus_{microscope}.yml.
+ * The autofocus configuration is separate from the main microscope config and contains three parameters
+ * per objective:
+ * <ul>
+ *   <li>n_steps: Number of Z positions to sample during autofocus</li>
+ *   <li>search_range_um: Total Z range to search in micrometers</li>
+ *   <li>n_tiles: Spatial frequency - autofocus runs every N tiles during acquisition</li>
+ * </ul>
+ *
+ * <p>Key features:
+ * <ul>
+ *   <li>Reads objectives from main microscope config (respects preference setting)</li>
+ *   <li>Loads existing autofocus settings if autofocus_{microscope}.yml exists</li>
+ *   <li>"Write to file" button saves immediately but keeps dialog open</li>
+ *   <li>"OK" button saves (if changed) and closes dialog</li>
+ *   <li>"Cancel" button closes without saving unsaved changes</li>
+ *   <li>Parameter validation with warnings for extreme values</li>
+ * </ul>
+ *
+ * @author Mike Nelson
+ */
+public class AutofocusEditorWorkflow {
+
+    private static final Logger logger = LoggerFactory.getLogger(AutofocusEditorWorkflow.class);
+
+    /**
+     * Autofocus settings for a single objective
+     */
+    private static class AutofocusSettings {
+        String objective;
+        int nSteps;
+        double searchRangeUm;
+        int nTiles;
+
+        AutofocusSettings(String objective, int nSteps, double searchRangeUm, int nTiles) {
+            this.objective = objective;
+            this.nSteps = nSteps;
+            this.searchRangeUm = searchRangeUm;
+            this.nTiles = nTiles;
+        }
+
+        // Validation with detailed feedback
+        List<String> validate() {
+            List<String> warnings = new ArrayList<>();
+
+            if (nSteps <= 0) {
+                warnings.add("n_steps must be positive");
+            } else if (nSteps > 50) {
+                warnings.add("n_steps > 50 may be unnecessarily slow (typical range: 5-20)");
+            }
+
+            if (searchRangeUm <= 0) {
+                warnings.add("search_range_um must be positive");
+            } else if (searchRangeUm > 1000) {
+                warnings.add("search_range_um > 1000 um is very large (typical range: 10-50 um)");
+            }
+
+            if (nTiles <= 0) {
+                warnings.add("n_tiles must be positive");
+            } else if (nTiles > 20) {
+                warnings.add("n_tiles > 20 may cause infrequent autofocus (typical range: 3-10)");
+            }
+
+            return warnings;
+        }
+    }
+
+    /**
+     * Main entry point for the autofocus editor workflow
+     */
+    public static void run() {
+        Platform.runLater(() -> {
+            try {
+                showAutofocusEditorDialog();
+            } catch (Exception e) {
+                logger.error("Error in autofocus editor workflow", e);
+                Dialogs.showErrorMessage("Autofocus Editor Error",
+                    "Failed to open autofocus editor: " + e.getMessage());
+            }
+        });
+    }
+
+    /**
+     * Show the autofocus editor dialog
+     */
+    private static void showAutofocusEditorDialog() throws IOException {
+        // Get microscope config path from preferences
+        String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty().get();
+        if (configPath == null || configPath.isEmpty()) {
+            Dialogs.showErrorMessage("Configuration Error",
+                "No microscope configuration file set in preferences.");
+            return;
+        }
+
+        File configFile = new File(configPath);
+        if (!configFile.exists()) {
+            Dialogs.showErrorMessage("Configuration Error",
+                "Microscope configuration file not found: " + configPath);
+            return;
+        }
+
+        // Extract microscope name from config filename (e.g., "config_PPM.yml" -> "PPM")
+        String configFilename = configFile.getName();
+        String microscopeName = extractMicroscopeName(configFilename);
+
+        // Construct autofocus config path
+        File configDir = configFile.getParentFile();
+        File autofocusFile = new File(configDir, "autofocus_" + microscopeName + ".yml");
+
+        logger.info("Autofocus editor using config: {}", autofocusFile.getAbsolutePath());
+
+        // Load objectives from main config
+        MicroscopeConfigManager configManager = MicroscopeConfigManager.getInstance(configPath);
+        List<String> objectives = loadObjectivesFromConfig(configManager);
+
+        if (objectives.isEmpty()) {
+            Dialogs.showErrorMessage("Configuration Error",
+                "No objectives found in microscope configuration.");
+            return;
+        }
+
+        // Load existing autofocus settings (if file exists)
+        Map<String, AutofocusSettings> existingSettings = loadAutofocusSettings(autofocusFile);
+
+        // Create working copy with defaults for all objectives
+        Map<String, AutofocusSettings> workingSettings = new LinkedHashMap<>();
+        for (String obj : objectives) {
+            if (existingSettings.containsKey(obj)) {
+                AutofocusSettings existing = existingSettings.get(obj);
+                workingSettings.put(obj, new AutofocusSettings(obj, existing.nSteps, existing.searchRangeUm, existing.nTiles));
+            } else {
+                // Use defaults
+                workingSettings.put(obj, new AutofocusSettings(obj, 9, 15.0, 5));
+            }
+        }
+
+        // Create dialog
+        Dialog<ButtonType> dialog = new Dialog<>();
+        dialog.setTitle("Autofocus Configuration Editor");
+        dialog.setHeaderText("Edit autofocus parameters for " + microscopeName + " microscope\n" +
+                "Settings will be saved to: " + autofocusFile.getName());
+
+        // Create UI
+        VBox mainLayout = new VBox(10);
+        mainLayout.setPadding(new Insets(10));
+
+        // Objective selection
+        Label objectiveLabel = new Label("Select Objective:");
+        ComboBox<String> objectiveCombo = new ComboBox<>();
+        objectiveCombo.getItems().addAll(objectives);
+        objectiveCombo.setValue(objectives.get(0));
+
+        // Parameter inputs
+        GridPane paramGrid = new GridPane();
+        paramGrid.setHgap(10);
+        paramGrid.setVgap(10);
+        paramGrid.setPadding(new Insets(10));
+
+        Label nStepsLabel = new Label("n_steps:");
+        Spinner<Integer> nStepsSpinner = new Spinner<>(1, 100, 9, 1);
+        nStepsSpinner.setEditable(true);
+        nStepsSpinner.setPrefWidth(100);
+        Label nStepsDesc = new Label("(Number of Z positions to sample)");
+        nStepsDesc.setStyle("-fx-font-size: 10px; -fx-text-fill: gray;");
+
+        Label searchRangeLabel = new Label("search_range_um:");
+        TextField searchRangeField = new TextField("15.0");
+        searchRangeField.setPrefWidth(100);
+        Label searchRangeDesc = new Label("(Total Z range in micrometers)");
+        searchRangeDesc.setStyle("-fx-font-size: 10px; -fx-text-fill: gray;");
+
+        Label nTilesLabel = new Label("n_tiles:");
+        Spinner<Integer> nTilesSpinner = new Spinner<>(1, 50, 5, 1);
+        nTilesSpinner.setEditable(true);
+        nTilesSpinner.setPrefWidth(100);
+        Label nTilesDesc = new Label("(Autofocus every N tiles)");
+        nTilesDesc.setStyle("-fx-font-size: 10px; -fx-text-fill: gray;");
+
+        paramGrid.add(nStepsLabel, 0, 0);
+        paramGrid.add(nStepsSpinner, 1, 0);
+        paramGrid.add(nStepsDesc, 2, 0);
+
+        paramGrid.add(searchRangeLabel, 0, 1);
+        paramGrid.add(searchRangeField, 1, 1);
+        paramGrid.add(searchRangeDesc, 2, 1);
+
+        paramGrid.add(nTilesLabel, 0, 2);
+        paramGrid.add(nTilesSpinner, 1, 2);
+        paramGrid.add(nTilesDesc, 2, 2);
+
+        // Status label for validation feedback
+        Label statusLabel = new Label();
+        statusLabel.setStyle("-fx-text-fill: blue; -fx-font-weight: bold;");
+        statusLabel.setWrapText(true);
+        statusLabel.setMaxWidth(500);
+
+        // Track current objective for saving changes before switching
+        final String[] currentObjective = {objectiveCombo.getValue()};
+
+        // Save current UI values to working settings
+        Runnable saveCurrentSettings = () -> {
+            try {
+                int nSteps = nStepsSpinner.getValue();
+                double searchRange = Double.parseDouble(searchRangeField.getText());
+                int nTiles = nTilesSpinner.getValue();
+
+                workingSettings.put(currentObjective[0],
+                    new AutofocusSettings(currentObjective[0], nSteps, searchRange, nTiles));
+            } catch (NumberFormatException ex) {
+                logger.warn("Invalid numeric input when saving settings");
+            }
+        };
+
+        // Load settings from working copy for selected objective
+        Runnable loadSettingsForObjective = () -> {
+            // First save current UI state
+            if (currentObjective[0] != null) {
+                saveCurrentSettings.run();
+            }
+
+            // Update current objective
+            String selectedObjective = objectiveCombo.getValue();
+            currentObjective[0] = selectedObjective;
+
+            // Load from working settings
+            AutofocusSettings settings = workingSettings.get(selectedObjective);
+
+            if (settings != null) {
+                nStepsSpinner.getValueFactory().setValue(settings.nSteps);
+                searchRangeField.setText(String.valueOf(settings.searchRangeUm));
+                nTilesSpinner.getValueFactory().setValue(settings.nTiles);
+
+                if (existingSettings.containsKey(selectedObjective)) {
+                    statusLabel.setText("Loaded existing settings for " + selectedObjective);
+                } else {
+                    statusLabel.setText("Using default values for " + selectedObjective);
+                }
+            }
+        };
+
+        objectiveCombo.setOnAction(e -> loadSettingsForObjective.run());
+        loadSettingsForObjective.run(); // Load initial settings
+
+        // "Write to file" button
+        Button writeButton = new Button("Write to File");
+        writeButton.setOnAction(e -> {
+            try {
+                // Save current UI state to working settings
+                saveCurrentSettings.run();
+
+                // Validate all settings
+                boolean hasErrors = false;
+                for (AutofocusSettings settings : workingSettings.values()) {
+                    List<String> warnings = settings.validate();
+                    if (!warnings.isEmpty()) {
+                        boolean proceed = Dialogs.showConfirmDialog(
+                            "Validation Warnings for " + settings.objective,
+                            String.join("\n", warnings) + "\n\nContinue saving?"
+                        );
+                        if (!proceed) {
+                            hasErrors = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (hasErrors) {
+                    return;
+                }
+
+                // Save to file
+                saveAutofocusSettings(autofocusFile, workingSettings);
+                statusLabel.setText("Settings saved successfully to " + autofocusFile.getName());
+                statusLabel.setStyle("-fx-text-fill: green; -fx-font-weight: bold;");
+                logger.info("Autofocus settings saved to: {}", autofocusFile.getAbsolutePath());
+
+            } catch (NumberFormatException ex) {
+                Dialogs.showErrorMessage("Input Error", "Please enter valid numeric values.");
+            } catch (IOException ex) {
+                logger.error("Failed to save autofocus settings", ex);
+                Dialogs.showErrorMessage("Save Error", "Failed to save settings: " + ex.getMessage());
+            }
+        });
+
+        // Layout
+        HBox objectiveRow = new HBox(10, objectiveLabel, objectiveCombo);
+        objectiveRow.setAlignment(Pos.CENTER_LEFT);
+
+        mainLayout.getChildren().addAll(
+            objectiveRow,
+            new Separator(),
+            paramGrid,
+            statusLabel,
+            new Separator(),
+            writeButton
+        );
+
+        dialog.getDialogPane().setContent(mainLayout);
+        dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
+
+        // OK button behavior - save if changed
+        Button okButton = (Button) dialog.getDialogPane().lookupButton(ButtonType.OK);
+        okButton.setOnAction(e -> {
+            writeButton.fire(); // Trigger save
+        });
+
+        dialog.showAndWait();
+    }
+
+    /**
+     * Extract microscope name from config filename
+     * E.g., "config_PPM.yml" -> "PPM"
+     */
+    private static String extractMicroscopeName(String configFilename) {
+        // Remove extension
+        String nameWithoutExt = configFilename.replaceFirst("\\.[^.]+$", "");
+
+        // Remove "config_" prefix if present
+        if (nameWithoutExt.startsWith("config_")) {
+            return nameWithoutExt.substring(7);
+        }
+
+        return nameWithoutExt;
+    }
+
+    /**
+     * Load list of objectives from main microscope config
+     */
+    private static List<String> loadObjectivesFromConfig(MicroscopeConfigManager configManager) {
+        List<String> objectives = new ArrayList<>();
+
+        try {
+            Map<String, Object> config = configManager.getFullConfig();
+            Map<String, Object> acqProfiles = (Map<String, Object>) config.get("acq_profiles_new");
+
+            if (acqProfiles != null) {
+                List<Map<String, Object>> defaults = (List<Map<String, Object>>) acqProfiles.get("defaults");
+
+                if (defaults != null) {
+                    for (Map<String, Object> entry : defaults) {
+                        String objective = (String) entry.get("objective");
+                        if (objective != null && !objectives.contains(objective)) {
+                            objectives.add(objective);
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logger.error("Error loading objectives from config", e);
+        }
+
+        return objectives;
+    }
+
+    /**
+     * Load autofocus settings from YAML file
+     */
+    private static Map<String, AutofocusSettings> loadAutofocusSettings(File autofocusFile) {
+        Map<String, AutofocusSettings> settings = new LinkedHashMap<>();
+
+        if (!autofocusFile.exists()) {
+            logger.info("Autofocus config file does not exist yet: {}", autofocusFile.getAbsolutePath());
+            return settings;
+        }
+
+        try {
+            Yaml yaml = new Yaml();
+            Map<String, Object> data = yaml.load(Files.newInputStream(autofocusFile.toPath()));
+
+            if (data != null) {
+                List<Map<String, Object>> afSettings = (List<Map<String, Object>>) data.get("autofocus_settings");
+
+                if (afSettings != null) {
+                    for (Map<String, Object> entry : afSettings) {
+                        String objective = (String) entry.get("objective");
+                        int nSteps = ((Number) entry.get("n_steps")).intValue();
+                        double searchRange = ((Number) entry.get("search_range_um")).doubleValue();
+                        int nTiles = ((Number) entry.get("n_tiles")).intValue();
+
+                        settings.put(objective, new AutofocusSettings(objective, nSteps, searchRange, nTiles));
+                    }
+                }
+            }
+
+            logger.info("Loaded autofocus settings for {} objectives", settings.size());
+        } catch (Exception e) {
+            logger.error("Error loading autofocus settings from file", e);
+        }
+
+        return settings;
+    }
+
+    /**
+     * Save autofocus settings to YAML file
+     */
+    private static void saveAutofocusSettings(File autofocusFile, Map<String, AutofocusSettings> settings) throws IOException {
+        // Build YAML structure
+        List<Map<String, Object>> afSettingsList = new ArrayList<>();
+
+        for (AutofocusSettings setting : settings.values()) {
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("objective", setting.objective);
+            entry.put("n_steps", setting.nSteps);
+            entry.put("search_range_um", setting.searchRangeUm);
+            entry.put("n_tiles", setting.nTiles);
+            afSettingsList.add(entry);
+        }
+
+        Map<String, Object> root = new LinkedHashMap<>();
+        root.put("autofocus_settings", afSettingsList);
+
+        // Configure YAML dumper for clean output
+        DumperOptions options = new DumperOptions();
+        options.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK);
+        options.setPrettyFlow(true);
+
+        Yaml yaml = new Yaml(options);
+
+        // Write with header comment
+        try (FileWriter writer = new FileWriter(autofocusFile)) {
+            writer.write("# ========== AUTOFOCUS CONFIGURATION ==========\n");
+            writer.write("# Autofocus parameters per objective\n");
+            writer.write("# These settings control the autofocus behavior during image acquisition\n");
+            writer.write("#\n");
+            writer.write("# Parameters:\n");
+            writer.write("#   n_steps: Number of Z positions to sample during autofocus (higher = more accurate but slower)\n");
+            writer.write("#   search_range_um: Total Z range to search in micrometers (centered on current position)\n");
+            writer.write("#   n_tiles: Spatial frequency - autofocus runs every N tiles during large acquisitions (lower = more frequent but slower)\n\n");
+
+            yaml.dump(root, writer);
+        }
+
+        logger.info("Saved autofocus settings for {} objectives to: {}",
+            settings.size(), autofocusFile.getAbsolutePath());
+    }
+}

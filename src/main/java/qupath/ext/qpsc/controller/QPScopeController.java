@@ -158,6 +158,10 @@ public class QPScopeController {
                 logger.debug("Launching polarizer calibration workflow");
                 PolarizerCalibrationWorkflow.run();
             }
+            case "autofocusEditor" -> {
+                logger.debug("Launching autofocus settings editor");
+                AutofocusEditorWorkflow.run();
+            }
             case "serverConnection" -> {
                 logger.debug("Launching server connection dialog");
                 ServerConnectionController.showDialog()

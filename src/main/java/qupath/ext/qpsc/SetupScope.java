@@ -213,6 +213,17 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 			}
 		});
 
+		// 6) Autofocus settings editor
+		MenuItem autofocusEditorOption = new MenuItem(res.getString("menu.autofocusEditor"));
+		autofocusEditorOption.setDisable(!configValid);
+		autofocusEditorOption.setOnAction(e -> {
+			try {
+				QPScopeController.getInstance().startWorkflow("autofocusEditor");
+			} catch (IOException ex) {
+				throw new RuntimeException(ex);
+			}
+		});
+
 		// === UTILITY MENU ITEMS ===
 
 		// 6) Basic stage control (test only)
@@ -256,9 +267,10 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 				existingImageOption,
 				alignmentOption,
 				new SeparatorMenuItem(),  // Visual separator
-				// Background collection and calibration
+				// Calibration and configuration
 				backgroundCollectionOption,
 				polarizerCalibrationOption,
+				autofocusEditorOption,
 				new SeparatorMenuItem(),  // Visual separator
 				// Utilities
 				stageControlOption,
