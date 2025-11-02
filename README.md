@@ -28,6 +28,7 @@ The extension bridges QuPath, Python-based microscope controllers (e.g., Pycro-M
     - **Existing Image Registration**: Register new tile scans to previously acquired macro images with affine transformation support.
     - **Background Collection**: Automated flat-field correction image acquisition with adaptive exposure control for consistent background intensities.
     - **Polarizer Calibration (PPM)**: Automated rotation stage calibration to find crossed polarizer positions via angle sweep and sine curve fitting.
+    - **Autofocus Configuration Editor**: GUI editor for per-objective autofocus parameters (focus steps, search range, and spatial frequency).
 - **Modality Handlers**: Imaging modes are resolved through pluggable handlers (e.g., PPM). Modalities with no special requirements use a no-op handler.
 - **Integration with Python Controllers**: Robust socket-based communication with real-time progress reporting and heartbeat monitoring between QuPath and your Python microscope backend.
 - **Project & Data Management**: Automatic project creation, tile config, and stitched OME-TIFF integration.
@@ -67,9 +68,11 @@ This extension requires qupath-extension-tiles-to-pyramid to create the pyramida
   - **"Start with Bounding Box"**: Acquire a defined region with automatic tiling.
   - **"Start with Existing Image"**: Register new high-res scans to a pre-existing macro image using affine transforms and annotation selection.
   - **"Microscope to Microscope Alignment"**: Semi-automated alignment workflow for coordinate transformation between QuPath and microscope coordinates.
-- **Calibration & Utilities**:
+- **Calibration & Configuration**:
   - **"Collect Background Images"**: Acquire flat-field correction backgrounds with adaptive exposure control. The system automatically adjusts exposure times to reach target intensities for consistent background quality.
   - **"Polarizer Calibration (PPM)"**: Calibrate PPM rotation stage to determine crossed polarizer positions. Sweeps rotation angles, fits data to sine curve, and generates a report with suggested `config_PPM.yml` angles. Run this only after optical component changes.
+  - **"Autofocus Settings Editor"**: Edit per-objective autofocus parameters in a user-friendly dialog. Configure focus steps (n_steps), Z search range (search_range_um), and spatial frequency (n_tiles) for each objective. Settings stored in `autofocus_{microscope}.yml` for easy management.
+- **Utilities**:
   - **"Basic Stage Control"**: Manual stage movement interface for testing.
   - **"Server Connection Settings"**: Configure socket communication with Python microscope server.
 
@@ -218,6 +221,68 @@ rotation_angles:
   - name: 'uncrossed'
     angles: [90.0]
 ```
+
+### Autofocus Settings Editor
+
+**Purpose**: Configure per-objective autofocus parameters in an easy-to-use GUI without manually editing YAML files.
+
+**Key Features**:
+- **Per-Objective Configuration**: Set different autofocus parameters for each objective (10X, 20X, 40X, etc.)
+- **Three Key Parameters**:
+  - **n_steps**: Number of Z positions to sample during autofocus (higher = more accurate but slower)
+  - **search_range_um**: Total Z range to search in micrometers (centered on current position)
+  - **n_tiles**: Spatial frequency - autofocus runs every N tiles during large acquisitions (lower = more frequent but slower)
+- **Live Validation**: Warns about extreme values that may cause poor performance
+- **Separate Storage**: Settings stored in `autofocus_{microscope}.yml` (e.g., `autofocus_PPM.yml`)
+- **Working Copy**: Edit multiple objectives before saving to file
+
+**When to Use**:
+- Initial microscope setup
+- After changing objectives or optical configuration
+- When autofocus performance needs tuning (too slow, not accurate enough, etc.)
+- To optimize autofocus frequency for different sample types
+
+**Workflow**:
+1. Select **"Autofocus Settings Editor..."** from menu
+2. Select objective from dropdown
+3. Edit parameters:
+   - **n_steps**: Typical range 5-20 (default: 9-15 depending on objective)
+   - **search_range_um**: Typical range 10-50 μm (default: 10-15 μm)
+   - **n_tiles**: Typical range 3-10 (default: 5-7)
+4. Switch between objectives to edit other settings (changes saved automatically)
+5. Click **"Write to File"** to save all settings
+6. Click **"OK"** to save and close, or **"Cancel"** to discard unsaved changes
+
+**Parameter Guidance**:
+- **Higher magnification** → More n_steps, smaller search_range_um (e.g., 40X: 15 steps, 10 μm range)
+- **Lower magnification** → Fewer n_steps, larger search_range_um (e.g., 10X: 9 steps, 15 μm range)
+- **Thick samples** → Increase search_range_um
+- **Time-critical acquisitions** → Increase n_tiles (less frequent autofocus), decrease n_steps
+- **Critical focus quality** → Decrease n_tiles (more frequent autofocus), increase n_steps
+
+**Configuration File Format** (`autofocus_PPM.yml`):
+```yaml
+autofocus_settings:
+  - objective: 'LOCI_OBJECTIVE_OLYMPUS_10X_001'
+    n_steps: 9
+    search_range_um: 15.0
+    n_tiles: 5
+
+  - objective: 'LOCI_OBJECTIVE_OLYMPUS_20X_POL_001'
+    n_steps: 11
+    search_range_um: 15.0
+    n_tiles: 5
+
+  - objective: 'LOCI_OBJECTIVE_OLYMPUS_40X_POL_001'
+    n_steps: 15
+    search_range_um: 10.0
+    n_tiles: 7
+```
+
+**First-Time Use**:
+- If `autofocus_{microscope}.yml` doesn't exist, editor loads sensible defaults
+- Objectives from main config automatically populate
+- Save creates the file with all configured objectives
 
 ---
 
