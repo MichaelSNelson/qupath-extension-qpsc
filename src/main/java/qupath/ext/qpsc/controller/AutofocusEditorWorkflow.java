@@ -113,7 +113,7 @@ public class AutofocusEditorWorkflow {
      */
     private static void showAutofocusEditorDialog() throws IOException {
         // Get microscope config path from preferences
-        String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty().get();
+        String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
         if (configPath == null || configPath.isEmpty()) {
             Dialogs.showErrorMessage("Configuration Error",
                 "No microscope configuration file set in preferences.");
@@ -358,7 +358,7 @@ public class AutofocusEditorWorkflow {
         List<String> objectives = new ArrayList<>();
 
         try {
-            Map<String, Object> config = configManager.getFullConfig();
+            Map<String, Object> config = configManager.getAllConfig();
             Map<String, Object> acqProfiles = (Map<String, Object>) config.get("acq_profiles_new");
 
             if (acqProfiles != null) {

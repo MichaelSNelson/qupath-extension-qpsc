@@ -146,7 +146,7 @@ public class PolarizerCalibrationWorkflow {
             // Get background folder from config
             String configFile = QPPreferenceDialog.getMicroscopeConfigFileProperty();
             MicroscopeConfigManager configManager = MicroscopeConfigManager.getInstance(configFile);
-            String defaultOutput = configManager.getBackgroundCorrectionBaseFolder();
+            String defaultOutput = configManager.getBackgroundCorrectionFolder("ppm");
 
             if (defaultOutput == null || defaultOutput.isEmpty()) {
                 defaultOutput = System.getProperty("user.home");
