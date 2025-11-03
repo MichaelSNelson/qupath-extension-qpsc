@@ -59,12 +59,19 @@ public class AutofocusEditorWorkflow {
         int nSteps;
         double searchRangeUm;
         int nTiles;
+        int interpStrength;
+        String interpKind;
+        String scoreMetric;
 
-        AutofocusSettings(String objective, int nSteps, double searchRangeUm, int nTiles) {
+        AutofocusSettings(String objective, int nSteps, double searchRangeUm, int nTiles,
+                         int interpStrength, String interpKind, String scoreMetric) {
             this.objective = objective;
             this.nSteps = nSteps;
             this.searchRangeUm = searchRangeUm;
             this.nTiles = nTiles;
+            this.interpStrength = interpStrength;
+            this.interpKind = interpKind;
+            this.scoreMetric = scoreMetric;
         }
 
         // Validation with detailed feedback
@@ -87,6 +94,20 @@ public class AutofocusEditorWorkflow {
                 warnings.add("n_tiles must be positive");
             } else if (nTiles > 20) {
                 warnings.add("n_tiles > 20 may cause infrequent autofocus (typical range: 3-10)");
+            }
+
+            if (interpStrength <= 0) {
+                warnings.add("interp_strength must be positive");
+            } else if (interpStrength > 1000) {
+                warnings.add("interp_strength > 1000 may be unnecessarily high (typical: 50-200)");
+            }
+
+            if (interpKind == null || interpKind.isEmpty()) {
+                warnings.add("interp_kind must be specified");
+            }
+
+            if (scoreMetric == null || scoreMetric.isEmpty()) {
+                warnings.add("score_metric must be specified");
             }
 
             return warnings;
@@ -155,10 +176,12 @@ public class AutofocusEditorWorkflow {
         for (String obj : objectives) {
             if (existingSettings.containsKey(obj)) {
                 AutofocusSettings existing = existingSettings.get(obj);
-                workingSettings.put(obj, new AutofocusSettings(obj, existing.nSteps, existing.searchRangeUm, existing.nTiles));
+                workingSettings.put(obj, new AutofocusSettings(obj, existing.nSteps, existing.searchRangeUm,
+                    existing.nTiles, existing.interpStrength, existing.interpKind, existing.scoreMetric));
             } else {
-                // Use defaults
-                workingSettings.put(obj, new AutofocusSettings(obj, 9, 15.0, 5));
+                // Use defaults: n_steps=9, search_range=15um, n_tiles=5, interp_strength=100,
+                // interp_kind=quadratic, score_metric=laplacian_variance
+                workingSettings.put(obj, new AutofocusSettings(obj, 9, 15.0, 5, 100, "quadratic", "laplacian_variance"));
             }
         }
 
@@ -204,6 +227,35 @@ public class AutofocusEditorWorkflow {
         Label nTilesDesc = new Label("(Autofocus every N tiles)");
         nTilesDesc.setStyle("-fx-font-size: 10px; -fx-text-fill: gray;");
 
+        Label interpStrengthLabel = new Label("interp_strength:");
+        Spinner<Integer> interpStrengthSpinner = new Spinner<>(10, 1000, 100, 10);
+        interpStrengthSpinner.setEditable(true);
+        interpStrengthSpinner.setPrefWidth(100);
+        Label interpStrengthDesc = new Label("(Interpolation density factor)");
+        interpStrengthDesc.setStyle("-fx-font-size: 10px; -fx-text-fill: gray;");
+
+        Label interpKindLabel = new Label("interp_kind:");
+        ComboBox<String> interpKindCombo = new ComboBox<>();
+        interpKindCombo.getItems().addAll("linear", "quadratic", "cubic");
+        interpKindCombo.setValue("quadratic");
+        interpKindCombo.setPrefWidth(150);
+        Label interpKindDesc = new Label("(Interpolation method)");
+        interpKindDesc.setStyle("-fx-font-size: 10px; -fx-text-fill: gray;");
+
+        Label scoreMetricLabel = new Label("score_metric:");
+        ComboBox<String> scoreMetricCombo = new ComboBox<>();
+        scoreMetricCombo.getItems().addAll(
+            "laplacian_variance",
+            "sobel",
+            "brenner_gradient",
+            "robust_sharpness",
+            "hybrid_sharpness"
+        );
+        scoreMetricCombo.setValue("laplacian_variance");
+        scoreMetricCombo.setPrefWidth(200);
+        Label scoreMetricDesc = new Label("(Focus sharpness metric)");
+        scoreMetricDesc.setStyle("-fx-font-size: 10px; -fx-text-fill: gray;");
+
         paramGrid.add(nStepsLabel, 0, 0);
         paramGrid.add(nStepsSpinner, 1, 0);
         paramGrid.add(nStepsDesc, 2, 0);
@@ -215,6 +267,18 @@ public class AutofocusEditorWorkflow {
         paramGrid.add(nTilesLabel, 0, 2);
         paramGrid.add(nTilesSpinner, 1, 2);
         paramGrid.add(nTilesDesc, 2, 2);
+
+        paramGrid.add(interpStrengthLabel, 0, 3);
+        paramGrid.add(interpStrengthSpinner, 1, 3);
+        paramGrid.add(interpStrengthDesc, 2, 3);
+
+        paramGrid.add(interpKindLabel, 0, 4);
+        paramGrid.add(interpKindCombo, 1, 4);
+        paramGrid.add(interpKindDesc, 2, 4);
+
+        paramGrid.add(scoreMetricLabel, 0, 5);
+        paramGrid.add(scoreMetricCombo, 1, 5);
+        paramGrid.add(scoreMetricDesc, 2, 5);
 
         // Status label for validation feedback
         Label statusLabel = new Label();
@@ -231,9 +295,13 @@ public class AutofocusEditorWorkflow {
                 int nSteps = nStepsSpinner.getValue();
                 double searchRange = Double.parseDouble(searchRangeField.getText());
                 int nTiles = nTilesSpinner.getValue();
+                int interpStrength = interpStrengthSpinner.getValue();
+                String interpKind = interpKindCombo.getValue();
+                String scoreMetric = scoreMetricCombo.getValue();
 
                 workingSettings.put(currentObjective[0],
-                    new AutofocusSettings(currentObjective[0], nSteps, searchRange, nTiles));
+                    new AutofocusSettings(currentObjective[0], nSteps, searchRange, nTiles,
+                        interpStrength, interpKind, scoreMetric));
             } catch (NumberFormatException ex) {
                 logger.warn("Invalid numeric input when saving settings");
             }
@@ -257,6 +325,9 @@ public class AutofocusEditorWorkflow {
                 nStepsSpinner.getValueFactory().setValue(settings.nSteps);
                 searchRangeField.setText(String.valueOf(settings.searchRangeUm));
                 nTilesSpinner.getValueFactory().setValue(settings.nTiles);
+                interpStrengthSpinner.getValueFactory().setValue(settings.interpStrength);
+                interpKindCombo.setValue(settings.interpKind);
+                scoreMetricCombo.setValue(settings.scoreMetric);
 
                 if (existingSettings.containsKey(selectedObjective)) {
                     statusLabel.setText("Loaded existing settings for " + selectedObjective);
@@ -405,7 +476,16 @@ public class AutofocusEditorWorkflow {
                         double searchRange = ((Number) entry.get("search_range_um")).doubleValue();
                         int nTiles = ((Number) entry.get("n_tiles")).intValue();
 
-                        settings.put(objective, new AutofocusSettings(objective, nSteps, searchRange, nTiles));
+                        // New parameters with defaults for backward compatibility
+                        int interpStrength = entry.containsKey("interp_strength") ?
+                            ((Number) entry.get("interp_strength")).intValue() : 100;
+                        String interpKind = entry.containsKey("interp_kind") ?
+                            (String) entry.get("interp_kind") : "quadratic";
+                        String scoreMetric = entry.containsKey("score_metric") ?
+                            (String) entry.get("score_metric") : "laplacian_variance";
+
+                        settings.put(objective, new AutofocusSettings(objective, nSteps, searchRange, nTiles,
+                            interpStrength, interpKind, scoreMetric));
                     }
                 }
             }
@@ -431,6 +511,9 @@ public class AutofocusEditorWorkflow {
             entry.put("n_steps", setting.nSteps);
             entry.put("search_range_um", setting.searchRangeUm);
             entry.put("n_tiles", setting.nTiles);
+            entry.put("interp_strength", setting.interpStrength);
+            entry.put("interp_kind", setting.interpKind);
+            entry.put("score_metric", setting.scoreMetric);
             afSettingsList.add(entry);
         }
 
@@ -453,7 +536,12 @@ public class AutofocusEditorWorkflow {
             writer.write("# Parameters:\n");
             writer.write("#   n_steps: Number of Z positions to sample during autofocus (higher = more accurate but slower)\n");
             writer.write("#   search_range_um: Total Z range to search in micrometers (centered on current position)\n");
-            writer.write("#   n_tiles: Spatial frequency - autofocus runs every N tiles during large acquisitions (lower = more frequent but slower)\n\n");
+            writer.write("#   n_tiles: Spatial frequency - autofocus runs every N tiles during large acquisitions (lower = more frequent but slower)\n");
+            writer.write("#   interp_strength: Interpolation density factor for focus curve fitting (typical: 50-200)\n");
+            writer.write("#   interp_kind: Interpolation method - 'linear', 'quadratic', or 'cubic'\n");
+            writer.write("#   score_metric: Focus sharpness metric - 'laplacian_variance' (fast ~5ms), 'sobel' (fast ~5ms),\n");
+            writer.write("#                 'brenner_gradient' (fastest ~3ms), 'robust_sharpness' (particle-resistant ~20ms),\n");
+            writer.write("#                 or 'hybrid_sharpness' (balanced ~8ms)\n\n");
 
             yaml.dump(root, writer);
         }
