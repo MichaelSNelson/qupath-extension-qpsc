@@ -480,15 +480,15 @@ public class AutofocusEditorWorkflow {
             String selectedObjective = objectiveCombo.getValue();
             currentObjective[0] = selectedObjective;
 
-            logger.debug("Loading settings for objective: {}", selectedObjective);
-            logger.debug("Working settings contains {} objectives: {}", workingSettings.size(), workingSettings.keySet());
-            logger.debug("Existing settings contains {} objectives: {}", existingSettings.size(), existingSettings.keySet());
+            logger.info("Loading settings for objective: {}", selectedObjective);
+            logger.info("Working settings contains {} objectives: {}", workingSettings.size(), workingSettings.keySet());
+            logger.info("Existing settings contains {} objectives: {}", existingSettings.size(), existingSettings.keySet());
 
             // Load from working settings
             AutofocusSettings settings = workingSettings.get(selectedObjective);
 
             if (settings != null) {
-                logger.debug("Found settings for {}: n_steps={}, search_range={}, texture_threshold={}, tissue_area_threshold={}",
+                logger.info("Found settings for {}: n_steps={}, search_range={}, texture_threshold={}, tissue_area_threshold={}",
                     selectedObjective, settings.nSteps, settings.searchRangeUm, settings.textureThreshold, settings.tissueAreaThreshold);
 
                 nStepsSpinner.getValueFactory().setValue(settings.nSteps);
@@ -663,7 +663,7 @@ public class AutofocusEditorWorkflow {
                         double tissueAreaThreshold = entry.containsKey("tissue_area_threshold") ?
                             ((Number) entry.get("tissue_area_threshold")).doubleValue() : 0.2;
 
-                        logger.debug("Loaded from YAML - objective='{}', n_steps={}, search_range={}, texture_threshold={}, tissue_area_threshold={}",
+                        logger.info("Loaded from YAML - objective='{}', n_steps={}, search_range={}, texture_threshold={}, tissue_area_threshold={}",
                             objective, nSteps, searchRange, textureThreshold, tissueAreaThreshold);
 
                         settings.put(objective, new AutofocusSettings(objective, nSteps, searchRange, nTiles,
