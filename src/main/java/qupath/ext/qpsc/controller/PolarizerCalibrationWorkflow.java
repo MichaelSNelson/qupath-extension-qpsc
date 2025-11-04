@@ -350,12 +350,17 @@ public class PolarizerCalibrationWorkflow {
                 alert.setContentText(
                         "Calibration report saved to:\n" + reportPath + "\n\n" +
                         "The report contains:\n" +
-                        "  • Crossed polarizer positions (angles)\n" +
-                        "  • Intensity statistics and sine fit parameters\n" +
-                        "  • Suggestions for updating config_PPM.yml\n" +
-                        "  • Raw data for all measurements\n\n" +
+                        "  • Calibration Results - Crossed polarizer positions found\n" +
+                        "  • Config Recommendations - Values to update in config_PPM.yml\n" +
+                        "  • Calibration Metadata - Parameters and conditions used\n" +
+                        "  • Raw Data - Complete measurement data for verification\n\n" +
                         "Would you like to open the report folder?"
                 );
+
+                // Make dialog resizable and larger
+                alert.setResizable(true);
+                alert.getDialogPane().setPrefWidth(650);
+                alert.getDialogPane().setPrefHeight(300);
 
                 ButtonType openFolderBtn = new ButtonType("Open Folder");
                 ButtonType closeBtn = new ButtonType("Close", ButtonBar.ButtonData.CANCEL_CLOSE);
