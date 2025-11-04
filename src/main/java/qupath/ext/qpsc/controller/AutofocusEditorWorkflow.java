@@ -62,9 +62,12 @@ public class AutofocusEditorWorkflow {
         int interpStrength;
         String interpKind;
         String scoreMetric;
+        double textureThreshold;
+        double tissueAreaThreshold;
 
         AutofocusSettings(String objective, int nSteps, double searchRangeUm, int nTiles,
-                         int interpStrength, String interpKind, String scoreMetric) {
+                         int interpStrength, String interpKind, String scoreMetric,
+                         double textureThreshold, double tissueAreaThreshold) {
             this.objective = objective;
             this.nSteps = nSteps;
             this.searchRangeUm = searchRangeUm;
@@ -72,6 +75,8 @@ public class AutofocusEditorWorkflow {
             this.interpStrength = interpStrength;
             this.interpKind = interpKind;
             this.scoreMetric = scoreMetric;
+            this.textureThreshold = textureThreshold;
+            this.tissueAreaThreshold = tissueAreaThreshold;
         }
 
         // Validation with detailed feedback
@@ -108,6 +113,18 @@ public class AutofocusEditorWorkflow {
 
             if (scoreMetric == null || scoreMetric.isEmpty()) {
                 warnings.add("score_metric must be specified");
+            }
+
+            if (textureThreshold <= 0) {
+                warnings.add("texture_threshold must be positive");
+            } else if (textureThreshold > 0.1) {
+                warnings.add("texture_threshold > 0.1 is very high (typical range: 0.005-0.030)");
+            }
+
+            if (tissueAreaThreshold <= 0) {
+                warnings.add("tissue_area_threshold must be positive");
+            } else if (tissueAreaThreshold > 0.5) {
+                warnings.add("tissue_area_threshold > 0.5 is very high (typical range: 0.05-0.30)");
             }
 
             return warnings;
@@ -177,11 +194,14 @@ public class AutofocusEditorWorkflow {
             if (existingSettings.containsKey(obj)) {
                 AutofocusSettings existing = existingSettings.get(obj);
                 workingSettings.put(obj, new AutofocusSettings(obj, existing.nSteps, existing.searchRangeUm,
-                    existing.nTiles, existing.interpStrength, existing.interpKind, existing.scoreMetric));
+                    existing.nTiles, existing.interpStrength, existing.interpKind, existing.scoreMetric,
+                    existing.textureThreshold, existing.tissueAreaThreshold));
             } else {
                 // Use defaults: n_steps=9, search_range=15um, n_tiles=5, interp_strength=100,
-                // interp_kind=quadratic, score_metric=laplacian_variance
-                workingSettings.put(obj, new AutofocusSettings(obj, 9, 15.0, 5, 100, "quadratic", "laplacian_variance"));
+                // interp_kind=quadratic, score_metric=laplacian_variance,
+                // texture_threshold=0.005, tissue_area_threshold=0.2
+                workingSettings.put(obj, new AutofocusSettings(obj, 9, 15.0, 5, 100, "quadratic",
+                    "laplacian_variance", 0.005, 0.2));
             }
         }
 
@@ -256,6 +276,18 @@ public class AutofocusEditorWorkflow {
         Label scoreMetricDesc = new Label("(Focus sharpness metric)");
         scoreMetricDesc.setStyle("-fx-font-size: 10px; -fx-text-fill: gray;");
 
+        Label textureThresholdLabel = new Label("texture_threshold:");
+        TextField textureThresholdField = new TextField("0.005");
+        textureThresholdField.setPrefWidth(100);
+        Label textureThresholdDesc = new Label("(Min texture for tissue detection, typical: 0.005-0.030)");
+        textureThresholdDesc.setStyle("-fx-font-size: 10px; -fx-text-fill: gray;");
+
+        Label tissueAreaThresholdLabel = new Label("tissue_area_threshold:");
+        TextField tissueAreaThresholdField = new TextField("0.2");
+        tissueAreaThresholdField.setPrefWidth(100);
+        Label tissueAreaThresholdDesc = new Label("(Min tissue coverage fraction, typical: 0.05-0.30)");
+        tissueAreaThresholdDesc.setStyle("-fx-font-size: 10px; -fx-text-fill: gray;");
+
         paramGrid.add(nStepsLabel, 0, 0);
         paramGrid.add(nStepsSpinner, 1, 0);
         paramGrid.add(nStepsDesc, 2, 0);
@@ -280,6 +312,14 @@ public class AutofocusEditorWorkflow {
         paramGrid.add(scoreMetricCombo, 1, 5);
         paramGrid.add(scoreMetricDesc, 2, 5);
 
+        paramGrid.add(textureThresholdLabel, 0, 6);
+        paramGrid.add(textureThresholdField, 1, 6);
+        paramGrid.add(textureThresholdDesc, 2, 6);
+
+        paramGrid.add(tissueAreaThresholdLabel, 0, 7);
+        paramGrid.add(tissueAreaThresholdField, 1, 7);
+        paramGrid.add(tissueAreaThresholdDesc, 2, 7);
+
         // Status label for validation feedback
         Label statusLabel = new Label();
         statusLabel.setStyle("-fx-text-fill: blue; -fx-font-weight: bold;");
@@ -298,10 +338,12 @@ public class AutofocusEditorWorkflow {
                 int interpStrength = interpStrengthSpinner.getValue();
                 String interpKind = interpKindCombo.getValue();
                 String scoreMetric = scoreMetricCombo.getValue();
+                double textureThreshold = Double.parseDouble(textureThresholdField.getText());
+                double tissueAreaThreshold = Double.parseDouble(tissueAreaThresholdField.getText());
 
                 workingSettings.put(currentObjective[0],
                     new AutofocusSettings(currentObjective[0], nSteps, searchRange, nTiles,
-                        interpStrength, interpKind, scoreMetric));
+                        interpStrength, interpKind, scoreMetric, textureThreshold, tissueAreaThreshold));
             } catch (NumberFormatException ex) {
                 logger.warn("Invalid numeric input when saving settings");
             }
@@ -328,6 +370,8 @@ public class AutofocusEditorWorkflow {
                 interpStrengthSpinner.getValueFactory().setValue(settings.interpStrength);
                 interpKindCombo.setValue(settings.interpKind);
                 scoreMetricCombo.setValue(settings.scoreMetric);
+                textureThresholdField.setText(String.valueOf(settings.textureThreshold));
+                tissueAreaThresholdField.setText(String.valueOf(settings.tissueAreaThreshold));
 
                 if (existingSettings.containsKey(selectedObjective)) {
                     statusLabel.setText("Loaded existing settings for " + selectedObjective);
@@ -483,9 +527,13 @@ public class AutofocusEditorWorkflow {
                             (String) entry.get("interp_kind") : "quadratic";
                         String scoreMetric = entry.containsKey("score_metric") ?
                             (String) entry.get("score_metric") : "laplacian_variance";
+                        double textureThreshold = entry.containsKey("texture_threshold") ?
+                            ((Number) entry.get("texture_threshold")).doubleValue() : 0.005;
+                        double tissueAreaThreshold = entry.containsKey("tissue_area_threshold") ?
+                            ((Number) entry.get("tissue_area_threshold")).doubleValue() : 0.2;
 
                         settings.put(objective, new AutofocusSettings(objective, nSteps, searchRange, nTiles,
-                            interpStrength, interpKind, scoreMetric));
+                            interpStrength, interpKind, scoreMetric, textureThreshold, tissueAreaThreshold));
                     }
                 }
             }
@@ -514,6 +562,8 @@ public class AutofocusEditorWorkflow {
             entry.put("interp_strength", setting.interpStrength);
             entry.put("interp_kind", setting.interpKind);
             entry.put("score_metric", setting.scoreMetric);
+            entry.put("texture_threshold", setting.textureThreshold);
+            entry.put("tissue_area_threshold", setting.tissueAreaThreshold);
             afSettingsList.add(entry);
         }
 
@@ -541,7 +591,11 @@ public class AutofocusEditorWorkflow {
             writer.write("#   interp_kind: Interpolation method - 'linear', 'quadratic', or 'cubic'\n");
             writer.write("#   score_metric: Focus sharpness metric - 'laplacian_variance' (fast ~5ms), 'sobel' (fast ~5ms),\n");
             writer.write("#                 'brenner_gradient' (fastest ~3ms), 'robust_sharpness' (particle-resistant ~20ms),\n");
-            writer.write("#                 or 'hybrid_sharpness' (balanced ~8ms)\n\n");
+            writer.write("#                 or 'hybrid_sharpness' (balanced ~8ms)\n");
+            writer.write("#   texture_threshold: Minimum texture variance for tissue detection (typical: 0.005-0.030)\n");
+            writer.write("#                      Lower values accept smoother tissue, higher values require more texture\n");
+            writer.write("#   tissue_area_threshold: Minimum fraction of image that must contain tissue (typical: 0.05-0.30)\n");
+            writer.write("#                          Lower values accept sparse tissue, higher values require fuller coverage\n\n");
 
             yaml.dump(root, writer);
         }
