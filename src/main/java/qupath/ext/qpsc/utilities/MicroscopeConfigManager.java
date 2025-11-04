@@ -36,8 +36,12 @@ public class MicroscopeConfigManager {
     private final Map<String, String> lociSectionMap;
     private final String configPath;
 
+    // External autofocus settings loaded from autofocus_{microscope}.yml
+    // Maps objective ID -> autofocus parameters map
+    private final Map<String, Map<String, Object>> autofocusData;
+
     /**
-     * Private constructor: loads both the microscope-specific YAML and the shared LOCI resources.
+     * Private constructor: loads microscope YAML, shared LOCI resources, and external autofocus settings.
      *
      * @param configPath Filesystem path to the microscope YAML configuration file.
      */
@@ -46,6 +50,9 @@ public class MicroscopeConfigManager {
         this.configData = loadConfig(configPath);
         String resPath = computeResourcePath(configPath);
         this.resourceData = loadConfig(resPath);
+
+        // Load external autofocus settings if available
+        this.autofocusData = loadAutofocusConfig(configPath);
 
         // Dynamically build field-to-section map from the top-level of resources_LOCI.yml
         this.lociSectionMap = new HashMap<>();
@@ -88,7 +95,7 @@ public class MicroscopeConfigManager {
     }
 
     /**
-     * Reloads both the microscope YAML and shared LOCI resources.
+     * Reloads the microscope YAML, shared LOCI resources, and external autofocus settings.
      *
      * @param configPath Path to the microscope YAML file.
      */
@@ -98,6 +105,8 @@ public class MicroscopeConfigManager {
         String resPath = computeResourcePath(configPath);
         resourceData.clear();
         resourceData.putAll(loadConfig(resPath));
+        autofocusData.clear();
+        autofocusData.putAll(loadAutofocusConfig(configPath));
     }
 
     /**
@@ -159,6 +168,89 @@ public class MicroscopeConfigManager {
             logger.error("Error parsing YAML: {}", path, e);
         }
         return new LinkedHashMap<>();
+    }
+
+    /**
+     * Loads external autofocus configuration from autofocus_{microscope}.yml file.
+     * This file contains per-objective autofocus parameters separate from the main config.
+     *
+     * @param configPath Path to the main microscope YAML file
+     * @return Map of objective ID -> autofocus parameters, or empty map if file doesn't exist
+     */
+    @SuppressWarnings("unchecked")
+    private static Map<String, Map<String, Object>> loadAutofocusConfig(String configPath) {
+        Map<String, Map<String, Object>> autofocusMap = new LinkedHashMap<>();
+
+        try {
+            File configFile = new File(configPath);
+            if (!configFile.exists()) {
+                logger.debug("Config file not found for autofocus lookup: {}", configPath);
+                return autofocusMap;
+            }
+
+            // Extract microscope name from config filename (e.g., "config_PPM.yml" -> "PPM")
+            String microscopeName = extractMicroscopeName(configFile.getName());
+
+            // Construct autofocus config path in same directory
+            File configDir = configFile.getParentFile();
+            File autofocusFile = new File(configDir, "autofocus_" + microscopeName + ".yml");
+
+            if (!autofocusFile.exists()) {
+                logger.info("No external autofocus config file found: {}", autofocusFile.getAbsolutePath());
+                return autofocusMap;
+            }
+
+            // Load and parse autofocus YAML
+            Yaml yaml = new Yaml();
+            Map<String, Object> data = yaml.load(Files.newInputStream(autofocusFile.toPath()));
+
+            if (data != null && data.containsKey("autofocus_settings")) {
+                List<Map<String, Object>> settings = (List<Map<String, Object>>) data.get("autofocus_settings");
+
+                for (Map<String, Object> entry : settings) {
+                    String objective = (String) entry.get("objective");
+                    if (objective != null) {
+                        // Store all autofocus parameters for this objective
+                        Map<String, Object> params = new LinkedHashMap<>();
+                        params.put("n_steps", entry.get("n_steps"));
+                        params.put("search_range_um", entry.get("search_range_um"));
+                        params.put("n_tiles", entry.get("n_tiles"));
+                        params.put("interp_strength", entry.get("interp_strength"));
+                        params.put("interp_kind", entry.get("interp_kind"));
+                        params.put("score_metric", entry.get("score_metric"));
+
+                        autofocusMap.put(objective, params);
+                    }
+                }
+
+                logger.info("Loaded external autofocus settings for {} objectives from: {}",
+                        autofocusMap.size(), autofocusFile.getAbsolutePath());
+            }
+
+        } catch (Exception e) {
+            logger.warn("Error loading external autofocus config", e);
+        }
+
+        return autofocusMap;
+    }
+
+    /**
+     * Extracts microscope name from config filename.
+     * E.g., "config_PPM.yml" -> "PPM", "config_ppm.yml" -> "ppm"
+     *
+     * @param configFilename The config filename
+     * @return Microscope name extracted from filename
+     */
+    private static String extractMicroscopeName(String configFilename) {
+        // Remove extension
+        String nameWithoutExt = configFilename.replaceFirst("\\.[^.]+$", "");
+
+        // Remove "config_" prefix if present (case insensitive)
+        if (nameWithoutExt.toLowerCase().startsWith("config_")) {
+            return nameWithoutExt.substring(7);
+        }
+
+        return nameWithoutExt;
     }
 
     /**
@@ -543,7 +635,9 @@ public class MicroscopeConfigManager {
 
     /**
      * Get autofocus parameters for a specific objective.
-     * Uses the new profile system with defaults.
+     * Priority order:
+     * 1. External autofocus_{microscope}.yml file (preferred)
+     * 2. Embedded config: acq_profiles_new -> defaults -> settings -> autofocus
      *
      * @param objective The objective ID
      * @return Map of autofocus parameters, or null if not found
@@ -552,7 +646,14 @@ public class MicroscopeConfigManager {
     public Map<String, Object> getAutofocusParams(String objective) {
         logger.debug("Getting autofocus parameters for objective: {}", objective);
 
-        // Check defaults section for this objective
+        // Priority 1: Check external autofocus file
+        if (autofocusData != null && autofocusData.containsKey(objective)) {
+            Map<String, Object> params = autofocusData.get(objective);
+            logger.info("Found autofocus params for {} in external autofocus file", objective);
+            return params;
+        }
+
+        // Priority 2: Check embedded config (defaults section)
         List<Object> defaults = getList("acq_profiles_new", "defaults");
         if (defaults != null) {
             for (Object def : defaults) {
@@ -561,7 +662,7 @@ public class MicroscopeConfigManager {
                     if (objective.equals(d.get("objective")) && d.containsKey("settings")) {
                         Map<String, Object> settings = (Map<String, Object>) d.get("settings");
                         if (settings.containsKey("autofocus")) {
-                            logger.debug("Found autofocus params for {}", objective);
+                            logger.info("Found autofocus params for {} in embedded config", objective);
                             return (Map<String, Object>) settings.get("autofocus");
                         }
                     }

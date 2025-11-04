@@ -372,8 +372,8 @@ public class BackgroundCollectionController {
                                     // Update angle type label
                                     Platform.runLater(() -> angleTypeLabel.setText(getPPMAngleTypeName(newAngle)));
                                 }
-                            } catch (NumberFormatException e) {
-                                // Invalid input, ignore
+                            } catch (NumberFormatException | IllegalArgumentException e) {
+                                // Invalid input (unparseable or out of range), ignore during typing
                             }
                         });
 
@@ -386,8 +386,8 @@ public class BackgroundCollectionController {
                                     currentAngleExposures.set(index, new AngleExposure(oldAe.ticks(), newExposure));
 
                                 }
-                            } catch (NumberFormatException e) {
-                                // Invalid input, ignore
+                            } catch (NumberFormatException | IllegalArgumentException e) {
+                                // Invalid input (unparseable or out of range), ignore during typing
                             }
                         });
 
@@ -414,8 +414,8 @@ public class BackgroundCollectionController {
                                     currentAngleExposures.set(index, new AngleExposure(oldAe.ticks(), newExposure));
 
                                 }
-                            } catch (NumberFormatException e) {
-                                // Invalid input, ignore
+                            } catch (NumberFormatException | IllegalArgumentException e) {
+                                // Invalid input (unparseable or out of range), ignore during typing
                             }
                         });
 
