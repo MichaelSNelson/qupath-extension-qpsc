@@ -231,12 +231,36 @@ public class AutofocusEditorWorkflow {
         Spinner<Integer> nStepsSpinner = new Spinner<>(1, 100, 9, 1);
         nStepsSpinner.setEditable(true);
         nStepsSpinner.setPrefWidth(100);
+        nStepsSpinner.setTooltip(new Tooltip(
+            "Number of Z positions sampled during autofocus.\n\n" +
+            "Higher values (15-30):\n" +
+            "  + More accurate focus finding\n" +
+            "  + Better for thick samples\n" +
+            "  - Slower autofocus (~2-3x time)\n\n" +
+            "Lower values (5-11):\n" +
+            "  + Faster autofocus\n" +
+            "  + Adequate for thin, flat samples\n" +
+            "  - May miss optimal focus on thick samples\n\n" +
+            "Typical: 9-15 steps"
+        ));
         Label nStepsDesc = new Label("(Number of Z positions to sample)");
         nStepsDesc.setStyle("-fx-font-size: 10px; -fx-text-fill: gray;");
 
         Label searchRangeLabel = new Label("search_range_um:");
         TextField searchRangeField = new TextField("15.0");
         searchRangeField.setPrefWidth(100);
+        searchRangeField.setTooltip(new Tooltip(
+            "Total Z range to search, centered on current position.\n\n" +
+            "Larger range (30-50um):\n" +
+            "  + Finds focus even when stage is far off\n" +
+            "  + Better for initial acquisition setup\n" +
+            "  - Slower if many steps used\n\n" +
+            "Smaller range (10-20um):\n" +
+            "  + Faster autofocus\n" +
+            "  + Works well when stage is pre-leveled\n" +
+            "  - May fail if sample is very tilted\n\n" +
+            "Typical: 15-25um for most samples"
+        ));
         Label searchRangeDesc = new Label("(Total Z range in micrometers)");
         searchRangeDesc.setStyle("-fx-font-size: 10px; -fx-text-fill: gray;");
 
@@ -244,6 +268,20 @@ public class AutofocusEditorWorkflow {
         Spinner<Integer> nTilesSpinner = new Spinner<>(1, 50, 5, 1);
         nTilesSpinner.setEditable(true);
         nTilesSpinner.setPrefWidth(100);
+        nTilesSpinner.setTooltip(new Tooltip(
+            "Spatial frequency: Autofocus runs every N tiles.\n\n" +
+            "Lower values (1-3):\n" +
+            "  + More frequent autofocus\n" +
+            "  + Better tracking of uneven samples\n" +
+            "  - Significantly slower acquisition\n" +
+            "  - More wear on Z motor\n\n" +
+            "Higher values (5-10):\n" +
+            "  + Faster acquisition\n" +
+            "  + Less mechanical wear\n" +
+            "  - May lose focus on tilted samples\n\n" +
+            "Typical: 5 tiles (good balance)\n" +
+            "Use 1-3 for tilted or curved samples"
+        ));
         Label nTilesDesc = new Label("(Autofocus every N tiles)");
         nTilesDesc.setStyle("-fx-font-size: 10px; -fx-text-fill: gray;");
 
@@ -251,6 +289,18 @@ public class AutofocusEditorWorkflow {
         Spinner<Integer> interpStrengthSpinner = new Spinner<>(10, 1000, 100, 10);
         interpStrengthSpinner.setEditable(true);
         interpStrengthSpinner.setPrefWidth(100);
+        interpStrengthSpinner.setTooltip(new Tooltip(
+            "Density of interpolated points in focus curve.\n\n" +
+            "Higher values (150-200):\n" +
+            "  + Smoother focus curve fitting\n" +
+            "  + More precise peak finding\n" +
+            "  - Minimal speed impact\n\n" +
+            "Lower values (50-100):\n" +
+            "  + Slightly faster computation\n" +
+            "  + Usually sufficient for most samples\n\n" +
+            "Typical: 100 (good default)\n" +
+            "Increase to 150-200 if autofocus is inconsistent"
+        ));
         Label interpStrengthDesc = new Label("(Interpolation density factor)");
         interpStrengthDesc.setStyle("-fx-font-size: 10px; -fx-text-fill: gray;");
 
@@ -259,6 +309,21 @@ public class AutofocusEditorWorkflow {
         interpKindCombo.getItems().addAll("linear", "quadratic", "cubic");
         interpKindCombo.setValue("quadratic");
         interpKindCombo.setPrefWidth(150);
+        interpKindCombo.setTooltip(new Tooltip(
+            "Interpolation method for focus curve fitting.\n\n" +
+            "Linear:\n" +
+            "  + Simple and fast\n" +
+            "  - Less accurate peak detection\n\n" +
+            "Quadratic (recommended):\n" +
+            "  + Good balance of speed and accuracy\n" +
+            "  + Smooth parabolic curve fitting\n" +
+            "  + Works well for most samples\n\n" +
+            "Cubic:\n" +
+            "  + Most accurate curve fitting\n" +
+            "  - Can be sensitive to noise\n" +
+            "  - May overfit sparse data\n\n" +
+            "Typical: quadratic for most applications"
+        ));
         Label interpKindDesc = new Label("(Interpolation method)");
         interpKindDesc.setStyle("-fx-font-size: 10px; -fx-text-fill: gray;");
 
@@ -273,18 +338,73 @@ public class AutofocusEditorWorkflow {
         );
         scoreMetricCombo.setValue("laplacian_variance");
         scoreMetricCombo.setPrefWidth(200);
+        scoreMetricCombo.setTooltip(new Tooltip(
+            "Algorithm for measuring image sharpness.\n\n" +
+            "laplacian_variance (~5ms, recommended):\n" +
+            "  + Fast and reliable for most samples\n" +
+            "  + Good for uniform tissue\n\n" +
+            "sobel (~5ms):\n" +
+            "  + Edge-sensitive metric\n" +
+            "  + Good for high-contrast features\n\n" +
+            "brenner_gradient (~3ms):\n" +
+            "  + Fastest option\n" +
+            "  - Less robust on noisy images\n\n" +
+            "robust_sharpness (~20ms):\n" +
+            "  + Resistant to debris/particles\n" +
+            "  + Best for contaminated samples\n" +
+            "  - Slower autofocus\n\n" +
+            "hybrid_sharpness (~8ms):\n" +
+            "  + Balanced speed and robustness\n" +
+            "  + Good compromise for varied samples"
+        ));
         Label scoreMetricDesc = new Label("(Focus sharpness metric)");
         scoreMetricDesc.setStyle("-fx-font-size: 10px; -fx-text-fill: gray;");
 
         Label textureThresholdLabel = new Label("texture_threshold:");
         TextField textureThresholdField = new TextField("0.005");
         textureThresholdField.setPrefWidth(100);
+        textureThresholdField.setTooltip(new Tooltip(
+            "Minimum texture variance required for tissue detection.\n" +
+            "Controls whether autofocus runs at a position.\n\n" +
+            "Lower values (0.005-0.010):\n" +
+            "  + More sensitive - detects smooth tissue\n" +
+            "  + Accepts homogeneous samples\n" +
+            "  + Better for uniform staining\n" +
+            "  - May accept out-of-focus areas\n" +
+            "  - Risk of autofocus on background\n\n" +
+            "Higher values (0.015-0.030):\n" +
+            "  + More selective - requires textured tissue\n" +
+            "  + Rejects blurry or empty areas\n" +
+            "  - May skip smooth but valid tissue\n" +
+            "  - Can cause missed autofocus points\n\n" +
+            "Typical: 0.005 for smooth tissue, 0.010-0.015 for textured\n" +
+            "Tune if seeing 'Insufficient tissue' warnings"
+        ));
         Label textureThresholdDesc = new Label("(Min texture for tissue detection, typical: 0.005-0.030)");
         textureThresholdDesc.setStyle("-fx-font-size: 10px; -fx-text-fill: gray;");
 
         Label tissueAreaThresholdLabel = new Label("tissue_area_threshold:");
         TextField tissueAreaThresholdField = new TextField("0.2");
         tissueAreaThresholdField.setPrefWidth(100);
+        tissueAreaThresholdField.setTooltip(new Tooltip(
+            "Minimum fraction of image that must contain tissue.\n" +
+            "Determines if enough tissue is present for autofocus.\n\n" +
+            "Lower values (0.05-0.15):\n" +
+            "  + Accepts sparse tissue coverage\n" +
+            "  + Runs autofocus at edges of sample\n" +
+            "  + Better for small or fragmented samples\n" +
+            "  - May autofocus on debris or artifacts\n" +
+            "  - Less reliable on mostly-empty tiles\n\n" +
+            "Higher values (0.20-0.30):\n" +
+            "  + Requires substantial tissue presence\n" +
+            "  + More reliable autofocus targets\n" +
+            "  + Rejects edge tiles with partial coverage\n" +
+            "  - May skip valid tissue at sample edges\n" +
+            "  - Can defer too many autofocus points\n\n" +
+            "Typical: 0.2 (20% coverage)\n" +
+            "Lower to 0.1-0.15 for sparse or small samples\n" +
+            "Raise to 0.25-0.3 if autofocus on background/debris"
+        ));
         Label tissueAreaThresholdDesc = new Label("(Min tissue coverage fraction, typical: 0.05-0.30)");
         tissueAreaThresholdDesc.setStyle("-fx-font-size: 10px; -fx-text-fill: gray;");
 
