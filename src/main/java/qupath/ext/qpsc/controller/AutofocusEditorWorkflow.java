@@ -455,7 +455,8 @@ public class AutofocusEditorWorkflow {
         statusLabel.setMaxWidth(500);
 
         // Track current objective for saving changes before switching
-        final String[] currentObjective = {objectiveCombo.getValue()};
+        // Initialize to null to skip save on first load (prevents overwriting loaded settings with UI defaults)
+        final String[] currentObjective = {null};
 
         // Save current UI values to working settings
         Runnable saveCurrentSettings = () -> {
