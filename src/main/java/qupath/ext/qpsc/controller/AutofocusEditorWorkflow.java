@@ -190,13 +190,21 @@ public class AutofocusEditorWorkflow {
 
         // Create working copy with defaults for all objectives
         Map<String, AutofocusSettings> workingSettings = new LinkedHashMap<>();
+        logger.info("Creating working settings from {} objectives and {} existing settings",
+            objectives.size(), existingSettings.size());
+        logger.info("Objectives list: {}", objectives);
+        logger.info("Existing settings keys: {}", existingSettings.keySet());
+
         for (String obj : objectives) {
+            logger.info("Processing objective: '{}'", obj);
             if (existingSettings.containsKey(obj)) {
                 AutofocusSettings existing = existingSettings.get(obj);
+                logger.info("  FOUND in existingSettings: n_steps={}", existing.nSteps);
                 workingSettings.put(obj, new AutofocusSettings(obj, existing.nSteps, existing.searchRangeUm,
                     existing.nTiles, existing.interpStrength, existing.interpKind, existing.scoreMetric,
                     existing.textureThreshold, existing.tissueAreaThreshold));
             } else {
+                logger.info("  NOT FOUND in existingSettings - using defaults");
                 // Use defaults: n_steps=9, search_range=15um, n_tiles=5, interp_strength=100,
                 // interp_kind=quadratic, score_metric=laplacian_variance,
                 // texture_threshold=0.005, tissue_area_threshold=0.2
