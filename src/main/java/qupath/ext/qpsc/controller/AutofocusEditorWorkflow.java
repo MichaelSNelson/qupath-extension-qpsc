@@ -591,7 +591,7 @@ public class AutofocusEditorWorkflow {
                 logger.info("Autofocus settings saved before test");
 
                 // Determine output path for test results (same directory as config file)
-                File configDir = configFile.getParentFile();
+                // Note: configDir is already defined earlier in this method (line 173)
                 String testOutputPath = new File(configDir, "autofocus_tests").getAbsolutePath();
                 logger.info("Using autofocus test output path: {}", testOutputPath);
 
