@@ -107,6 +107,8 @@ public class MicroscopeSocketClient implements AutoCloseable {
         ACQUIRE("acquire_"),
         /** Background acquisition */
         BGACQUIRE("bgacquir"),
+        /** Test autofocus at current position */
+        TESTAF("testaf__"),
         /** Get acquisition status */
         STATUS("status__"),
         /** Get acquisition progress */
@@ -594,6 +596,148 @@ public class MicroscopeSocketClient implements AutoCloseable {
             } catch (IOException | InterruptedException e) {
                 handleIOException(new IOException("Background acquisition error", e));
                 throw new IOException("Background acquisition error: " + e.getMessage(), e);
+            } finally {
+                // Restore original timeout
+                if (socket != null) {
+                    try {
+                        socket.setSoTimeout(originalTimeout);
+                        logger.debug("Restored socket timeout to {}ms", originalTimeout);
+                    } catch (IOException e) {
+                        logger.warn("Failed to restore original socket timeout", e);
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Test autofocus at current microscope position with diagnostic output.
+     *
+     * This command performs autofocus using settings from the autofocus_{microscope}.yml
+     * configuration file and generates a detailed diagnostic plot showing:
+     * - Focus curve with raw scores and interpolated curve
+     * - Z positions tested and scores achieved
+     * - Comparison of raw best vs interpolated best focus position
+     * - Summary statistics and parameter settings
+     *
+     * @param yamlPath Path to microscope configuration YAML file
+     * @param outputPath Output directory for diagnostic plots
+     * @param objective Objective identifier (e.g., "LOCI_OBJECTIVE_OLYMPUS_20X_POL_001")
+     * @return Map with keys: "plot_path", "initial_z", "final_z", "z_shift"
+     * @throws IOException if communication fails or autofocus test fails
+     */
+    public Map<String, String> testAutofocus(String yamlPath, String outputPath, String objective)
+            throws IOException {
+
+        // Build TESTAF-specific command message
+        String message = String.format("--yaml %s --output %s --objective %s END_MARKER",
+                yamlPath, outputPath, objective);
+        byte[] messageBytes = message.getBytes(StandardCharsets.UTF_8);
+
+        logger.info("Sending autofocus test command:");
+        logger.info("  Message length: {} bytes", messageBytes.length);
+        logger.info("  Message content: {}", message);
+
+        synchronized (socketLock) {
+            ensureConnected();
+
+            // Temporarily increase socket timeout for autofocus test
+            // Autofocus scan can take 30-60 seconds depending on n_steps
+            int originalTimeout = readTimeout;
+            try {
+                if (socket != null) {
+                    socket.setSoTimeout(120000); // 2 minutes for autofocus test
+                    logger.debug("Increased socket timeout to 120s for autofocus test");
+                }
+
+                // Send TESTAF command (8 bytes)
+                output.write(Command.TESTAF.getValue());
+                output.flush();
+                logger.debug("Sent TESTAF command (8 bytes)");
+
+                // Small delay to ensure command is processed
+                Thread.sleep(50);
+
+                // Send message
+                output.write(messageBytes);
+                output.flush();
+                logger.debug("Sent autofocus test message ({} bytes)", messageBytes.length);
+
+                // Ensure all data is sent
+                output.flush();
+
+                lastActivityTime.set(System.currentTimeMillis());
+                logger.info("Autofocus test command sent successfully");
+
+                // Read the STARTED acknowledgment
+                byte[] buffer = new byte[1024];
+                int bytesRead = input.read(buffer);
+                if (bytesRead > 0) {
+                    String response = new String(buffer, 0, bytesRead, StandardCharsets.UTF_8);
+                    logger.info("Received initial server response: {}", response);
+
+                    if (response.startsWith("FAILED:")) {
+                        throw new IOException("Server rejected autofocus test: " + response);
+                    } else if (!response.startsWith("STARTED:")) {
+                        logger.warn("Unexpected initial server response: {}", response);
+                    }
+                }
+
+                // Now wait for the final SUCCESS/FAILED response
+                logger.info("Waiting for autofocus test to complete...");
+                bytesRead = input.read(buffer);
+                if (bytesRead > 0) {
+                    String finalResponse = new String(buffer, 0, bytesRead, StandardCharsets.UTF_8);
+                    logger.info("Received final server response: {}", finalResponse);
+
+                    if (finalResponse.startsWith("FAILED:")) {
+                        throw new IOException("Autofocus test failed: " + finalResponse.substring(7));
+                    } else if (!finalResponse.startsWith("SUCCESS:")) {
+                        logger.warn("Unexpected final response: {}", finalResponse);
+                    }
+
+                    // Parse result from SUCCESS response
+                    // Format: SUCCESS:plot_path|initial_z:final_z:z_shift
+                    Map<String, String> result = new java.util.HashMap<>();
+                    if (finalResponse.startsWith("SUCCESS:")) {
+                        String data = finalResponse.substring(8); // Remove "SUCCESS:"
+                        String[] parts = data.split("\\|");
+
+                        if (parts.length > 0) {
+                            result.put("plot_path", parts[0].trim());
+                        }
+
+                        // Parse Z position data if available
+                        if (parts.length > 1 && !parts[1].trim().isEmpty()) {
+                            String zData = parts[1].trim();
+                            logger.info("Parsing Z position data from response: {}", zData);
+
+                            String[] zValues = zData.split(":");
+                            if (zValues.length == 3) {
+                                result.put("initial_z", zValues[0].trim());
+                                result.put("final_z", zValues[1].trim());
+                                result.put("z_shift", zValues[2].trim());
+
+                                logger.info("  Initial Z: {} um", zValues[0]);
+                                logger.info("  Final Z: {} um", zValues[1]);
+                                logger.info("  Z shift: {} um", zValues[2]);
+                            }
+                        }
+
+                        lastActivityTime.set(System.currentTimeMillis());
+                        return result;
+                    }
+                } else {
+                    throw new IOException("No final response received from autofocus test");
+                }
+
+                // Fallback - shouldn't reach here
+                lastActivityTime.set(System.currentTimeMillis());
+                return new java.util.HashMap<>();
+
+            } catch (IOException | InterruptedException e) {
+                handleIOException(new IOException("Autofocus test error", e));
+                throw new IOException("Autofocus test error: " + e.getMessage(), e);
             } finally {
                 // Restore original timeout
                 if (socket != null) {

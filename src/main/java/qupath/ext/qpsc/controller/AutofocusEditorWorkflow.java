@@ -565,6 +565,63 @@ public class AutofocusEditorWorkflow {
             }
         });
 
+        // "Test Autofocus" button
+        Button testButton = new Button("Test Autofocus at Current Position");
+        testButton.setOnAction(e -> {
+            try {
+                // First, save current UI state to working settings
+                saveCurrentSettings.run();
+
+                // Validate current settings
+                String currentObj = objectiveCombo.getValue();
+                AutofocusSettings currentSettings = workingSettings.get(currentObj);
+
+                if (currentSettings != null) {
+                    List<String> warnings = currentSettings.validate();
+                    if (!warnings.isEmpty()) {
+                        Dialogs.showWarningNotification("Validation Warnings",
+                            "Current settings have warnings:\n" + String.join("\n", warnings));
+                    }
+                }
+
+                // Save to file first so test uses current settings
+                saveAutofocusSettings(autofocusFile, workingSettings);
+                statusLabel.setText("Settings saved - running autofocus test...");
+                statusLabel.setStyle("-fx-text-fill: blue; -fx-font-weight: bold;");
+                logger.info("Autofocus settings saved before test");
+
+                // Determine output path for test results (same directory as config file)
+                File configDir = configFile.getParentFile();
+                String testOutputPath = new File(configDir, "autofocus_tests").getAbsolutePath();
+                logger.info("Using autofocus test output path: {}", testOutputPath);
+
+                // Run the test workflow
+                // Note: TestAutofocusWorkflow will run async and show its own dialogs
+                TestAutofocusWorkflow.run(testOutputPath);
+
+                // Update status after launching test
+                Platform.runLater(() -> {
+                    statusLabel.setText("Autofocus test launched - check for results dialog");
+                    statusLabel.setStyle("-fx-text-fill: blue; -fx-font-weight: bold;");
+                });
+
+            } catch (NumberFormatException ex) {
+                Dialogs.showErrorMessage("Input Error", "Please enter valid numeric values before testing.");
+            } catch (IOException ex) {
+                logger.error("Failed to save autofocus settings before test", ex);
+                Dialogs.showErrorMessage("Save Error",
+                    "Failed to save settings before test: " + ex.getMessage());
+            } catch (Exception ex) {
+                logger.error("Failed to start autofocus test", ex);
+                Dialogs.showErrorMessage("Test Error",
+                    "Failed to start autofocus test: " + ex.getMessage());
+            }
+        });
+
+        // Button row with both write and test buttons
+        HBox buttonRow = new HBox(10, writeButton, testButton);
+        buttonRow.setAlignment(Pos.CENTER_LEFT);
+
         // Layout
         HBox objectiveRow = new HBox(10, objectiveLabel, objectiveCombo);
         objectiveRow.setAlignment(Pos.CENTER_LEFT);
@@ -575,7 +632,7 @@ public class AutofocusEditorWorkflow {
             paramGrid,
             statusLabel,
             new Separator(),
-            writeButton
+            buttonRow
         );
 
         dialog.getDialogPane().setContent(mainLayout);
