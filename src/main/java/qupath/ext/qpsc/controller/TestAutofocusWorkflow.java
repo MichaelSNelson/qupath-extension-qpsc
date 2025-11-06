@@ -51,13 +51,23 @@ public class TestAutofocusWorkflow {
     private static final Logger logger = LoggerFactory.getLogger(TestAutofocusWorkflow.class);
 
     /**
-     * Main entry point for autofocus test workflow.
+     * Main entry point for standard autofocus test workflow.
      * Uses default output path in same directory as configuration file.
      */
-    public static void run() {
+    public static void runStandard() {
         // Determine output path from config file location
         String defaultOutputPath = getDefaultOutputPath();
-        run(defaultOutputPath);
+        runStandard(defaultOutputPath);
+    }
+
+    /**
+     * Main entry point for adaptive autofocus test workflow.
+     * Uses default output path in same directory as configuration file.
+     */
+    public static void runAdaptive() {
+        // Determine output path from config file location
+        String defaultOutputPath = getDefaultOutputPath();
+        runAdaptive(defaultOutputPath);
     }
 
     /**
@@ -93,12 +103,36 @@ public class TestAutofocusWorkflow {
     }
 
     /**
-     * Run autofocus test with specified output path.
+     * Run STANDARD autofocus test with specified output path.
+     * Tests the symmetric-sweep autofocus algorithm.
      *
      * @param outputPath Directory where diagnostic plots will be saved
      */
-    public static void run(String outputPath) {
-        logger.info("Starting autofocus test workflow");
+    public static void runStandard(String outputPath) {
+        logger.info("Starting STANDARD autofocus test workflow");
+        runTest(outputPath, false); // false = standard
+    }
+
+    /**
+     * Run ADAPTIVE autofocus test with specified output path.
+     * Tests the intelligent bidirectional search algorithm used during acquisitions.
+     *
+     * @param outputPath Directory where diagnostic plots will be saved
+     */
+    public static void runAdaptive(String outputPath) {
+        logger.info("Starting ADAPTIVE autofocus test workflow");
+        runTest(outputPath, true); // true = adaptive
+    }
+
+    /**
+     * Internal method to run autofocus test.
+     *
+     * @param outputPath Directory where diagnostic plots will be saved
+     * @param isAdaptive True for adaptive autofocus, false for standard
+     */
+    private static void runTest(String outputPath, boolean isAdaptive) {
+        String testType = isAdaptive ? "adaptive" : "standard";
+        logger.info("Starting {} autofocus test workflow", testType);
 
         Platform.runLater(() -> {
             try {
@@ -148,27 +182,34 @@ public class TestAutofocusWorkflow {
                     return;
                 }
 
-                logger.info("Testing autofocus for objective: {}", objective);
+                logger.info("Testing {} autofocus for objective: {}", testType, objective);
 
                 // Show confirmation dialog
-                boolean proceed = Dialogs.showConfirmDialog("Test Autofocus",
-                        String.format("Test autofocus at current position?\n\n" +
+                String dialogTitle = isAdaptive ? "Test Adaptive Autofocus" : "Test Standard Autofocus";
+                String algorithmDesc = isAdaptive
+                    ? "The microscope will perform an intelligent bidirectional search (same algorithm used during acquisitions)."
+                    : "The microscope will perform a symmetric Z-sweep centered on current position.";
+
+                boolean proceed = Dialogs.showConfirmDialog(dialogTitle,
+                        String.format("Test %s autofocus at current position?\n\n" +
                                 "Objective: %s\n" +
                                 "Settings: autofocus_%s.yml\n" +
                                 "Output: %s\n\n" +
-                                "The microscope will perform a Z-scan and generate a diagnostic plot.",
+                                "%s",
+                                testType,
                                 objective,
                                 extractMicroscopeName(configFile.getName()),
-                                outputPath));
+                                outputPath,
+                                algorithmDesc));
 
                 if (!proceed) {
-                    logger.info("Autofocus test cancelled by user");
+                    logger.info("{} autofocus test cancelled by user", testType);
                     return;
                 }
 
                 // Execute test in background
                 CompletableFuture.runAsync(() -> {
-                    executeAutofocusTest(configPath, outputPath, objective);
+                    executeAutofocusTest(configPath, outputPath, objective, isAdaptive);
                 }).exceptionally(ex -> {
                     logger.error("Autofocus test failed", ex);
                     Platform.runLater(() -> {
@@ -188,9 +229,12 @@ public class TestAutofocusWorkflow {
 
     /**
      * Execute autofocus test via socket communication.
+     *
+     * @param isAdaptive True for adaptive autofocus, false for standard
      */
-    private static void executeAutofocusTest(String configPath, String outputPath, String objective) {
-        logger.info("Executing autofocus test for objective: {}", objective);
+    private static void executeAutofocusTest(String configPath, String outputPath, String objective, boolean isAdaptive) {
+        String testType = isAdaptive ? "adaptive" : "standard";
+        logger.info("Executing {} autofocus test for objective: {}", testType, objective);
 
         try {
             // Get socket client from MicroscopeController
@@ -208,22 +252,29 @@ public class TestAutofocusWorkflow {
                 throw new IOException("Failed to create output directory: " + outputPath);
             }
 
-            logger.info("Starting autofocus test");
+            logger.info("Starting {} autofocus test", testType);
 
-            // Call the testAutofocus method
-            Map<String, String> result = socketClient.testAutofocus(configPath, outputPath, objective);
+            // Call the appropriate test method
+            Map<String, String> result;
+            if (isAdaptive) {
+                result = socketClient.testAdaptiveAutofocus(configPath, outputPath, objective);
+            } else {
+                result = socketClient.testAutofocus(configPath, outputPath, objective);
+            }
 
-            logger.info("Autofocus test completed successfully");
+            logger.info("{} autofocus test completed successfully", testType);
 
             // Extract results
             String plotPath = result.get("plot_path");
+            String message_text = result.get("message");
             String initialZ = result.get("initial_z");
             String finalZ = result.get("final_z");
             String zShift = result.get("z_shift");
 
             // Show success notification on UI thread
             Platform.runLater(() -> {
-                StringBuilder message = new StringBuilder("Autofocus test completed successfully!\n\n");
+                StringBuilder message = new StringBuilder(testType.substring(0, 1).toUpperCase() + testType.substring(1)
+                    + " autofocus test completed successfully!\n\n");
 
                 if (initialZ != null && finalZ != null && zShift != null) {
                     message.append(String.format("Initial Z: %s um\n", initialZ));

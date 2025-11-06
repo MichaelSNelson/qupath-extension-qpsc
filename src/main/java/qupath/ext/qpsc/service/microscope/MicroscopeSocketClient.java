@@ -107,8 +107,10 @@ public class MicroscopeSocketClient implements AutoCloseable {
         ACQUIRE("acquire_"),
         /** Background acquisition */
         BGACQUIRE("bgacquir"),
-        /** Test autofocus at current position */
+        /** Test standard autofocus at current position */
         TESTAF("testaf__"),
+        /** Test adaptive autofocus at current position */
+        TESTADAF("testadaf"),
         /** Get acquisition status */
         STATUS("status__"),
         /** Get acquisition progress */
@@ -738,6 +740,150 @@ public class MicroscopeSocketClient implements AutoCloseable {
             } catch (IOException | InterruptedException e) {
                 handleIOException(new IOException("Autofocus test error", e));
                 throw new IOException("Autofocus test error: " + e.getMessage(), e);
+            } finally {
+                // Restore original timeout
+                if (socket != null) {
+                    try {
+                        socket.setSoTimeout(originalTimeout);
+                        logger.debug("Restored socket timeout to {}ms", originalTimeout);
+                    } catch (IOException e) {
+                        logger.warn("Failed to restore original socket timeout", e);
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Test adaptive autofocus at current microscope position with diagnostic output.
+     *
+     * This command performs ADAPTIVE autofocus which:
+     * - Starts at current Z position
+     * - Searches bidirectionally (above and below)
+     * - Adapts step size based on results
+     * - Stops when focus is "good enough" or max steps reached
+     * - Minimizes number of acquisitions needed
+     *
+     * This is the autofocus algorithm used during actual acquisitions.
+     *
+     * @param yamlPath Path to microscope configuration YAML file
+     * @param outputPath Output directory for diagnostic data
+     * @param objective Objective identifier (e.g., "LOCI_OBJECTIVE_OLYMPUS_20X_POL_001")
+     * @return Map with keys: "message", "initial_z", "final_z", "z_shift"
+     * @throws IOException if communication fails or autofocus test fails
+     */
+    public Map<String, String> testAdaptiveAutofocus(String yamlPath, String outputPath, String objective)
+            throws IOException {
+
+        // Build TESTADAF-specific command message
+        String message = String.format("--yaml %s --output %s --objective %s END_MARKER",
+                yamlPath, outputPath, objective);
+        byte[] messageBytes = message.getBytes(StandardCharsets.UTF_8);
+
+        logger.info("Sending adaptive autofocus test command:");
+        logger.info("  Message length: {} bytes", messageBytes.length);
+        logger.info("  Message content: {}", message);
+
+        synchronized (socketLock) {
+            ensureConnected();
+
+            // Temporarily increase socket timeout for adaptive autofocus test
+            // Adaptive can take varying time depending on how quickly it converges
+            int originalTimeout = readTimeout;
+            try {
+                if (socket != null) {
+                    socket.setSoTimeout(120000); // 2 minutes for adaptive autofocus test
+                    logger.debug("Increased socket timeout to 120s for adaptive autofocus test");
+                }
+
+                // Send TESTADAF command (8 bytes)
+                output.write(Command.TESTADAF.getValue());
+                output.flush();
+                logger.debug("Sent TESTADAF command (8 bytes)");
+
+                // Small delay to ensure command is processed
+                Thread.sleep(50);
+
+                // Send message
+                output.write(messageBytes);
+                output.flush();
+                logger.debug("Sent adaptive autofocus test message ({} bytes)", messageBytes.length);
+
+                // Ensure all data is sent
+                output.flush();
+
+                lastActivityTime.set(System.currentTimeMillis());
+                logger.info("Adaptive autofocus test command sent successfully");
+
+                // Read the STARTED acknowledgment
+                byte[] buffer = new byte[1024];
+                int bytesRead = input.read(buffer);
+                if (bytesRead > 0) {
+                    String response = new String(buffer, 0, bytesRead, StandardCharsets.UTF_8);
+                    logger.info("Received initial server response: {}", response);
+
+                    if (response.startsWith("FAILED:")) {
+                        throw new IOException("Server rejected adaptive autofocus test: " + response);
+                    } else if (!response.startsWith("STARTED:")) {
+                        logger.warn("Unexpected initial server response: {}", response);
+                    }
+                }
+
+                // Now wait for the final SUCCESS/FAILED response
+                logger.info("Waiting for adaptive autofocus test to complete...");
+                bytesRead = input.read(buffer);
+                if (bytesRead > 0) {
+                    String finalResponse = new String(buffer, 0, bytesRead, StandardCharsets.UTF_8);
+                    logger.info("Received final server response: {}", finalResponse);
+
+                    if (finalResponse.startsWith("FAILED:")) {
+                        throw new IOException("Adaptive autofocus test failed: " + finalResponse.substring(7));
+                    } else if (!finalResponse.startsWith("SUCCESS:")) {
+                        logger.warn("Unexpected final response: {}", finalResponse);
+                    }
+
+                    // Parse result from SUCCESS response
+                    // Format: SUCCESS:message|initial_z:final_z:z_shift
+                    Map<String, String> result = new java.util.HashMap<>();
+                    if (finalResponse.startsWith("SUCCESS:")) {
+                        String data = finalResponse.substring(8); // Remove "SUCCESS:"
+                        String[] parts = data.split("\\|");
+
+                        if (parts.length > 0) {
+                            result.put("message", parts[0].trim());
+                        }
+
+                        // Parse Z position data if available
+                        if (parts.length > 1 && !parts[1].trim().isEmpty()) {
+                            String zData = parts[1].trim();
+                            logger.info("Parsing Z position data from response: {}", zData);
+
+                            String[] zValues = zData.split(":");
+                            if (zValues.length == 3) {
+                                result.put("initial_z", zValues[0].trim());
+                                result.put("final_z", zValues[1].trim());
+                                result.put("z_shift", zValues[2].trim());
+
+                                logger.info("  Initial Z: {} um", zValues[0]);
+                                logger.info("  Final Z: {} um", zValues[1]);
+                                logger.info("  Z shift: {} um", zValues[2]);
+                            }
+                        }
+
+                        lastActivityTime.set(System.currentTimeMillis());
+                        return result;
+                    }
+                } else {
+                    throw new IOException("No final response received from adaptive autofocus test");
+                }
+
+                // Fallback - shouldn't reach here
+                lastActivityTime.set(System.currentTimeMillis());
+                return new java.util.HashMap<>();
+
+            } catch (IOException | InterruptedException e) {
+                handleIOException(new IOException("Adaptive autofocus test error", e));
+                throw new IOException("Adaptive autofocus test error: " + e.getMessage(), e);
             } finally {
                 // Restore original timeout
                 if (socket != null) {

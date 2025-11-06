@@ -565,9 +565,9 @@ public class AutofocusEditorWorkflow {
             }
         });
 
-        // "Test Autofocus" button
-        Button testButton = new Button("Test Autofocus at Current Position");
-        testButton.setOnAction(e -> {
+        // "Test Standard Autofocus" button
+        Button testStandardButton = new Button("Test Standard Autofocus");
+        testStandardButton.setOnAction(e -> {
             try {
                 // First, save current UI state to working settings
                 saveCurrentSettings.run();
@@ -586,22 +586,22 @@ public class AutofocusEditorWorkflow {
 
                 // Save to file first so test uses current settings
                 saveAutofocusSettings(autofocusFile, workingSettings);
-                statusLabel.setText("Settings saved - running autofocus test...");
+                statusLabel.setText("Settings saved - running standard autofocus test...");
                 statusLabel.setStyle("-fx-text-fill: blue; -fx-font-weight: bold;");
-                logger.info("Autofocus settings saved before test");
+                logger.info("Autofocus settings saved before standard test");
 
                 // Determine output path for test results (same directory as config file)
                 // Note: configDir is already defined earlier in this method (line 173)
                 String testOutputPath = new File(configDir, "autofocus_tests").getAbsolutePath();
                 logger.info("Using autofocus test output path: {}", testOutputPath);
 
-                // Run the test workflow
+                // Run the STANDARD test workflow
                 // Note: TestAutofocusWorkflow will run async and show its own dialogs
-                TestAutofocusWorkflow.run(testOutputPath);
+                TestAutofocusWorkflow.runStandard(testOutputPath);
 
                 // Update status after launching test
                 Platform.runLater(() -> {
-                    statusLabel.setText("Autofocus test launched - check for results dialog");
+                    statusLabel.setText("Standard autofocus test launched - check for results dialog");
                     statusLabel.setStyle("-fx-text-fill: blue; -fx-font-weight: bold;");
                 });
 
@@ -612,14 +612,66 @@ public class AutofocusEditorWorkflow {
                 Dialogs.showErrorMessage("Save Error",
                     "Failed to save settings before test: " + ex.getMessage());
             } catch (Exception ex) {
-                logger.error("Failed to start autofocus test", ex);
+                logger.error("Failed to start standard autofocus test", ex);
                 Dialogs.showErrorMessage("Test Error",
-                    "Failed to start autofocus test: " + ex.getMessage());
+                    "Failed to start standard autofocus test: " + ex.getMessage());
             }
         });
 
-        // Button row with both write and test buttons
-        HBox buttonRow = new HBox(10, writeButton, testButton);
+        // "Test Adaptive Autofocus" button
+        Button testAdaptiveButton = new Button("Test Adaptive Autofocus");
+        testAdaptiveButton.setOnAction(e -> {
+            try {
+                // First, save current UI state to working settings
+                saveCurrentSettings.run();
+
+                // Validate current settings
+                String currentObj = objectiveCombo.getValue();
+                AutofocusSettings currentSettings = workingSettings.get(currentObj);
+
+                if (currentSettings != null) {
+                    List<String> warnings = currentSettings.validate();
+                    if (!warnings.isEmpty()) {
+                        Dialogs.showWarningNotification("Validation Warnings",
+                            "Current settings have warnings:\n" + String.join("\n", warnings));
+                    }
+                }
+
+                // Save to file first so test uses current settings
+                saveAutofocusSettings(autofocusFile, workingSettings);
+                statusLabel.setText("Settings saved - running adaptive autofocus test...");
+                statusLabel.setStyle("-fx-text-fill: blue; -fx-font-weight: bold;");
+                logger.info("Autofocus settings saved before adaptive test");
+
+                // Determine output path for test results (same directory as config file)
+                String testOutputPath = new File(configDir, "autofocus_tests").getAbsolutePath();
+                logger.info("Using autofocus test output path: {}", testOutputPath);
+
+                // Run the ADAPTIVE test workflow
+                // Note: TestAutofocusWorkflow will run async and show its own dialogs
+                TestAutofocusWorkflow.runAdaptive(testOutputPath);
+
+                // Update status after launching test
+                Platform.runLater(() -> {
+                    statusLabel.setText("Adaptive autofocus test launched - check for results dialog");
+                    statusLabel.setStyle("-fx-text-fill: blue; -fx-font-weight: bold;");
+                });
+
+            } catch (NumberFormatException ex) {
+                Dialogs.showErrorMessage("Input Error", "Please enter valid numeric values before testing.");
+            } catch (IOException ex) {
+                logger.error("Failed to save autofocus settings before test", ex);
+                Dialogs.showErrorMessage("Save Error",
+                    "Failed to save settings before test: " + ex.getMessage());
+            } catch (Exception ex) {
+                logger.error("Failed to start adaptive autofocus test", ex);
+                Dialogs.showErrorMessage("Test Error",
+                    "Failed to start adaptive autofocus test: " + ex.getMessage());
+            }
+        });
+
+        // Button row with write and both test buttons
+        HBox buttonRow = new HBox(10, writeButton, testStandardButton, testAdaptiveButton);
         buttonRow.setAlignment(Pos.CENTER_LEFT);
 
         // Layout
