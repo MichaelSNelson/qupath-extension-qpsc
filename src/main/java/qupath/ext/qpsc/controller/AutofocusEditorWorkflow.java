@@ -595,9 +595,9 @@ public class AutofocusEditorWorkflow {
                 String testOutputPath = new File(configDir, "autofocus_tests").getAbsolutePath();
                 logger.info("Using autofocus test output path: {}", testOutputPath);
 
-                // Run the STANDARD test workflow
+                // Run the STANDARD test workflow with selected objective
                 // Note: TestAutofocusWorkflow will run async and show its own dialogs
-                TestAutofocusWorkflow.runStandard(testOutputPath);
+                TestAutofocusWorkflow.runStandard(testOutputPath, currentObj);
 
                 // Update status after launching test
                 Platform.runLater(() -> {
@@ -647,9 +647,9 @@ public class AutofocusEditorWorkflow {
                 String testOutputPath = new File(configDir, "autofocus_tests").getAbsolutePath();
                 logger.info("Using autofocus test output path: {}", testOutputPath);
 
-                // Run the ADAPTIVE test workflow
+                // Run the ADAPTIVE test workflow with selected objective
                 // Note: TestAutofocusWorkflow will run async and show its own dialogs
-                TestAutofocusWorkflow.runAdaptive(testOutputPath);
+                TestAutofocusWorkflow.runAdaptive(testOutputPath, currentObj);
 
                 // Update status after launching test
                 Platform.runLater(() -> {

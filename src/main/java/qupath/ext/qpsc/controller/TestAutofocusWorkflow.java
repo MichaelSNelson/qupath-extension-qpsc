@@ -52,22 +52,20 @@ public class TestAutofocusWorkflow {
 
     /**
      * Main entry point for standard autofocus test workflow.
-     * Uses default output path in same directory as configuration file.
+     * Uses default output path and reads objective from config.
      */
     public static void runStandard() {
-        // Determine output path from config file location
         String defaultOutputPath = getDefaultOutputPath();
-        runStandard(defaultOutputPath);
+        runStandard(defaultOutputPath, null); // null = read from config
     }
 
     /**
      * Main entry point for adaptive autofocus test workflow.
-     * Uses default output path in same directory as configuration file.
+     * Uses default output path and reads objective from config.
      */
     public static void runAdaptive() {
-        // Determine output path from config file location
         String defaultOutputPath = getDefaultOutputPath();
-        runAdaptive(defaultOutputPath);
+        runAdaptive(defaultOutputPath, null); // null = read from config
     }
 
     /**
@@ -103,25 +101,27 @@ public class TestAutofocusWorkflow {
     }
 
     /**
-     * Run STANDARD autofocus test with specified output path.
+     * Run STANDARD autofocus test with specified output path and objective.
      * Tests the symmetric-sweep autofocus algorithm.
      *
      * @param outputPath Directory where diagnostic plots will be saved
+     * @param objectiveOverride Objective to use, or null to read from config
      */
-    public static void runStandard(String outputPath) {
+    public static void runStandard(String outputPath, String objectiveOverride) {
         logger.info("Starting STANDARD autofocus test workflow");
-        runTest(outputPath, false); // false = standard
+        runTest(outputPath, false, objectiveOverride); // false = standard
     }
 
     /**
-     * Run ADAPTIVE autofocus test with specified output path.
+     * Run ADAPTIVE autofocus test with specified output path and objective.
      * Tests the intelligent bidirectional search algorithm used during acquisitions.
      *
      * @param outputPath Directory where diagnostic plots will be saved
+     * @param objectiveOverride Objective to use, or null to read from config
      */
-    public static void runAdaptive(String outputPath) {
+    public static void runAdaptive(String outputPath, String objectiveOverride) {
         logger.info("Starting ADAPTIVE autofocus test workflow");
-        runTest(outputPath, true); // true = adaptive
+        runTest(outputPath, true, objectiveOverride); // true = adaptive
     }
 
     /**
@@ -129,8 +129,9 @@ public class TestAutofocusWorkflow {
      *
      * @param outputPath Directory where diagnostic plots will be saved
      * @param isAdaptive True for adaptive autofocus, false for standard
+     * @param objectiveOverride Objective to use, or null to read from config
      */
-    private static void runTest(String outputPath, boolean isAdaptive) {
+    private static void runTest(String outputPath, boolean isAdaptive, String objectiveOverride) {
         String testType = isAdaptive ? "adaptive" : "standard";
         logger.info("Starting {} autofocus test workflow", testType);
 
@@ -171,15 +172,24 @@ public class TestAutofocusWorkflow {
                     return;
                 }
 
-                // Load config to get current objective
-                MicroscopeConfigManager configManager = MicroscopeConfigManager.getInstance(configPath);
-                String objective = getCurrentObjective(configManager);
+                // Determine objective to use
+                String objective;
+                if (objectiveOverride != null && !objectiveOverride.isEmpty()) {
+                    // Use objective from UI selection
+                    objective = objectiveOverride;
+                    logger.info("Using objective from UI selection: {}", objective);
+                } else {
+                    // Read from config file
+                    MicroscopeConfigManager configManager = MicroscopeConfigManager.getInstance(configPath);
+                    objective = getCurrentObjective(configManager);
 
-                if (objective == null) {
-                    Dialogs.showErrorMessage("Configuration Error",
-                            "Could not determine current objective from configuration.\n" +
-                            "Please check microscope/objective_in_use setting.");
-                    return;
+                    if (objective == null) {
+                        Dialogs.showErrorMessage("Configuration Error",
+                                "Could not determine current objective from configuration.\n" +
+                                "Please check microscope/objective_in_use setting.");
+                        return;
+                    }
+                    logger.info("Using objective from config: {}", objective);
                 }
 
                 logger.info("Testing {} autofocus for objective: {}", testType, objective);
