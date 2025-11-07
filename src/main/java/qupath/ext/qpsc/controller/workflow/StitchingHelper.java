@@ -194,15 +194,17 @@ public class StitchingHelper {
                             metadata.parentEntry != null ? metadata.parentEntry.getImageName() : "none");
 
                     // Get standard stitching configuration
-                    StitchingConfiguration.StitchingParams stitchingConfig = 
+                    StitchingConfiguration.StitchingParams stitchingConfig =
                         StitchingConfiguration.getStandardConfiguration();
                     String compression = stitchingConfig.compressionType();
 
                     // Create enhanced parameters map for UtilityFunctions
+                    // NOTE: For multi-angle acquisitions, do NOT pass blockingDialog to individual angle
+                    // processing calls to prevent premature dialog closure. Dialog will be completed
+                    // manually after all angles/biref/sum are processed.
                     Map<String, Object> stitchParams = new HashMap<>();
                     stitchParams.put("metadata", metadata);
-                    stitchParams.put("blockingDialog", blockingDialog);
-                    stitchParams.put("operationId", operationId);
+                    // Do NOT include blockingDialog or operationId for multi-angle case
 
                     if (blockingDialog != null) {
                         blockingDialog.updateStatus(operationId, "Processing " + angleExposures.size() + " angles for " + annotationName + "...");
@@ -425,7 +427,11 @@ public class StitchingHelper {
                     logger.info("Batch stitching completed for {}, output: {}",
                             annotationName, outPath);
 
-                    // Note: Dialog completion is handled in TileProcessingUtilities after project import
+                    // Complete the blocking dialog now that ALL angles/biref/sum are processed
+                    if (blockingDialog != null) {
+                        logger.info("Completing stitching dialog operation after all images processed");
+                        blockingDialog.completeOperation(operationId);
+                    }
 
                 } catch (Exception e) {
                     logger.error("Stitching failed for {}", annotation.getName(), e);
@@ -587,15 +593,17 @@ public class StitchingHelper {
                             metadata.parentEntry != null ? metadata.parentEntry.getImageName() : "none");
 
                     // Get standard stitching configuration
-                    StitchingConfiguration.StitchingParams stitchingConfig = 
+                    StitchingConfiguration.StitchingParams stitchingConfig =
                         StitchingConfiguration.getStandardConfiguration();
                     String compression = stitchingConfig.compressionType();
 
                     // Create enhanced parameters map for UtilityFunctions
+                    // NOTE: For multi-angle acquisitions, do NOT pass blockingDialog to individual angle
+                    // processing calls to prevent premature dialog closure. Dialog will be completed
+                    // manually after all angles/biref/sum are processed.
                     Map<String, Object> stitchParams = new HashMap<>();
                     stitchParams.put("metadata", metadata);
-                    stitchParams.put("blockingDialog", blockingDialog);
-                    stitchParams.put("operationId", operationId);
+                    // Do NOT include blockingDialog or operationId for multi-angle case
 
                     if (blockingDialog != null) {
                         blockingDialog.updateStatus(operationId, "Processing " + angleExposures.size() + " angles for " + regionName + "...");
@@ -818,7 +826,11 @@ public class StitchingHelper {
                     logger.info("Batch stitching completed for {}, output: {}",
                             regionName, outPath);
 
-                    // Note: Dialog completion is handled in TileProcessingUtilities after project import
+                    // Complete the blocking dialog now that ALL angles/biref/sum are processed
+                    if (blockingDialog != null) {
+                        logger.info("Completing stitching dialog operation after all images processed");
+                        blockingDialog.completeOperation(operationId);
+                    }
 
                 } catch (Exception e) {
                     logger.error("Multi-angle stitching failed for region {}", regionName, e);

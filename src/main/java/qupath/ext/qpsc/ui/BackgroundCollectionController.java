@@ -623,27 +623,14 @@ public class BackgroundCollectionController {
     }
 
     /**
-     * Gets default exposure time for background collection with preferences-first priority.
-     * Priority order: 1. Preferences, 2. Config file, 3. Fallback default
+     * Gets default exposure time for background collection with config-file-first priority.
+     * Priority order: 1. Config file, 2. Preferences, 3. Fallback default
      */
     private double getBackgroundExposureDefault(double angle, String modality, String objective, String detector) {
         logger.debug("Getting background collection exposure default for angle {} with modality={}, objective={}, detector={}",
                 angle, modality, objective, detector);
 
-        // Priority 1: Check persistent preferences first (most likely to be user's desired values)
-        if ("ppm".equals(modality)) {
-            try {
-                double preferencesValue = getPersistentPreferenceExposure(angle);
-                if (preferencesValue > 0) {
-                    logger.info("Using persistent preferences exposure time for background collection angle {}: {}ms", angle, preferencesValue);
-                    return preferencesValue;
-                }
-            } catch (Exception e) {
-                logger.debug("Failed to read persistent preferences for angle {}", angle, e);
-            }
-        }
-
-        // Priority 2: Check config file
+        // Priority 1: Check config file first (most likely to have good starting values)
         try {
             String configFileLocation = qupath.ext.qpsc.preferences.QPPreferenceDialog.getMicroscopeConfigFileProperty();
             MicroscopeConfigManager configManager = MicroscopeConfigManager.getInstance(configFileLocation);
@@ -677,6 +664,19 @@ public class BackgroundCollectionController {
             }
         } catch (Exception e) {
             logger.debug("Failed to read config file exposure settings for background collection", e);
+        }
+
+        // Priority 2: Check persistent preferences as fallback
+        if ("ppm".equals(modality)) {
+            try {
+                double preferencesValue = getPersistentPreferenceExposure(angle);
+                if (preferencesValue > 0) {
+                    logger.info("Using persistent preferences exposure time for background collection angle {}: {}ms", angle, preferencesValue);
+                    return preferencesValue;
+                }
+            } catch (Exception e) {
+                logger.debug("Failed to read persistent preferences for angle {}", angle, e);
+            }
         }
 
         // Priority 3: Fallback default
