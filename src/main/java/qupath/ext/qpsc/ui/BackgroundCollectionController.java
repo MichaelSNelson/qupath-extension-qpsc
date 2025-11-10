@@ -308,19 +308,31 @@ public class BackgroundCollectionController {
         }
         
         final String finalDetector = detector;
-        // For background collection, prioritize preferences over config since users typically
-        // collect backgrounds after being warned about exposure mismatches
+        // Capture existingBackgroundSettings in final variable for use in callback
+        final BackgroundSettingsReader.BackgroundSettings capturedSettings = existingBackgroundSettings;
+        logger.info("DEBUG: Before async call - existingBackgroundSettings = {}",
+                capturedSettings != null ? "FOUND" : "NULL");
+
         getBackgroundCollectionDefaults(modality, objective, finalDetector).thenAccept(defaultExposures -> {
             Platform.runLater(() -> {
+                logger.info("DEBUG: Inside callback - capturedSettings = {}",
+                        capturedSettings != null ? "FOUND" : "NULL");
                 logger.debug("Creating exposure controls for {} angles", defaultExposures.size());
                 
-                // Always use defaults from config/preferences for new background collection
-                // Don't auto-populate with old background settings as this prevents users from choosing new values
-                List<AngleExposure> exposuresToUse = defaultExposures;
-                if (existingBackgroundSettings != null) {
-                    showBackgroundValidationMessage("⚠️ Existing background images found. New collection will replace them.",
+                // Prioritize existing background settings from previous collections
+                // Users want to see the values they used last time for this modality+objective
+                List<AngleExposure> exposuresToUse;
+                if (capturedSettings != null) {
+                    // Use exposure values from previous background collection for this modality+objective
+                    exposuresToUse = capturedSettings.angleExposures;
+                    logger.info("Loading exposure values from previous background collection: {}",
+                            capturedSettings.settingsFilePath);
+                    showBackgroundValidationMessage("⚠️ Existing background images found. Values loaded from previous collection.",
                             "-fx-text-fill: orange; -fx-font-weight: bold;");
                 } else {
+                    // No previous backgrounds, use defaults from config/preferences
+                    exposuresToUse = defaultExposures;
+                    logger.info("No existing background settings - using defaults from config/preferences");
                     showBackgroundValidationMessage("✓ No existing background images. Ready for new collection.",
                             "-fx-text-fill: green; -fx-font-weight: bold;");
                 }
