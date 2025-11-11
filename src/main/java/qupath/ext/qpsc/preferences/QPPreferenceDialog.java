@@ -5,6 +5,7 @@ import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import qupath.ext.basicstitching.config.StitchingConfig;
 import qupath.ext.qpsc.utilities.AffineTransformManager;
 import qupath.ext.qpsc.utilities.MacroImageAnalyzer;
 import qupath.ext.qpsc.utilities.MicroscopeConfigManager;
@@ -83,8 +84,14 @@ public class QPPreferenceDialog {
                     OMEPyramidWriter.CompressionType.DEFAULT,
                     OMEPyramidWriter.CompressionType.class);
 
+    private static final ObjectProperty<StitchingConfig.OutputFormat> outputFormatProperty =
+            PathPrefs.createPersistentPreference(
+                    "stitchingOutputFormat",
+                    StitchingConfig.OutputFormat.OME_TIFF,
+                    StitchingConfig.OutputFormat.class);
+
     /**
-     * Register all preferences in QuPath’s PreferencePane. Call once during extension installation.
+     * Register all preferences in QuPath's PreferencePane. Call once during extension installation.
      */
     public static void installPreferences(QuPathGUI qupath) {
         if (qupath == null)
@@ -160,6 +167,16 @@ public class QPPreferenceDialog {
                 .name("Compression type")
                 .category(CATEGORY)
                 .description("Compression for OME Pyramid output.")
+                .build());
+        items.add(new PropertyItemBuilder<>(outputFormatProperty, StitchingConfig.OutputFormat.class)
+                .propertyType(PropertyItemBuilder.PropertyType.CHOICE)
+                .choices(Arrays.asList(StitchingConfig.OutputFormat.values()))
+                .name("Stitching output format")
+                .category(CATEGORY)
+                .description("Output format for stitched images.\n" +
+                             "OME-TIFF: Traditional single-file format, widely compatible (standard as of 2025).\n" +
+                             "OME-ZARR: Cloud-native directory format with better compression and parallel writing,\n" +
+                             "but less commonly used. ZARR provides 2-3x faster writing and 20-30% smaller files.")
                 .build());
         items.add(new PropertyItemBuilder<>(useSocketConnectionProperty, Boolean.class)
                 .name("Use Socket Connection")
@@ -254,6 +271,9 @@ public class QPPreferenceDialog {
     }
     public static OMEPyramidWriter.CompressionType getCompressionTypeProperty() {
         return compressionTypeProperty.get();
+    }
+    public static StitchingConfig.OutputFormat getOutputFormatProperty() {
+        return outputFormatProperty.get();
     }
     //TODO should this be here?
 

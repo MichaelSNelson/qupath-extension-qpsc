@@ -7,6 +7,7 @@ import qupath.ext.basicstitching.config.StitchingConfig;
 import qupath.ext.basicstitching.workflow.StitchingWorkflow;
 import qupath.ext.qpsc.controller.workflow.StitchingHelper;
 import qupath.ext.qpsc.modality.ModalityHandler;
+import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.ui.UIFunctions;
 import qupath.lib.gui.QuPathGUI;
 import qupath.lib.projects.Project;
@@ -150,8 +151,11 @@ public class TileProcessingUtilities {
         }
 
         // Configure and run the stitching workflow
-        logger.info("Configuring stitching with compression: {}, pixel size: {} µm, downsample: {}",
-                compression, pixelSizeMicrons, downsample);
+        // Get output format from preferences
+        StitchingConfig.OutputFormat outputFormat = QPPreferenceDialog.getOutputFormatProperty();
+
+        logger.info("Configuring stitching with compression: {}, pixel size: {} µm, downsample: {}, format: {}",
+                compression, pixelSizeMicrons, downsample, outputFormat);
 
         StitchingConfig config = new StitchingConfig(
                 "Coordinates in TileConfiguration.txt file",
@@ -161,10 +165,11 @@ public class TileProcessingUtilities {
                 pixelSizeMicrons,
                 downsample,
                 matchingString,
-                1.0  // globalQuality parameter
+                1.0,  // zSpacingMicrons parameter
+                outputFormat  // Output format from preferences
         );
 
-        logger.info("Starting BasicStitching workflow...");
+        logger.info("Starting BasicStitching workflow with {} format...", outputFormat);
         String outPath = StitchingWorkflow.run(config);
         logger.info("BasicStitching workflow completed. Output: {}", outPath);
 
