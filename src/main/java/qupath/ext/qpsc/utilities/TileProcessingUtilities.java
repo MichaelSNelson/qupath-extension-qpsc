@@ -185,23 +185,33 @@ public class TileProcessingUtilities {
         if (matchingString.equals(".")) {
             logger.info("Processing batch stitching results...");
 
-            File[] allOmeTiffs = outputDir.listFiles((dir, name) ->
-                    name.endsWith(".ome.tif") && !existingFiles.contains(name));
+            // Look for both OME-TIFF files and OME-ZARR directories
+            File[] allOmeFiles = outputDir.listFiles((dir, name) ->
+                    (name.endsWith(".ome.tif") || name.endsWith(".ome.zarr")) && !existingFiles.contains(name));
 
-            if (allOmeTiffs == null || allOmeTiffs.length == 0) {
-                logger.error("No new OME-TIFF files found after batch stitching");
-                throw new IOException("No new OME-TIFF files found after batch stitching");
+            if (allOmeFiles == null || allOmeFiles.length == 0) {
+                logger.error("No new OME-TIFF/ZARR files found after batch stitching");
+                throw new IOException("No new OME-TIFF/ZARR files found after batch stitching");
             }
 
-            logger.info("Found {} new OME-TIFF files to rename and import", allOmeTiffs.length);
+            logger.info("Found {} new OME-TIFF/ZARR files to rename and import", allOmeFiles.length);
             String lastPath = null;
 
             // Process each newly created file
-            for (File stitchedFile : allOmeTiffs) {
+            for (File stitchedFile : allOmeFiles) {
                 String originalName = stitchedFile.getName();
-                // Extract the angle/subdirectory name from the filename
-                String angleOrSubdir = originalName.replace(".ome.tif", "");
-                logger.debug("Processing file: {} (angle/subdir: {})", originalName, angleOrSubdir);
+
+                // Detect the file format and extract angle/subdirectory name
+                String extension;
+                String angleOrSubdir;
+                if (originalName.endsWith(".ome.zarr")) {
+                    extension = ".ome.zarr";
+                    angleOrSubdir = originalName.replace(".ome.zarr", "");
+                } else {
+                    extension = ".ome.tif";
+                    angleOrSubdir = originalName.replace(".ome.tif", "");
+                }
+                logger.debug("Processing file: {} (angle/subdir: {}, format: {})", originalName, angleOrSubdir, extension);
 
                 String angleSuffix = angleOrSubdir;
                 if (modalityHandler != null) {
@@ -218,7 +228,7 @@ public class TileProcessingUtilities {
                                                                .replace("/", "_")
                                                                .replace("\\", "_");
                 String baseName = sampleLabel + "_" + imagingModeWithIndex + "_" +
-                        sanitizedAnnotationName + "_" + angleSuffix + ".ome.tif";
+                        sanitizedAnnotationName + "_" + angleSuffix + extension;
                 File renamed = new File(stitchedFile.getParent(), baseName);
 
                 logger.info("Renaming {} → {}", originalName, baseName);
@@ -327,10 +337,18 @@ public class TileProcessingUtilities {
             File orig = new File(outPath);
             String baseName;
 
+            // Detect the output format extension from the original path
+            String extension;
+            if (orig.getName().endsWith(".ome.zarr")) {
+                extension = ".ome.zarr";
+            } else {
+                extension = ".ome.tif";  // Default to TIFF
+            }
+
             // Check if this is angle-based stitching (matching string is different from annotation)
             if (!matchingString.equals(annotationName)) {
                 String angleSuffix = matchingString;
-                
+
                 // Handle birefringence images specially
                 if (matchingString.contains(".biref")) {
                     // Extract base angle and add birefringence indicator
@@ -369,9 +387,9 @@ public class TileProcessingUtilities {
                         // Keep original string if not a valid number
                     }
                 }
-                
+
                 // This is angle-based stitching - include both annotation AND angle
-                // Format: sampleLabel_modality_annotation_angle.ome.tif
+                // Format: sampleLabel_modality_annotation_angle.ome.zarr (or .ome.tif)
                 // Extract original region name from potentially combined path (e.g., "bounds\_temp_7_0" -> "bounds")
                 String originalRegionName = extractOriginalRegionName(annotationName);
                 // Sanitize annotation name to replace path separators with underscores for valid filenames
@@ -379,7 +397,7 @@ public class TileProcessingUtilities {
                                                                    .replace("/", "_")
                                                                    .replace("\\", "_");
                 baseName = sampleLabel + "_" + imagingModeWithIndex + "_" +
-                        sanitizedAnnotationName + "_" + angleSuffix + ".ome.tif";
+                        sanitizedAnnotationName + "_" + angleSuffix + extension;
                 logger.info("Angle-based stitching detected - including annotation and angle in filename");
             } else {
                 // Standard stitching - just annotation (or nothing for "bounds")
@@ -391,7 +409,7 @@ public class TileProcessingUtilities {
                                                                    .replace("\\", "_");
                 baseName = sampleLabel + "_" + imagingModeWithIndex
                         + (sanitizedAnnotationName.equals("bounds") ? "" : "_" + sanitizedAnnotationName)
-                        + ".ome.tif";
+                        + extension;
                 logger.info("Standard stitching - using annotation-based filename");
             }
 
