@@ -275,7 +275,7 @@ public class TileProcessingUtilities {
                             logger.info("Successfully imported {} to project", new File(pathToImport).getName());
 
                             // Optionally open the first image
-                            if (allOmeTiffs[0].getName().equals(originalName)) {
+                            if (allOmeFiles[0].getName().equals(originalName)) {
                                 logger.debug("Opening first image in viewer");
 
                                 // Save current image data before opening new image to prevent save prompts
@@ -320,7 +320,7 @@ public class TileProcessingUtilities {
 
                 qupath.fx.dialogs.Dialogs.showInfoNotification(
                         res.getString("stitching.success.title"),
-                        String.format("Successfully stitched and imported %d images", allOmeTiffs.length));
+                        String.format("Successfully stitched and imported %d images", allOmeFiles.length));
             });
 
         } else {
