@@ -277,11 +277,15 @@ public class PPMAngleSelectionController {
             //TODO MAKE THIS EASIER TO CHANGE IN THE FUTURE AND NOT SET IN THE GUI CODE
             dialog.setResultConverter(button -> {
                 if(button==okType){
+                    // Optimized angle order to minimize rotation stage movement:
+                    // 90deg -> +7deg -> 0deg -> -7deg minimizes total rotation distance
+                    // Previous order (90 -> -7 -> 0 -> +7) required 111deg total rotation
+                    // New order (90 -> +7 -> 0 -> -7) requires only 31deg total rotation
                     List<AngleExposure> list = new ArrayList<>();
                     if(uncrossedCheck.isSelected()) list.add(new AngleExposure(uncrossedAngle,Double.parseDouble(uncrossedExposure.getText())));
-                    if(minusCheck.isSelected()) list.add(new AngleExposure(minusAngle,Double.parseDouble(minusExposure.getText())));
-                    if(zeroCheck.isSelected()) list.add(new AngleExposure(0.0,Double.parseDouble(zeroExposure.getText())));
                     if(plusCheck.isSelected()) list.add(new AngleExposure(plusAngle,Double.parseDouble(plusExposure.getText())));
+                    if(zeroCheck.isSelected()) list.add(new AngleExposure(0.0,Double.parseDouble(zeroExposure.getText())));
+                    if(minusCheck.isSelected()) list.add(new AngleExposure(minusAngle,Double.parseDouble(minusExposure.getText())));
 
                     logger.info("PPM angles and exposures selected: {}", list);
                     return new AngleExposureResult(list);
