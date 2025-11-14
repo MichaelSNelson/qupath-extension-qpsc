@@ -355,9 +355,9 @@ public class TestAutofocusWorkflow {
         content.setPadding(new javafx.geometry.Insets(10));
 
         if (initialZ != null && finalZ != null && zShift != null) {
-            // Create labels with larger font
+            // Create labels with larger font using theme-adaptive text color
             javafx.scene.control.Label resultsLabel = new javafx.scene.control.Label("Results:");
-            resultsLabel.setStyle("-fx-font-weight: bold; -fx-font-size: 13px;");
+            resultsLabel.setStyle("-fx-font-weight: bold; -fx-font-size: 13px; -fx-text-fill: -fx-text-base-color;");
 
             javafx.scene.text.TextFlow resultsFlow = new javafx.scene.text.TextFlow();
             javafx.scene.text.Text initialText = new javafx.scene.text.Text(
@@ -367,10 +367,10 @@ public class TestAutofocusWorkflow {
             javafx.scene.text.Text shiftText = new javafx.scene.text.Text(
                     String.format("Z Shift: %s um", zShift));
 
-            // Use default text fill (respects dark mode)
-            initialText.setStyle("-fx-font-size: 12px;");
-            finalText.setStyle("-fx-font-size: 12px;");
-            shiftText.setStyle("-fx-font-size: 12px; -fx-font-weight: bold;");
+            // Use theme-adaptive text color that works in both light and dark modes
+            initialText.setStyle("-fx-font-size: 12px; -fx-fill: -fx-text-base-color;");
+            finalText.setStyle("-fx-font-size: 12px; -fx-fill: -fx-text-base-color;");
+            shiftText.setStyle("-fx-font-size: 12px; -fx-font-weight: bold; -fx-fill: -fx-text-base-color;");
 
             resultsFlow.getChildren().addAll(initialText, finalText, shiftText);
             content.getChildren().addAll(resultsLabel, resultsFlow);
@@ -386,7 +386,7 @@ public class TestAutofocusWorkflow {
 
                     javafx.scene.control.Label warningDetail = new javafx.scene.control.Label(
                             "Starting position may have been out of focus.");
-                    warningDetail.setStyle("-fx-font-size: 11px;");
+                    warningDetail.setStyle("-fx-font-size: 11px; -fx-text-fill: -fx-text-base-color;");
 
                     content.getChildren().addAll(
                         new javafx.scene.control.Separator(),
@@ -402,10 +402,10 @@ public class TestAutofocusWorkflow {
         if (plotPath != null) {
             javafx.scene.control.Label plotLabel = new javafx.scene.control.Label(
                     "Diagnostic plot saved:");
-            plotLabel.setStyle("-fx-font-weight: bold; -fx-font-size: 12px;");
+            plotLabel.setStyle("-fx-font-weight: bold; -fx-font-size: 12px; -fx-text-fill: -fx-text-base-color;");
 
             javafx.scene.control.Label plotPathLabel = new javafx.scene.control.Label(plotPath);
-            plotPathLabel.setStyle("-fx-font-size: 11px; -fx-font-family: monospace;");
+            plotPathLabel.setStyle("-fx-font-size: 11px; -fx-font-family: monospace; -fx-text-fill: -fx-text-base-color;");
             plotPathLabel.setWrapText(true);
 
             content.getChildren().addAll(
