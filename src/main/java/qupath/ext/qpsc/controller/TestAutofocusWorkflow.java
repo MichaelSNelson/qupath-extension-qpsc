@@ -283,50 +283,7 @@ public class TestAutofocusWorkflow {
 
             // Show success notification on UI thread
             Platform.runLater(() -> {
-                StringBuilder message = new StringBuilder(testType.substring(0, 1).toUpperCase() + testType.substring(1)
-                    + " autofocus test completed successfully!\n\n");
-
-                if (initialZ != null && finalZ != null && zShift != null) {
-                    message.append(String.format("Initial Z: %s um\n", initialZ));
-                    message.append(String.format("Final Z: %s um\n", finalZ));
-                    message.append(String.format("Z Shift: %s um\n\n", zShift));
-
-                    // Warn if large shift
-                    try {
-                        double shift = Double.parseDouble(zShift);
-                        if (Math.abs(shift) > 5.0) {
-                            message.append("WARNING: Large Z shift detected!\n");
-                            message.append("Starting position may have been out of focus.\n\n");
-                        }
-                    } catch (NumberFormatException e) {
-                        // Ignore parsing error
-                    }
-                }
-
-                if (plotPath != null) {
-                    message.append("Diagnostic plot: ").append(plotPath);
-                }
-
-                // Show dialog with option to open plot
-                boolean openPlot = Dialogs.showConfirmDialog("Autofocus Test Complete",
-                        message.toString() + "\n\nOpen diagnostic plot?");
-
-                if (openPlot && plotPath != null) {
-                    try {
-                        File plotFile = new File(plotPath);
-                        if (plotFile.exists()) {
-                            Desktop.getDesktop().open(plotFile);
-                            logger.info("Opened diagnostic plot: {}", plotPath);
-                        } else {
-                            Dialogs.showErrorMessage("File Not Found",
-                                    "Diagnostic plot file not found: " + plotPath);
-                        }
-                    } catch (IOException e) {
-                        logger.error("Failed to open diagnostic plot", e);
-                        Dialogs.showErrorMessage("Error Opening Plot",
-                                "Could not open diagnostic plot: " + e.getMessage());
-                    }
-                }
+                showAutofocusResultDialog(testType, initialZ, finalZ, zShift, plotPath);
             });
 
         } catch (Exception e) {
@@ -378,6 +335,120 @@ public class TestAutofocusWorkflow {
         }
 
         return null;
+    }
+
+    /**
+     * Show autofocus result dialog with improved formatting and readability.
+     * Uses larger, bold text with system colors for better dark mode support.
+     */
+    private static void showAutofocusResultDialog(String testType, String initialZ,
+                                                   String finalZ, String zShift, String plotPath) {
+        // Create custom dialog for better formatting
+        javafx.scene.control.Alert alert = new javafx.scene.control.Alert(
+                javafx.scene.control.Alert.AlertType.INFORMATION);
+        alert.setTitle("Autofocus Test Complete");
+        alert.setHeaderText(testType.substring(0, 1).toUpperCase() + testType.substring(1) +
+                           " autofocus test completed successfully!");
+
+        // Build formatted message with larger, bold text
+        javafx.scene.layout.VBox content = new javafx.scene.layout.VBox(10);
+        content.setPadding(new javafx.geometry.Insets(10));
+
+        if (initialZ != null && finalZ != null && zShift != null) {
+            // Create labels with larger font
+            javafx.scene.control.Label resultsLabel = new javafx.scene.control.Label("Results:");
+            resultsLabel.setStyle("-fx-font-weight: bold; -fx-font-size: 13px;");
+
+            javafx.scene.text.TextFlow resultsFlow = new javafx.scene.text.TextFlow();
+            javafx.scene.text.Text initialText = new javafx.scene.text.Text(
+                    String.format("Initial Z: %s um\n", initialZ));
+            javafx.scene.text.Text finalText = new javafx.scene.text.Text(
+                    String.format("Final Z: %s um\n", finalZ));
+            javafx.scene.text.Text shiftText = new javafx.scene.text.Text(
+                    String.format("Z Shift: %s um", zShift));
+
+            // Use default text fill (respects dark mode)
+            initialText.setStyle("-fx-font-size: 12px;");
+            finalText.setStyle("-fx-font-size: 12px;");
+            shiftText.setStyle("-fx-font-size: 12px; -fx-font-weight: bold;");
+
+            resultsFlow.getChildren().addAll(initialText, finalText, shiftText);
+            content.getChildren().addAll(resultsLabel, resultsFlow);
+
+            // Warn if large shift
+            try {
+                double shift = Double.parseDouble(zShift);
+                if (Math.abs(shift) > 5.0) {
+                    javafx.scene.control.Label warningLabel = new javafx.scene.control.Label(
+                            "WARNING: Large Z shift detected!");
+                    warningLabel.setStyle("-fx-font-weight: bold; -fx-font-size: 12px; " +
+                                        "-fx-text-fill: #FF6B6B;"); // Soft red for visibility
+
+                    javafx.scene.control.Label warningDetail = new javafx.scene.control.Label(
+                            "Starting position may have been out of focus.");
+                    warningDetail.setStyle("-fx-font-size: 11px;");
+
+                    content.getChildren().addAll(
+                        new javafx.scene.control.Separator(),
+                        warningLabel,
+                        warningDetail
+                    );
+                }
+            } catch (NumberFormatException e) {
+                // Ignore parsing error
+            }
+        }
+
+        if (plotPath != null) {
+            javafx.scene.control.Label plotLabel = new javafx.scene.control.Label(
+                    "Diagnostic plot saved:");
+            plotLabel.setStyle("-fx-font-weight: bold; -fx-font-size: 12px;");
+
+            javafx.scene.control.Label plotPathLabel = new javafx.scene.control.Label(plotPath);
+            plotPathLabel.setStyle("-fx-font-size: 11px; -fx-font-family: monospace;");
+            plotPathLabel.setWrapText(true);
+
+            content.getChildren().addAll(
+                new javafx.scene.control.Separator(),
+                plotLabel,
+                plotPathLabel
+            );
+        }
+
+        alert.getDialogPane().setContent(content);
+        alert.getDialogPane().setMinWidth(500);
+
+        // Add "Open Plot" and "Close" buttons
+        alert.getButtonTypes().setAll(
+                javafx.scene.control.ButtonType.YES,
+                javafx.scene.control.ButtonType.NO
+        );
+
+        // Customize button text
+        ((javafx.scene.control.Button) alert.getDialogPane().lookupButton(
+                javafx.scene.control.ButtonType.YES)).setText("Open Plot");
+        ((javafx.scene.control.Button) alert.getDialogPane().lookupButton(
+                javafx.scene.control.ButtonType.NO)).setText("Close");
+
+        // Show dialog and handle response
+        alert.showAndWait().ifPresent(response -> {
+            if (response == javafx.scene.control.ButtonType.YES && plotPath != null) {
+                try {
+                    File plotFile = new File(plotPath);
+                    if (plotFile.exists()) {
+                        Desktop.getDesktop().open(plotFile);
+                        logger.info("Opened diagnostic plot: {}", plotPath);
+                    } else {
+                        Dialogs.showErrorMessage("File Not Found",
+                                "Diagnostic plot file not found: " + plotPath);
+                    }
+                } catch (IOException e) {
+                    logger.error("Failed to open diagnostic plot", e);
+                    Dialogs.showErrorMessage("Error Opening Plot",
+                            "Could not open diagnostic plot: " + e.getMessage());
+                }
+            }
+        });
     }
 
     /**
