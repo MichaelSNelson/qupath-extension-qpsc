@@ -1,0 +1,192 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+
+    <!-- ========================================
+         QPSC Logging Configuration
+
+         This configuration creates multiple log files:
+         1. qpsc-acquisition.log - Centralized filtered log (excludes heartbeat spam)
+         2. project-specific logs - Per-workflow logs saved in QuPath project folders
+         3. qpsc-debug.log - Full debug log with everything (optional, uncomment if needed)
+         ======================================== -->
+
+    <!-- Define log directory (relative to QuPath working directory) -->
+    <property name="LOG_DIR" value="logs/qpsc" />
+
+    <!-- Project-specific log directory (set dynamically by workflows) -->
+    <property name="PROJECT_LOG_DIR" value="${qpsc.project.logdir:-}" />
+
+    <!-- Console appender (inherits QuPath's console settings) -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- ========================================
+         ACQUISITION LOG (Filtered)
+         Clean log without heartbeat/health check spam
+         ======================================== -->
+    <appender name="ACQUISITION_LOG" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_DIR}/qpsc-acquisition.log</file>
+
+        <!-- Rolling policy: keep 7 days of logs -->
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_DIR}/qpsc-acquisition-%d{yyyy-MM-dd}.log</fileNamePattern>
+            <maxHistory>7</maxHistory>
+            <totalSizeCap>100MB</totalSizeCap>
+        </rollingPolicy>
+
+        <!-- Readable format with timestamps -->
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%-20thread] %-5level %-40logger{40} - %msg%n</pattern>
+        </encoder>
+
+        <!-- Filter to exclude heartbeat, health check, progress, and verbose stitching messages -->
+        <filter class="ch.qos.logback.core.filter.EvaluatorFilter">
+            <evaluator>
+                <expression>
+                    <!-- Exclude specific heartbeat/health messages -->
+                    return message.contains("Stage XY position: (") ||
+                           message.contains("Health check passed") ||
+                           message.contains("Health check failed") ||
+                           message.contains("Heartbeat received:") ||
+                           message.contains("Heartbeat client") ||
+                           message.contains("Heartbeat server") ||
+
+                           <!-- Exclude repetitive progress update messages -->
+                           message.contains("PROGRESS UPDATE:") ||
+                           message.contains("of") &amp;&amp; message.contains("files") ||
+
+                           <!-- Exclude verbose stitching directory listings -->
+                           message.contains("directory contents:") ||
+                           message.contains("Initial tile base directory contents:") ||
+                           message.contains("Directory state after processing angle") ||
+                           message.contains("Available directories in tile base") ||
+                           message.contains("Birefringence directory contents:") ||
+                           message.contains("Sum directory contents:") ||
+
+                           <!-- Exclude .tif file counting messages -->
+                           message.contains("Found") &amp;&amp; message.contains(".tif") ||
+                           message.contains("OME-TIFF files") ||
+
+                           <!-- Exclude low-level socket debug messages -->
+                           (logger.contains("MicroscopeSocketClient") &amp;&amp;
+                            level.toInt() &lt; WARN.toInt() &amp;&amp;
+                            (message.contains("Stage") || message.contains("Health")));
+                </expression>
+            </evaluator>
+            <OnMatch>DENY</OnMatch>
+            <OnMismatch>NEUTRAL</OnMismatch>
+        </filter>
+    </appender>
+
+    <!-- ========================================
+         PROJECT-SPECIFIC LOG
+         Workflow log saved in the QuPath project folder
+         Activated dynamically when workflows start
+         ======================================== -->
+    <appender name="PROJECT_LOG" class="ch.qos.logback.core.FileAppender">
+        <!-- File path set dynamically via system property -->
+        <file>${PROJECT_LOG_DIR}/acquisition.log</file>
+
+        <!-- Readable format with timestamps -->
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%-20thread] %-5level %-40logger{40} - %msg%n</pattern>
+        </encoder>
+
+        <!-- Same filtering as ACQUISITION_LOG -->
+        <filter class="ch.qos.logback.core.filter.EvaluatorFilter">
+            <evaluator>
+                <expression>
+                    return message.contains("Stage XY position: (") ||
+                           message.contains("Health check passed") ||
+                           message.contains("Health check failed") ||
+                           message.contains("Heartbeat received:") ||
+                           message.contains("Heartbeat client") ||
+                           message.contains("Heartbeat server") ||
+                           message.contains("PROGRESS UPDATE:") ||
+                           message.contains("of") &amp;&amp; message.contains("files") ||
+                           message.contains("directory contents:") ||
+                           message.contains("Initial tile base directory contents:") ||
+                           message.contains("Directory state after processing angle") ||
+                           message.contains("Available directories in tile base") ||
+                           message.contains("Birefringence directory contents:") ||
+                           message.contains("Sum directory contents:") ||
+                           message.contains("Found") &amp;&amp; message.contains(".tif") ||
+                           message.contains("OME-TIFF files") ||
+                           (logger.contains("MicroscopeSocketClient") &amp;&amp;
+                            level.toInt() &lt; WARN.toInt() &amp;&amp;
+                            (message.contains("Stage") || message.contains("Health")));
+                </expression>
+            </evaluator>
+            <OnMatch>DENY</OnMatch>
+            <OnMismatch>NEUTRAL</OnMismatch>
+        </filter>
+
+        <!-- Only activate if PROJECT_LOG_DIR is set -->
+        <filter class="ch.qos.logback.core.filter.EvaluatorFilter">
+            <evaluator>
+                <expression>
+                    return property("PROJECT_LOG_DIR") == null ||
+                           property("PROJECT_LOG_DIR").isEmpty() ||
+                           property("PROJECT_LOG_DIR").equals("-");
+                </expression>
+            </evaluator>
+            <OnMatch>DENY</OnMatch>
+            <OnMismatch>ACCEPT</OnMismatch>
+        </filter>
+    </appender>
+
+    <!-- ========================================
+         FULL DEBUG LOG (Optional - Uncomment if needed)
+         Contains everything including heartbeat messages
+         ======================================== -->
+    <!--
+    <appender name="DEBUG_LOG" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_DIR}/qpsc-debug.log</file>
+
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_DIR}/qpsc-debug-%d{yyyy-MM-dd}.log</fileNamePattern>
+            <maxHistory>3</maxHistory>
+            <totalSizeCap>200MB</totalSizeCap>
+        </rollingPolicy>
+
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%-20thread] %-5level %-40logger{40} - %msg%n</pattern>
+        </encoder>
+    </appender>
+    -->
+
+    <!-- ========================================
+         LOGGER CONFIGURATION
+         ======================================== -->
+
+    <!-- QPSC extension loggers -->
+    <logger name="qupath.ext.qpsc" level="INFO" additivity="false">
+        <appender-ref ref="ACQUISITION_LOG" />
+        <appender-ref ref="PROJECT_LOG" />  <!-- Project-specific log (only active when set) -->
+        <!-- <appender-ref ref="DEBUG_LOG" /> --> <!-- Uncomment for full debug log -->
+        <appender-ref ref="CONSOLE" />
+    </logger>
+
+    <!-- Specific logger for MicroscopeSocketClient - raise to WARN to reduce verbosity -->
+    <logger name="qupath.ext.qpsc.service.microscope.MicroscopeSocketClient" level="WARN" additivity="false">
+        <appender-ref ref="ACQUISITION_LOG" />
+        <appender-ref ref="PROJECT_LOG" />
+        <appender-ref ref="CONSOLE" />
+    </logger>
+
+    <!-- Specific logger for TestWorkflow - can disable heartbeat test logs entirely -->
+    <logger name="qupath.ext.qpsc.ui.TestWorkFlowController" level="WARN" additivity="false">
+        <appender-ref ref="ACQUISITION_LOG" />
+        <appender-ref ref="PROJECT_LOG" />
+        <appender-ref ref="CONSOLE" />
+    </logger>
+
+    <!-- Root logger - catches everything not explicitly configured -->
+    <root level="INFO">
+        <appender-ref ref="CONSOLE" />
+    </root>
+
+</configuration>
