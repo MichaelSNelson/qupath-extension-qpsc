@@ -75,6 +75,47 @@ public class MinorFunctions {
         return count;
     }
 
+    /**
+     * Robustly counts expected tiles from TileConfiguration file with retry logic.
+     * This method addresses timing issues where files may not be immediately available.
+     *
+     * @param arguments Path components to build the tile directory path
+     * @param maxRetries Maximum number of retry attempts
+     * @param retryDelayMs Delay between retries in milliseconds
+     * @return Number of .tif entries found, or 0 if file not found after retries
+     */
+    public static int countExpectedTilesWithRetry(List<String> arguments, int maxRetries, long retryDelayMs) {
+        int count = 0;
+        for (int attempt = 0; attempt <= maxRetries; attempt++) {
+            count = countTifEntriesInTileConfig(arguments);
+
+            if (count > 0) {
+                if (attempt > 0) {
+                    logger.info("Successfully counted {} tiles after {} retries", count, attempt);
+                }
+                return count;
+            }
+
+            if (attempt < maxRetries) {
+                logger.debug("Tile count is 0, retrying in {}ms (attempt {}/{})",
+                            retryDelayMs, attempt + 1, maxRetries);
+                try {
+                    Thread.sleep(retryDelayMs);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    logger.warn("Retry interrupted", e);
+                    break;
+                }
+            }
+        }
+
+        // If we get here, all retries failed
+        String base = String.join(File.separator, arguments);
+        logger.error("Failed to count tiles after {} retries. Directory: {}", maxRetries, base);
+        logger.error("This may indicate missing TileConfiguration files or timing issues");
+        return 0;
+    }
+
     /** Returns a Map of two script-related paths based on the Groovy script’s folder. */
     public static Map<String,String> calculateScriptPaths(String groovyScriptPath) {
         Path dir = Paths.get(groovyScriptPath).getParent();

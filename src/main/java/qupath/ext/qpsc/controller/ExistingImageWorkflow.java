@@ -565,6 +565,7 @@ public class ExistingImageWorkflow {
         public List<PathObject> annotations = new ArrayList<>();
         public List<CompletableFuture<Void>> stitchingFutures = new ArrayList<>();
         public boolean useExistingSlideAlignment = false;
+        public boolean cancelled = false; // Tracks user cancellation
         public double pixelSize;
         public List<String> selectedAnnotationClasses = Arrays.asList("Tissue", "Scanned Area", "Bounding Box");
         public java.util.Map<String, Double> angleOverrides; // User-specified angle overrides for modality

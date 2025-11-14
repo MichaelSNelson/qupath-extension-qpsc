@@ -109,6 +109,7 @@ public class AcquisitionManager {
                 .thenCompose(valid -> {
                     if (!valid) {
                         logger.info("Annotation validation failed or cancelled");
+                        state.cancelled = true; // Mark workflow as cancelled
                         return CompletableFuture.completedFuture(null);
                     }
                     return getRotationAngles();
@@ -261,6 +262,12 @@ public class AcquisitionManager {
             List<AngleExposure> angleExposures) {
 
         return CompletableFuture.supplyAsync(() -> {
+            // Check for cancellation
+            if (state.cancelled) {
+                logger.info("Skipping acquisition preparation - workflow was cancelled");
+                return null;
+            }
+
             logger.info("Preparing for acquisition with {} angles",
                     angleExposures != null ? angleExposures.size() : 1);
 
@@ -337,6 +344,12 @@ public class AcquisitionManager {
      */
     private CompletableFuture<Boolean> processAnnotations(
             List<AngleExposure> angleExposures) {
+
+        // Check for cancellation
+        if (state.cancelled) {
+            logger.info("Skipping annotation processing - workflow was cancelled");
+            return CompletableFuture.completedFuture(false);
+        }
 
         if (state.annotations.isEmpty()) {
             logger.warn("No annotations to process");
@@ -535,7 +548,7 @@ public class AcquisitionManager {
 
         MicroscopeSocketClient socketClient = MicroscopeController.getInstance().getSocketClient();
 
-        // Calculate expected files
+        // Calculate expected files with retry logic to handle timing issues
         String tileDirPath = Paths.get(
                 state.sample.projectsFolder().getAbsolutePath(),
                 state.sample.sampleName(),
@@ -543,9 +556,18 @@ public class AcquisitionManager {
                 annotation.getName()
         ).toString();
 
-        int tilesPerAngle = MinorFunctions.countTifEntriesInTileConfig(List.of(tileDirPath));
-        final int expectedFiles = angleExposures != null && !angleExposures.isEmpty() 
-            ? tilesPerAngle * angleExposures.size() 
+        // Try to count tiles with retry logic (3 attempts, 200ms delay)
+        int tilesPerAngle = MinorFunctions.countExpectedTilesWithRetry(List.of(tileDirPath), 3, 200);
+
+        // If count is still 0 after retries, estimate from annotation bounds
+        if (tilesPerAngle == 0) {
+            logger.warn("Could not count tiles from TileConfiguration file, estimating from annotation bounds");
+            tilesPerAngle = estimateTileCount(annotation);
+            logger.info("Estimated {} tiles for annotation {}", tilesPerAngle, annotation.getName());
+        }
+
+        final int expectedFiles = angleExposures != null && !angleExposures.isEmpty()
+            ? tilesPerAngle * angleExposures.size()
             : tilesPerAngle;
 
         logger.info("Expected files: {} ({}x{} angles)", expectedFiles, tilesPerAngle,
@@ -677,6 +699,61 @@ public class AcquisitionManager {
         state.stitchingFutures.add(stitchFuture);
         logger.info("Launched stitching for annotation: {}", annotation.getName());
     }
+
+    /**
+     * Estimates tile count based on annotation bounds and camera FOV.
+     * This is used as a fallback when TileConfiguration files are not available.
+     *
+     * @param annotation The annotation to estimate tiles for
+     * @return Estimated number of tiles (minimum 1)
+     */
+    private int estimateTileCount(PathObject annotation) {
+        try {
+            // Get annotation bounds in image pixels
+            double annWidth = annotation.getROI().getBoundsWidth();
+            double annHeight = annotation.getROI().getBoundsHeight();
+
+            // Get image pixel size
+            double imagePixelSize = QuPathGUI.getInstance().getImageData()
+                    .getServer().getPixelCalibration().getAveragedPixelSizeMicrons();
+
+            // Convert to microns
+            double annWidthMicrons = annWidth * imagePixelSize;
+            double annHeightMicrons = annHeight * imagePixelSize;
+
+            // Get camera FOV from configuration
+            double[] fovMicrons = MicroscopeController.getInstance().getCameraFOVFromConfig(
+                    state.sample.modality(),
+                    state.sample.objective(),
+                    state.sample.detector());
+
+            double fovWidthMicrons = fovMicrons[0];
+            double fovHeightMicrons = fovMicrons[1];
+
+            // Get overlap percentage
+            double overlapPercent = QPPreferenceDialog.getTileOverlapPercentProperty();
+            double effectiveWidth = fovWidthMicrons * (1 - overlapPercent / 100.0);
+            double effectiveHeight = fovHeightMicrons * (1 - overlapPercent / 100.0);
+
+            // Calculate tile grid
+            int tilesX = (int) Math.ceil(annWidthMicrons / effectiveWidth);
+            int tilesY = (int) Math.ceil(annHeightMicrons / effectiveHeight);
+            int totalTiles = tilesX * tilesY;
+
+            logger.info("Tile estimate: annotation {}x{} um, FOV {}x{} um, overlap {}%, grid {}x{} = {} tiles",
+                    Math.round(annWidthMicrons), Math.round(annHeightMicrons),
+                    Math.round(fovWidthMicrons), Math.round(fovHeightMicrons),
+                    Math.round(overlapPercent), tilesX, tilesY, totalTiles);
+
+            // Return at least 1 tile to avoid division by zero
+            return Math.max(1, totalTiles);
+
+        } catch (Exception e) {
+            logger.error("Failed to estimate tile count, defaulting to 1", e);
+            return 1; // Safe default to prevent division by zero
+        }
+    }
+
     // UI notification methods
 
     /**
