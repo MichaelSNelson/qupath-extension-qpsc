@@ -1219,22 +1219,39 @@ public class MicroscopeSocketClient implements AutoCloseable {
      * @throws IOException if communication fails
      */
     public AcquisitionState getAcquisitionStatus() throws IOException {
-        byte[] response = executeCommand(Command.STATUS, null, 16);
-        String stateStr = new String(response, StandardCharsets.UTF_8);
-        
-        // Check if this is actually a SUCCESS or FAILED message from background acquisition
-        if (stateStr.startsWith("SUCCESS:")) {
+        // First, read initial response to check state
+        byte[] initialResponse = executeCommand(Command.STATUS, null, 16);
+        String stateStr = new String(initialResponse, StandardCharsets.UTF_8);
+
+        // Check if this is a FAILED message with additional details
+        if (stateStr.startsWith("FAILED:")) {
+            // Read additional bytes for the full error message (up to 512 bytes total)
+            synchronized (socketLock) {
+                try {
+                    byte[] additionalBytes = new byte[496]; // 512 - 16 already read
+                    int bytesRead = input.read(additionalBytes);
+
+                    if (bytesRead > 0) {
+                        // Combine initial response with additional bytes
+                        String additionalStr = new String(additionalBytes, 0, bytesRead, StandardCharsets.UTF_8);
+                        stateStr = stateStr + additionalStr;
+                    }
+                } catch (IOException e) {
+                    logger.warn("Could not read additional failure message bytes", e);
+                }
+            }
+
+            String failureDetails = stateStr.substring("FAILED:".length()).trim();
+            lastFailureMessage = failureDetails.isEmpty() ? "Unknown server error" : failureDetails;
+            logger.error("Received FAILED message during status check: {} - Details: {}",
+                    stateStr.trim(), lastFailureMessage);
+            return AcquisitionState.FAILED;
+        } else if (stateStr.startsWith("SUCCESS:")) {
             logger.info("Received SUCCESS message during status check: {}", stateStr.trim());
             lastFailureMessage = null; // Clear any previous failure message
             return AcquisitionState.COMPLETED;
-        } else if (stateStr.startsWith("FAILED:")) {
-            String failureDetails = stateStr.substring("FAILED:".length()).trim();
-            lastFailureMessage = failureDetails.isEmpty() ? "Unknown server error" : failureDetails;
-            logger.error("Received FAILED message during status check: {} - Details: {}", 
-                    stateStr.trim(), lastFailureMessage);
-            return AcquisitionState.FAILED;
         }
-        
+
         AcquisitionState state = AcquisitionState.fromString(stateStr);
         logger.debug("Acquisition status: {}", state);
         return state;
