@@ -448,9 +448,12 @@ public class BoundingBoxWorkflow {
                                     }
                                 }).exceptionally(ex -> {
                                     logger.error("Socket workflow failed", ex);
+                                    // Unwrap CompletionException to get actual error message
+                                    Throwable cause = ex.getCause();
+                                    String errorMessage = cause != null ? cause.getMessage() : ex.getMessage();
                                     Platform.runLater(() ->
                                             UIFunctions.notifyUserOfError(
-                                                    "Workflow error: " + ex.getMessage(),
+                                                    errorMessage,
                                                     res.getString("acquisition.error.title")));
                                     return null;
                                 });
