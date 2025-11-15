@@ -393,7 +393,8 @@ public class BoundingBoxWorkflow {
                                                         "Acquisition Error"
                                                 )
                                         );
-                                        throw new RuntimeException("Socket acquisition failed", e);
+                                        // Re-throw original exception to preserve detailed error message
+                                        throw e instanceof RuntimeException ? (RuntimeException) e : new RuntimeException(e.getMessage(), e);
                                     }
                                 });
 
