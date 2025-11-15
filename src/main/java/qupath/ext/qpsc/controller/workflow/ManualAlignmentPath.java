@@ -8,6 +8,7 @@ import qupath.ext.qpsc.preferences.PersistentPreferences;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.ui.AffineTransformationController;
 import qupath.ext.qpsc.utilities.AffineTransformManager;
+import qupath.ext.qpsc.utilities.ImageFlipHelper;
 import qupath.ext.qpsc.utilities.MacroImageUtility;
 import qupath.ext.qpsc.utilities.MinorFunctions;
 import qupath.lib.gui.QuPathGUI;
