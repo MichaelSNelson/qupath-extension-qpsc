@@ -304,7 +304,7 @@ public class UIFunctions {
         return showProgressBarAsync(progressCounter, totalFiles, timeoutMs, false);
     }
     /**
-     * Shows an error dialog on the JavaFX thread.
+     * Shows an error dialog on the JavaFX thread with proper text wrapping.
      */
     public static void notifyUserOfError(String message, String context) {
         logger.error("Error during {}: {}", context, message);
@@ -314,6 +314,18 @@ public class UIFunctions {
             alert.setHeaderText("Error during " + context);
             alert.setContentText(message);
             alert.initModality(Modality.APPLICATION_MODAL);
+
+            // Enable text wrapping and set reasonable dialog width for long messages
+            alert.getDialogPane().setMinWidth(500);
+            alert.getDialogPane().setPrefWidth(600);
+
+            // Force content text to wrap
+            javafx.scene.control.Label contentLabel = (javafx.scene.control.Label) alert.getDialogPane().lookup(".content");
+            if (contentLabel != null) {
+                contentLabel.setWrapText(true);
+                contentLabel.setMaxWidth(550);
+            }
+
             alert.showAndWait();
         });
     }
