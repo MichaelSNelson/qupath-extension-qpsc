@@ -386,13 +386,8 @@ public class BoundingBoxWorkflow {
                                         }
 
                                     } catch (Exception e) {
+                                        // Log the error and re-throw - outer exception handler will show dialog
                                         logger.error("Socket acquisition failed", e);
-                                        Platform.runLater(() ->
-                                                UIFunctions.notifyUserOfError(
-                                                        "Socket acquisition failed: " + e.getMessage(),
-                                                        "Acquisition Error"
-                                                )
-                                        );
                                         // Re-throw original exception to preserve detailed error message
                                         throw e instanceof RuntimeException ? (RuntimeException) e : new RuntimeException(e.getMessage(), e);
                                     }
