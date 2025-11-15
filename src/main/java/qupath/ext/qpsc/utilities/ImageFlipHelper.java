@@ -3,7 +3,7 @@ package qupath.ext.qpsc.utilities;
 import javafx.application.Platform;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import qupath.ext.qpsc.controller.SampleSetupController;
+import qupath.ext.qpsc.ui.SampleSetupController;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.ui.UIFunctions;
 import qupath.fx.dialogs.Dialogs;
