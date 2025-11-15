@@ -173,8 +173,8 @@ public class ImageFlipHelper {
                                             try {
                                                 ImageData<BufferedImage> currentData = gui.getImageData();
                                                 if (currentData != null) {
-                                                    ProjectImageEntry<BufferedImage> currentEntry = project.getEntry(currentData);
-                                                    if (currentEntry != null && currentEntry.equals(flippedEntry)) {
+                                                    ProjectImageEntry<BufferedImage> loadedEntry = project.getEntry(currentData);
+                                                    if (loadedEntry != null && loadedEntry.equals(flippedEntry)) {
                                                         logger.warn("Image loaded but listener didn't fire - completing anyway");
                                                         loadFuture.complete(true);
                                                         return;
