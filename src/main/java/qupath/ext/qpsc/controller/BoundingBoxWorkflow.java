@@ -376,7 +376,11 @@ public class BoundingBoxWorkflow {
                                             // Don't throw exception for user cancellation
                                             return;
                                         } else if (finalState == MicroscopeSocketClient.AcquisitionState.FAILED) {
-                                            throw new RuntimeException("Socket acquisition failed on server");
+                                            // Get detailed failure message from server
+                                            String failureMessage = socketClient.getLastFailureMessage();
+                                            String errorDetails = failureMessage != null ? failureMessage : "Unknown server error";
+                                            logger.error("Server acquisition failed: {}", errorDetails);
+                                            throw new RuntimeException("Acquisition failed on server: " + errorDetails);
                                         } else {
                                             logger.warn("Acquisition ended in unexpected state: {}", finalState);
                                         }
