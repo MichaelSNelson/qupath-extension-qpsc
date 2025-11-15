@@ -357,7 +357,7 @@ public class MacroImageController {
         previewImage.fitWidthProperty().bind(imageScroll.widthProperty().subtract(20));
         previewImage.fitHeightProperty().bind(imageScroll.heightProperty().subtract(20));
 
-        // CHANGED: Fix text cutoff in result label
+        // Enable text wrapping for long file paths
         Label resultLabel = new Label();
         resultLabel.setWrapText(true);
         resultLabel.setMaxWidth(Double.MAX_VALUE);  // Allow full width

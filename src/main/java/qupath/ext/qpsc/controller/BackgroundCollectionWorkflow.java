@@ -112,9 +112,7 @@ public class BackgroundCollectionWorkflow {
      * @param objective The selected objective
      * @param angleExposures List of angle-exposure pairs
      * @param outputPath Base output path for background images
-
      */
-// Replace the executeBackgroundAcquisition method with this fixed version
     private static void executeBackgroundAcquisition(String modality, String objective, List<AngleExposure> angleExposures,
                                                      String outputPath) {
         logger.info("Executing background acquisition for modality '{}' with {} angles",
