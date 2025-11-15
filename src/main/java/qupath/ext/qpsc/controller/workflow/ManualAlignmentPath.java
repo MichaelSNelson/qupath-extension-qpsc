@@ -79,7 +79,34 @@ public class ManualAlignmentPath {
                         throw new RuntimeException("Project setup failed");
                     }
                     state.projectInfo = projectInfo;
+                    return validateAndFlipImage();
+                })
+                .thenCompose(validated -> {
+                    if (!validated) {
+                        throw new RuntimeException("Image validation and flip preparation failed");
+                    }
                     return createManualAlignment();
+                });
+    }
+
+    /**
+     * Validates and flips the full-resolution image if needed.
+     *
+     * <p>This step ensures the image has the correct orientation BEFORE
+     * any operations that depend on it (annotations, tile creation, manual alignment UI).
+     *
+     * @return CompletableFuture with true if successful, false if failed
+     */
+    private CompletableFuture<Boolean> validateAndFlipImage() {
+        @SuppressWarnings("unchecked")
+        Project<BufferedImage> project = (Project<BufferedImage>) state.projectInfo.getCurrentProject();
+
+        return ImageFlipHelper.validateAndFlipIfNeeded(gui, project, state.sample)
+                .thenApply(validated -> {
+                    if (validated) {
+                        logger.info("Image flip validation complete - ready for manual alignment");
+                    }
+                    return validated;
                 });
     }
 

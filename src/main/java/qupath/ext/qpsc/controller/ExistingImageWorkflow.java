@@ -130,192 +130,6 @@ public class ExistingImageWorkflow {
         }
 
         /**
-         * Validates image flip status and creates flipped duplicate if needed.
-         * This should be called after the project is created/opened.
-         */
-        /**
-         * Validates image flip status and creates flipped duplicate if needed.
-         * This should be called after the project is created/opened.
-         */
-        private CompletableFuture<Boolean> validateAndPrepareImage() {
-            return CompletableFuture.supplyAsync(() -> {
-                // Get flip requirements from preferences
-                boolean requiresFlipX = QPPreferenceDialog.getFlipMacroXProperty();
-                boolean requiresFlipY = QPPreferenceDialog.getFlipMacroYProperty();
-
-                // If no flipping required, we're good
-                if (!requiresFlipX && !requiresFlipY) {
-                    logger.info("No image flipping required by preferences");
-                    return true;
-                }
-
-                // Check if we're in a project
-                Project<BufferedImage> project = gui.getProject();
-                if (project == null) {
-                    logger.warn("No project available to check flip status");
-                    return true; // Project will handle flipping during import
-                }
-
-                // Check current image's flip status
-                ProjectImageEntry<BufferedImage> currentEntry = project.getEntry(gui.getImageData());
-                if (currentEntry == null) {
-                    logger.info("Current image not in project yet - will be handled during import");
-                    return true;
-                }
-
-                boolean isFlipped = ImageMetadataManager.isFlipped(currentEntry);
-
-                if (isFlipped || (!requiresFlipX && !requiresFlipY)) {
-                    logger.info("Current image flip status matches requirements");
-                    return true;
-                }
-
-                // Image needs to be flipped - create duplicate
-                logger.info("Creating flipped duplicate of image for acquisition");
-
-                // Show notification
-                Platform.runLater(() ->
-                        Dialogs.showInfoNotification(
-                                "Image Preparation",
-                                "Creating flipped image for acquisition..."
-                        )
-                );
-
-                try {
-                    ProjectImageEntry<BufferedImage> flippedEntry = QPProjectFunctions.createFlippedDuplicate(
-                            project,
-                            currentEntry,
-                            requiresFlipX,
-                            requiresFlipY,
-                            state.sample != null ? state.sample.sampleName() : null
-                    );
-
-                    if (flippedEntry != null) {
-                        logger.info("Created flipped duplicate: {}", flippedEntry.getImageName());
-
-                        // CRITICAL: Sync project changes BEFORE attempting to open
-                        project.syncChanges();
-                        logger.info("Project synchronized after adding flipped image");
-
-                        // Create a future to track the image load
-                        CompletableFuture<Boolean> loadFuture = new CompletableFuture<>();
-
-                        // Set up the listener and open the image on the UI thread
-                        Platform.runLater(() -> {
-                            try {
-                                // Refresh project UI first
-                                gui.refreshProject();
-
-                                // Create a listener that detects when the flipped image is loaded
-                                // IMPORTANT: We check by ProjectImageEntry reference, not by name/path
-                                // because TransformedServer paths may not match the entry name
-                                javafx.beans.value.ChangeListener<ImageData<BufferedImage>> loadListener =
-                                        new javafx.beans.value.ChangeListener<ImageData<BufferedImage>>() {
-                                            @Override
-                                            public void changed(
-                                                    javafx.beans.value.ObservableValue<? extends ImageData<BufferedImage>> observable,
-                                                    ImageData<BufferedImage> oldValue,
-                                                    ImageData<BufferedImage> newValue) {
-
-                                                if (newValue != null && !loadFuture.isDone()) {
-                                                    // Check if this is our flipped entry by comparing with project entries
-                                                    try {
-                                                        ProjectImageEntry<BufferedImage> currentEntry = project.getEntry(newValue);
-                                                        if (currentEntry != null && currentEntry.equals(flippedEntry)) {
-                                                            logger.info("Flipped image loaded successfully - detected by entry match");
-                                                            // Remove this listener
-                                                            gui.getViewer().imageDataProperty().removeListener(this);
-                                                            // Complete the future
-                                                            loadFuture.complete(true);
-                                                        }
-                                                    } catch (Exception e) {
-                                                        logger.debug("Error checking image entry: {}", e.getMessage());
-                                                    }
-                                                }
-                                            }
-                                        };
-
-                                // Add the listener
-                                gui.getViewer().imageDataProperty().addListener(loadListener);
-
-                                // Now open the image
-                                logger.info("Opening image entry: {}", flippedEntry.getImageName());
-                                gui.openImageEntry(flippedEntry);
-
-                                // Set up timeout handler
-                                CompletableFuture.delayedExecutor(30, TimeUnit.SECONDS).execute(() -> {
-                                    if (!loadFuture.isDone()) {
-                                        // Check one more time if image actually loaded (must be on JavaFX thread)
-                                        Platform.runLater(() -> {
-                                            if (!loadFuture.isDone()) {
-                                                // Remove the listener
-                                                gui.getViewer().imageDataProperty().removeListener(loadListener);
-
-                                                // Check if image actually loaded by comparing entries
-                                                try {
-                                                    ImageData<BufferedImage> currentData = gui.getImageData();
-                                                    if (currentData != null) {
-                                                        //ProjectImageEntry<BufferedImage> currentEntry = project.getEntry(currentData);
-                                                        if (currentEntry != null && currentEntry.equals(flippedEntry)) {
-                                                            logger.warn("Image loaded but listener didn't fire - completing anyway");
-                                                            loadFuture.complete(true);
-                                                            return;
-                                                        }
-                                                    }
-                                                } catch (Exception e) {
-                                                    logger.debug("Error in timeout check: {}", e.getMessage());
-                                                }
-
-                                                // Image truly didn't load
-                                                logger.error("Image failed to load within 30 seconds");
-                                                loadFuture.completeExceptionally(
-                                                        new TimeoutException("Image failed to load within 30 seconds"));
-                                            }
-                                        });
-                                    }
-                                });
-
-                            } catch (Exception ex) {
-                                logger.error("Error in UI thread while opening image", ex);
-                                loadFuture.completeExceptionally(ex);
-                            }
-                        });
-
-                        // Wait for the load to complete
-                        try {
-                            return loadFuture.get(35, TimeUnit.SECONDS); // Slightly longer than internal timeout
-                        } catch (TimeoutException e) {
-                            logger.error("Timeout waiting for flipped image to load");
-                            throw new RuntimeException("Failed to load flipped image within timeout period", e);
-                        } catch (Exception e) {
-                            logger.error("Error waiting for flipped image to load", e);
-                            throw new RuntimeException("Failed to load flipped image", e);
-                        }
-
-                    } else {
-                        logger.error("Failed to create flipped duplicate");
-                        Platform.runLater(() ->
-                                UIFunctions.notifyUserOfError(
-                                        "Failed to create flipped image duplicate",
-                                        "Image Error"
-                                )
-                        );
-                        return false;
-                    }
-
-                } catch (Exception e) {
-                    logger.error("Error creating flipped duplicate", e);
-                    Platform.runLater(() ->
-                            UIFunctions.notifyUserOfError(
-                                    "Error creating flipped image: " + e.getMessage(),
-                                    "Image Error"
-                            )
-                    );
-                    return false;
-                }
-            });
-        }
-        /**
          * Shows sample setup dialog and stores results.
          */
         private CompletableFuture<WorkflowState> setupSample() {
@@ -386,7 +200,9 @@ public class ExistingImageWorkflow {
                         state.projectInfo = projectInfo;
 
                         // Now validate and prepare image after project is set up
-                        return validateAndPrepareImage();
+                        @SuppressWarnings("unchecked")
+                        Project<BufferedImage> project = (Project<BufferedImage>) projectInfo.getCurrentProject();
+                        return ImageFlipHelper.validateAndFlipIfNeeded(gui, project, state.sample);
                     })
                     .thenApply(validated -> {
                         if (!validated) {
@@ -423,36 +239,23 @@ public class ExistingImageWorkflow {
 
         /**
          * Executes the selected alignment path.
+         *
+         * <p>NOTE: Image flipping now happens INSIDE the alignment paths
+         * (after project setup, before annotations/tiles/white space detection).
+         * This ensures all operations work on the correctly oriented image.
          */
         private CompletableFuture<WorkflowState> executeAlignmentPath(WorkflowState state) {
             if (state == null || state.alignmentChoice == null) {
                 return CompletableFuture.completedFuture(null);
             }
 
-            CompletableFuture<WorkflowState> pathResult;
-
             if (state.alignmentChoice.useExistingAlignment()) {
                 // Path A: Use existing general alignment
-                pathResult = new ExistingAlignmentPath(gui, state).execute();
+                return new ExistingAlignmentPath(gui, state).execute();
             } else {
                 // Path B: Create manual alignment
-                pathResult = new ManualAlignmentPath(gui, state).execute();
+                return new ManualAlignmentPath(gui, state).execute();
             }
-
-            // After alignment path completes, validate image
-            return pathResult.thenCompose(alignedState -> {
-                if (alignedState == null) {
-                    return CompletableFuture.completedFuture(null);
-                }
-
-                return validateAndPrepareImage()
-                        .thenApply(validated -> {
-                            if (!validated) {
-                                throw new RuntimeException("Image validation failed after alignment");
-                            }
-                            return alignedState;
-                        });
-            });
         }
 
         /**

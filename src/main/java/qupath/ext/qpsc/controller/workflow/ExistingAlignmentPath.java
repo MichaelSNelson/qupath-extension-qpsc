@@ -94,6 +94,7 @@ public class ExistingAlignmentPath {
                 .thenCompose(this::processMacroImage)
                 .thenCompose(this::detectGreenBox)
                 .thenCompose(this::setupProject)
+                .thenCompose(this::validateAndFlipImage)
                 .thenCompose(this::createTransform);
     }
 
@@ -210,6 +211,30 @@ public class ExistingAlignmentPath {
                     }
 
                     state.projectInfo = projectInfo;
+                    return context;
+                });
+    }
+
+    /**
+     * Validates and flips the full-resolution image if needed.
+     *
+     * <p>This step ensures the image has the correct orientation BEFORE
+     * any operations that depend on it (annotations, white space detection,
+     * tile creation, alignment refinement).
+     *
+     * @param context Green box detection context
+     * @return CompletableFuture with context passed through
+     */
+    private CompletableFuture<GreenBoxContext> validateAndFlipImage(GreenBoxContext context) {
+        @SuppressWarnings("unchecked")
+        Project<BufferedImage> project = (Project<BufferedImage>) state.projectInfo.getCurrentProject();
+
+        return ImageFlipHelper.validateAndFlipIfNeeded(gui, project, state.sample)
+                .thenApply(validated -> {
+                    if (!validated) {
+                        throw new RuntimeException("Image validation and flip preparation failed");
+                    }
+                    logger.info("Image flip validation complete - ready for operations");
                     return context;
                 });
     }
