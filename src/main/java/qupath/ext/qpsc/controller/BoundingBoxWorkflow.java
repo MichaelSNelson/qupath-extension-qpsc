@@ -474,16 +474,18 @@ public class BoundingBoxWorkflow {
                                     logger.error("Rotation workflow failed", ex);
 
                                     // Extract the most informative error message
-                                    String errorMessage = ex.getMessage();
-                                    if (errorMessage == null || errorMessage.isEmpty()) {
+                                    String message = ex.getMessage();
+                                    if (message == null || message.isEmpty()) {
                                         Throwable cause = ex.getCause();
-                                        errorMessage = cause != null ? cause.getMessage() : "Unknown error occurred";
+                                        message = cause != null ? cause.getMessage() : "Unknown error occurred";
                                     }
 
-                                    String finalErrorMessage = errorMessage;
+                                    // Make final for lambda expression
+                                    final String errorMessage = message;
+
                                     Platform.runLater(() ->
                                             UIFunctions.notifyUserOfError(
-                                                    finalErrorMessage,
+                                                    errorMessage,
                                                     res.getString("acquisition.error.title")));
                                 }
                                 return null;
