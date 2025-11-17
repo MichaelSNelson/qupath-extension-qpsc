@@ -476,7 +476,7 @@ public class BoundingBoxWorkflow {
                                     // Extract the most informative error message
                                     String errorMessage = ex.getMessage();
                                     if (errorMessage == null || errorMessage.isEmpty()) {
-                                        Throwable cause = ex.getCause();
+                                        //Throwable cause = ex.getCause();
                                         errorMessage = cause != null ? cause.getMessage() : "Unknown error occurred";
                                     }
 
