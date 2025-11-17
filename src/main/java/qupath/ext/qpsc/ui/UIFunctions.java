@@ -487,6 +487,16 @@ public class UIFunctions {
                 "The system will retry autofocus after you press OK."
         );
         alert.initModality(Modality.APPLICATION_MODAL);
+
+        // Make dialog always on top so it's visible above progress dialog
+        alert.initOwner(null);
+        if (alert.getDialogPane() != null && alert.getDialogPane().getScene() != null) {
+            javafx.stage.Window window = alert.getDialogPane().getScene().getWindow();
+            if (window instanceof javafx.stage.Stage) {
+                ((javafx.stage.Stage) window).setAlwaysOnTop(true);
+            }
+        }
+
         alert.showAndWait();
     }
 

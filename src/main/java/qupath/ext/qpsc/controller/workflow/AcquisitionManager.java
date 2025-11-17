@@ -625,8 +625,17 @@ public class AcquisitionManager {
                                         });
 
                                         // Block until dialog is closed and acknowledged
+                                        // Periodically check progress to prevent timeout during manual focus
                                         try {
-                                            latch.await();
+                                            while (!latch.await(30, java.util.concurrent.TimeUnit.SECONDS)) {
+                                                // Ping server every 30 seconds to prevent timeout
+                                                try {
+                                                    socketClient.getAcquisitionProgress();
+                                                    logger.debug("Keepalive ping during manual focus");
+                                                } catch (IOException e) {
+                                                    logger.warn("Failed to ping server during manual focus", e);
+                                                }
+                                            }
                                         } catch (InterruptedException e) {
                                             logger.error("Interrupted while waiting for manual focus", e);
                                             Thread.currentThread().interrupt();
