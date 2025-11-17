@@ -1315,7 +1315,7 @@ public class MicroscopeSocketClient implements AutoCloseable {
     public boolean isManualFocusRequested() throws IOException {
         byte[] response = executeCommand(Command.REQMANF, null, 8);
         String status = new String(response, StandardCharsets.UTF_8).trim();
-        return "REQUESTED".equals(status);
+        return "NEEDED__".equals(status);
     }
 
     /**
