@@ -105,9 +105,10 @@ public class DualProgressDialog {
         currentProgressBar = new ProgressBar(0);
         currentProgressBar.setPrefWidth(350);
         currentProgressLabel = new Label("Current Annotation: Waiting to start...");
-        
+
         // Time and status labels
         timeLabel = new Label("Estimating total time...");
+        timeLabel.setWrapText(true);
         statusLabel = new Label("Initializing workflow...");
         
         // Layout
