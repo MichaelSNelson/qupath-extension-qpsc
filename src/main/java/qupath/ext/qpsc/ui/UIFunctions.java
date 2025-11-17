@@ -473,20 +473,40 @@ public class UIFunctions {
     }
 
     /**
+     * Result of manual focus dialog indicating user's choice.
+     */
+    public enum ManualFocusResult {
+        RETRY_AUTOFOCUS,    // Run autofocus again after manual adjustment
+        USE_CURRENT_FOCUS,  // Accept current focus and continue
+        CANCEL_ACQUISITION  // Cancel the entire acquisition
+    }
+
+    /**
      * Shows a blocking dialog requesting manual focus from the user.
      * Used when autofocus fails and manual intervention is required.
-     * This method blocks until the user presses OK.
+     * Provides three options: retry autofocus, use current focus, or cancel.
+     *
+     * @return ManualFocusResult indicating user's choice
      */
-    public static void showManualFocusDialog() {
-        Alert alert = new Alert(Alert.AlertType.INFORMATION);
+    public static ManualFocusResult showManualFocusDialog() {
+        Alert alert = new Alert(Alert.AlertType.WARNING);
         alert.setTitle("Manual Focus Required");
         alert.setHeaderText("Autofocus Failed");
         alert.setContentText(
                 "Autofocus was unable to find a reliable focus position.\n\n" +
-                "Please manually focus the microscope on the tissue and press OK to continue.\n\n" +
-                "The system will retry autofocus after you press OK."
+                "Please manually focus the microscope on the tissue, then choose:\n\n" +
+                "• Retry Autofocus - Run autofocus again after manual adjustment\n" +
+                "• Use Current Focus - Accept current focus and continue\n" +
+                "• Cancel - Stop the acquisition"
         );
         alert.initModality(Modality.APPLICATION_MODAL);
+
+        // Add custom buttons
+        ButtonType retryButton = new ButtonType("Retry Autofocus", ButtonBar.ButtonData.OK_DONE);
+        ButtonType useCurrentButton = new ButtonType("Use Current Focus", ButtonBar.ButtonData.APPLY);
+        ButtonType cancelButton = new ButtonType("Cancel", ButtonBar.ButtonData.CANCEL_CLOSE);
+
+        alert.getButtonTypes().setAll(retryButton, useCurrentButton, cancelButton);
 
         // Make dialog always on top so it's visible above progress dialog
         alert.initOwner(null);
@@ -497,7 +517,21 @@ public class UIFunctions {
             }
         }
 
-        alert.showAndWait();
+        // Show and wait for user choice
+        Optional<ButtonType> result = alert.showAndWait();
+
+        if (result.isPresent()) {
+            if (result.get() == retryButton) {
+                return ManualFocusResult.RETRY_AUTOFOCUS;
+            } else if (result.get() == useCurrentButton) {
+                return ManualFocusResult.USE_CURRENT_FOCUS;
+            } else {
+                return ManualFocusResult.CANCEL_ACQUISITION;
+            }
+        }
+
+        // Default to cancel if dialog closed without selection
+        return ManualFocusResult.CANCEL_ACQUISITION;
     }
 
 

@@ -120,8 +120,10 @@ public class MicroscopeSocketClient implements AutoCloseable {
         GETFOV("getfov__"),
         /** Check if manual focus is requested */
         REQMANF("reqmanf_"),
-        /** Acknowledge manual focus completion */
-        ACKMF("ackmf___");
+        /** Acknowledge manual focus - retry autofocus */
+        ACKMF("ackmf___"),
+        /** Skip autofocus retry - use current focus */
+        SKIPAF("skipaf__");
 
         private final byte[] value;
 
@@ -1319,8 +1321,8 @@ public class MicroscopeSocketClient implements AutoCloseable {
     }
 
     /**
-     * Acknowledges manual focus completion.
-     * Call this after the user has manually focused the microscope.
+     * Acknowledges manual focus completion - retry autofocus.
+     * Call this after the user has manually focused and wants to retry autofocus.
      *
      * @return true if acknowledgment was successful
      * @throws IOException if communication fails
@@ -1329,7 +1331,22 @@ public class MicroscopeSocketClient implements AutoCloseable {
         byte[] response = executeCommand(Command.ACKMF, null, 3);
         String ack = new String(response, StandardCharsets.UTF_8).trim();
         boolean acknowledged = "ACK".equals(ack);
-        logger.info("Manual focus acknowledgment {}", acknowledged ? "successful" : "failed");
+        logger.info("Manual focus retry autofocus {}", acknowledged ? "acknowledged" : "failed");
+        return acknowledged;
+    }
+
+    /**
+     * Skip autofocus retry - use current focus position.
+     * Call this when user has manually focused and wants to use current position.
+     *
+     * @return true if acknowledgment was successful
+     * @throws IOException if communication fails
+     */
+    public boolean skipAutofocusRetry() throws IOException {
+        byte[] response = executeCommand(Command.SKIPAF, null, 3);
+        String ack = new String(response, StandardCharsets.UTF_8).trim();
+        boolean acknowledged = "ACK".equals(ack);
+        logger.info("Manual focus skip retry {}", acknowledged ? "acknowledged" : "failed");
         return acknowledged;
     }
 

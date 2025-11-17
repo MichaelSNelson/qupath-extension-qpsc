@@ -610,13 +610,26 @@ public class AcquisitionManager {
                                         // Show dialog on JavaFX thread
                                         Platform.runLater(() -> {
                                             try {
-                                                UIFunctions.showManualFocusDialog();
-                                                // Acknowledge manual focus completion back to server
+                                                UIFunctions.ManualFocusResult result = UIFunctions.showManualFocusDialog();
+
+                                                // Handle user's choice
                                                 try {
-                                                    socketClient.acknowledgeManualFocus();
-                                                    logger.info("Manual focus acknowledged");
+                                                    switch (result) {
+                                                        case RETRY_AUTOFOCUS:
+                                                            socketClient.acknowledgeManualFocus();
+                                                            logger.info("User chose to retry autofocus");
+                                                            break;
+                                                        case USE_CURRENT_FOCUS:
+                                                            socketClient.skipAutofocusRetry();
+                                                            logger.info("User chose to use current focus");
+                                                            break;
+                                                        case CANCEL_ACQUISITION:
+                                                            socketClient.cancelAcquisition();
+                                                            logger.info("User chose to cancel acquisition");
+                                                            break;
+                                                    }
                                                 } catch (IOException e) {
-                                                    logger.error("Failed to acknowledge manual focus", e);
+                                                    logger.error("Failed to send manual focus response", e);
                                                 }
                                             } finally {
                                                 handlingManualFocus.set(false);
