@@ -596,6 +596,26 @@ public class AcquisitionManager {
                                     Platform.runLater(() -> progressDialog.updateCurrentAnnotationProgress(progress.current));
                                 }
 
+                                // Check for manual focus request
+                                try {
+                                    if (socketClient.isManualFocusRequested()) {
+                                        logger.info("Manual focus requested by server - showing dialog");
+                                        // Show dialog on JavaFX thread and wait for user
+                                        Platform.runLater(() -> {
+                                            UIFunctions.showManualFocusDialog();
+                                            // Acknowledge manual focus completion back to server
+                                            try {
+                                                socketClient.acknowledgeManualFocus();
+                                                logger.info("Manual focus acknowledged");
+                                            } catch (IOException e) {
+                                                logger.error("Failed to acknowledge manual focus", e);
+                                            }
+                                        });
+                                    }
+                                } catch (IOException e) {
+                                    logger.warn("Failed to check manual focus status: {}", e.getMessage());
+                                }
+
                                 // Check for acquisition metadata file (only once)
                                 if (!metadataRead.get() && progressDialog != null) {
                                     java.nio.file.Path metadataPath = java.nio.file.Paths.get(tileDirPath, "acquisition_metadata.txt");

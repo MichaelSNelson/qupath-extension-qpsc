@@ -472,6 +472,24 @@ public class UIFunctions {
         alert.showAndWait();
     }
 
+    /**
+     * Shows a blocking dialog requesting manual focus from the user.
+     * Used when autofocus fails and manual intervention is required.
+     * This method blocks until the user presses OK.
+     */
+    public static void showManualFocusDialog() {
+        Alert alert = new Alert(Alert.AlertType.INFORMATION);
+        alert.setTitle("Manual Focus Required");
+        alert.setHeaderText("Autofocus Failed");
+        alert.setContentText(
+                "Autofocus was unable to find a reliable focus position.\n\n" +
+                "Please manually focus the microscope on the tissue and press OK to continue.\n\n" +
+                "The system will retry autofocus after you press OK."
+        );
+        alert.initModality(Modality.APPLICATION_MODAL);
+        alert.showAndWait();
+    }
+
 
     /**
      * Prompts the user to select exactly one tile (detection object) in QuPath.

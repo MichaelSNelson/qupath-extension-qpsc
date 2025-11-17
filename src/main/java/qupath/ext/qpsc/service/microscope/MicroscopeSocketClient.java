@@ -117,7 +117,9 @@ public class MicroscopeSocketClient implements AutoCloseable {
         PROGRESS("progress"),
         /** Cancel acquisition */
         CANCEL("cancel__"),
-        GETFOV("getfov__");
+        GETFOV("getfov__"),
+        /** Request/acknowledge manual focus */
+        REQMANF("reqmanf_");
 
         private final byte[] value;
 
@@ -1299,6 +1301,34 @@ public class MicroscopeSocketClient implements AutoCloseable {
         boolean cancelled = "ACK".equals(ack);
         logger.info("Acquisition cancellation {}", cancelled ? "acknowledged" : "failed");
         return cancelled;
+    }
+
+    /**
+     * Checks if manual focus is requested by the server.
+     * This should be called periodically during acquisition to detect autofocus failures.
+     *
+     * @return true if manual focus is requested
+     * @throws IOException if communication fails
+     */
+    public boolean isManualFocusRequested() throws IOException {
+        byte[] response = executeCommand(Command.REQMANF, null, 9);
+        String status = new String(response, StandardCharsets.UTF_8).trim();
+        return "REQUESTED".equals(status);
+    }
+
+    /**
+     * Acknowledges manual focus completion.
+     * Call this after the user has manually focused the microscope.
+     *
+     * @return true if acknowledgment was successful
+     * @throws IOException if communication fails
+     */
+    public boolean acknowledgeManualFocus() throws IOException {
+        byte[] response = executeCommand(Command.REQMANF, null, 6);
+        String ack = new String(response, StandardCharsets.UTF_8).trim();
+        boolean acknowledged = "ACK_OK".equals(ack);
+        logger.info("Manual focus acknowledgment {}", acknowledged ? "successful" : "failed");
+        return acknowledged;
     }
 
     /**
