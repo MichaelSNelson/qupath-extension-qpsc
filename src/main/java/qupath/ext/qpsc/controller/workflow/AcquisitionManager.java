@@ -584,6 +584,8 @@ public class AcquisitionManager {
 
         // Flag to track if we've read the acquisition metadata file
         AtomicBoolean metadataRead = new AtomicBoolean(false);
+        // Flag to track if we're currently handling a manual focus request (to avoid showing multiple dialogs)
+        AtomicBoolean handlingManualFocus = new AtomicBoolean(false);
 
         try {
             // Monitor acquisition with regular status updates
@@ -596,21 +598,39 @@ public class AcquisitionManager {
                                     Platform.runLater(() -> progressDialog.updateCurrentAnnotationProgress(progress.current));
                                 }
 
-                                // Check for manual focus request
+                                // Check for manual focus request (only once per request)
                                 try {
-                                    if (socketClient.isManualFocusRequested()) {
+                                    if (socketClient.isManualFocusRequested() && !handlingManualFocus.get()) {
+                                        handlingManualFocus.set(true);
                                         logger.info("Manual focus requested by server - showing dialog");
-                                        // Show dialog on JavaFX thread and wait for user
+
+                                        // Use CountDownLatch to block until dialog is closed and acknowledged
+                                        java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+
+                                        // Show dialog on JavaFX thread
                                         Platform.runLater(() -> {
-                                            UIFunctions.showManualFocusDialog();
-                                            // Acknowledge manual focus completion back to server
                                             try {
-                                                socketClient.acknowledgeManualFocus();
-                                                logger.info("Manual focus acknowledged");
-                                            } catch (IOException e) {
-                                                logger.error("Failed to acknowledge manual focus", e);
+                                                UIFunctions.showManualFocusDialog();
+                                                // Acknowledge manual focus completion back to server
+                                                try {
+                                                    socketClient.acknowledgeManualFocus();
+                                                    logger.info("Manual focus acknowledged");
+                                                } catch (IOException e) {
+                                                    logger.error("Failed to acknowledge manual focus", e);
+                                                }
+                                            } finally {
+                                                handlingManualFocus.set(false);
+                                                latch.countDown();
                                             }
                                         });
+
+                                        // Block until dialog is closed and acknowledged
+                                        try {
+                                            latch.await();
+                                        } catch (InterruptedException e) {
+                                            logger.error("Interrupted while waiting for manual focus", e);
+                                            Thread.currentThread().interrupt();
+                                        }
                                     }
                                 } catch (IOException e) {
                                     logger.warn("Failed to check manual focus status: {}", e.getMessage());
