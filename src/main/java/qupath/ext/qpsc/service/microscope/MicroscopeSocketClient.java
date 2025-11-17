@@ -118,8 +118,10 @@ public class MicroscopeSocketClient implements AutoCloseable {
         /** Cancel acquisition */
         CANCEL("cancel__"),
         GETFOV("getfov__"),
-        /** Request/acknowledge manual focus */
-        REQMANF("reqmanf_");
+        /** Check if manual focus is requested */
+        REQMANF("reqmanf_"),
+        /** Acknowledge manual focus completion */
+        ACKMF("ackmf___");
 
         private final byte[] value;
 
@@ -1311,7 +1313,7 @@ public class MicroscopeSocketClient implements AutoCloseable {
      * @throws IOException if communication fails
      */
     public boolean isManualFocusRequested() throws IOException {
-        byte[] response = executeCommand(Command.REQMANF, null, 9);
+        byte[] response = executeCommand(Command.REQMANF, null, 8);
         String status = new String(response, StandardCharsets.UTF_8).trim();
         return "REQUESTED".equals(status);
     }
@@ -1324,9 +1326,9 @@ public class MicroscopeSocketClient implements AutoCloseable {
      * @throws IOException if communication fails
      */
     public boolean acknowledgeManualFocus() throws IOException {
-        byte[] response = executeCommand(Command.REQMANF, null, 6);
+        byte[] response = executeCommand(Command.ACKMF, null, 3);
         String ack = new String(response, StandardCharsets.UTF_8).trim();
-        boolean acknowledged = "ACK_OK".equals(ack);
+        boolean acknowledged = "ACK".equals(ack);
         logger.info("Manual focus acknowledgment {}", acknowledged ? "successful" : "failed");
         return acknowledged;
     }
