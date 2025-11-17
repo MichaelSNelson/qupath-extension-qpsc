@@ -474,12 +474,10 @@ public class BoundingBoxWorkflow {
                                     logger.error("Rotation workflow failed", ex);
 
                                     // Extract the most informative error message
-
-                                    String errorMessage = ex.getMessage();
-                                    if (errorMessage == null || errorMessage.isEmpty()) {
-                                        //Throwable cause = ex.getCause();
-                                        errorMessage = cause != null ? cause.getMessage() : "Unknown error occurred";
-
+                                    String message = ex.getMessage();
+                                    if (message == null || message.isEmpty()) {
+                                        Throwable cause = ex.getCause();
+                                        message = cause != null ? cause.getMessage() : "Unknown error occurred";
                                     }
 
                                     // Make final for lambda expression
