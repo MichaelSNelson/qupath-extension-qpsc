@@ -575,11 +575,14 @@ public class AcquisitionManager {
 
         // Create progress counter
         AtomicInteger progressCounter = new AtomicInteger(0);
-        
+
         // Start tracking this annotation in the dual progress dialog
         if (progressDialog != null && !progressDialog.isCancelled()) {
             Platform.runLater(() -> progressDialog.startAnnotation(annotation.getName(), expectedFiles));
         }
+
+        // Flag to track if we've read the acquisition metadata file
+        AtomicBoolean metadataRead = new AtomicBoolean(false);
 
         try {
             // Monitor acquisition with regular status updates
@@ -590,6 +593,27 @@ public class AcquisitionManager {
                                 // Update dual progress dialog
                                 if (progressDialog != null && !progressDialog.isCancelled()) {
                                     Platform.runLater(() -> progressDialog.updateCurrentAnnotationProgress(progress.current));
+                                }
+
+                                // Check for acquisition metadata file (only once)
+                                if (!metadataRead.get() && progressDialog != null) {
+                                    java.nio.file.Path metadataPath = java.nio.file.Paths.get(tileDirPath, "acquisition_metadata.txt");
+                                    if (java.nio.file.Files.exists(metadataPath)) {
+                                        metadataRead.set(true);
+                                        try {
+                                            java.util.List<String> lines = java.nio.file.Files.readAllLines(metadataPath);
+                                            for (String line : lines) {
+                                                if (line.startsWith("timing_window_size=")) {
+                                                    int timingWindowSize = Integer.parseInt(line.substring("timing_window_size=".length()));
+                                                    logger.info("Read timing window size from acquisition metadata: {} tiles", timingWindowSize);
+                                                    Platform.runLater(() -> progressDialog.setTimingWindowSize(timingWindowSize));
+                                                    break;
+                                                }
+                                            }
+                                        } catch (Exception e) {
+                                            logger.warn("Failed to read acquisition metadata: {}", e.getMessage());
+                                        }
+                                    }
                                 }
                             },
                             500,    // Poll every 500ms for responsive UI

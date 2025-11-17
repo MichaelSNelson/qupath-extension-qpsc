@@ -472,9 +472,18 @@ public class BoundingBoxWorkflow {
                                                     "Acquisition was cancelled by user request"));
                                 } else {
                                     logger.error("Rotation workflow failed", ex);
+
+                                    // Extract the most informative error message
+                                    String errorMessage = ex.getMessage();
+                                    if (errorMessage == null || errorMessage.isEmpty()) {
+                                        Throwable cause = ex.getCause();
+                                        errorMessage = cause != null ? cause.getMessage() : "Unknown error occurred";
+                                    }
+
+                                    String finalErrorMessage = errorMessage;
                                     Platform.runLater(() ->
                                             UIFunctions.notifyUserOfError(
-                                                    "Workflow error: " + ex.getMessage(),
+                                                    finalErrorMessage,
                                                     res.getString("acquisition.error.title")));
                                 }
                                 return null;

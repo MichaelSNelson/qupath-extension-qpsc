@@ -56,19 +56,38 @@ public class DualProgressDialog {
     private volatile int currentAnnotationExpectedFiles = 0;
     private final AtomicInteger currentAnnotationProgress = new AtomicInteger(0);
     private final AtomicLong currentAnnotationStartTime = new AtomicLong(0);
-    
+
+    // Tile timing tracking for better estimation (uses recent actual timing, no hardcoded values)
+    // Dynamic timing window size based on autofocus settings (5x n_steps for that objective)
+    private final AtomicInteger timingWindowSize = new AtomicInteger(10); // Default to 10, updated from acquisition metadata
+    private final java.util.concurrent.ConcurrentLinkedDeque<Long> recentTileTimes = new java.util.concurrent.ConcurrentLinkedDeque<>();
+    private final AtomicLong lastTileCompletionTime = new AtomicLong(0);
+    private final AtomicInteger totalTilesCompleted = new AtomicInteger(0);
+
     // Control
     private final AtomicBoolean cancelled = new AtomicBoolean(false);
     private Consumer<Void> cancelCallback;
-    
+
     /**
-     * Creates a new dual progress dialog.
-     * 
+     * Creates a new dual progress dialog with default timing window size.
+     *
      * @param totalAnnotations Total number of annotations to be processed
      * @param showCancelButton Whether to show a cancel button
      */
     public DualProgressDialog(int totalAnnotations, boolean showCancelButton) {
+        this(totalAnnotations, showCancelButton, 10); // Default timing window of 10
+    }
+
+    /**
+     * Creates a new dual progress dialog with specified timing window size.
+     *
+     * @param totalAnnotations Total number of annotations to be processed
+     * @param showCancelButton Whether to show a cancel button
+     * @param timingWindowSize Number of tiles to use for rolling average time estimation
+     */
+    public DualProgressDialog(int totalAnnotations, boolean showCancelButton, int timingWindowSize) {
         this.totalAnnotations = totalAnnotations;
+        this.timingWindowSize.set(timingWindowSize);
         
         // Create UI components
         stage = new Stage();
@@ -172,9 +191,11 @@ public class DualProgressDialog {
         this.currentAnnotationName = annotationName;
         this.currentAnnotationExpectedFiles = expectedFiles;
         this.currentAnnotationProgress.set(0);
-        this.currentAnnotationStartTime.set(System.currentTimeMillis());
-        
-        logger.info("Started tracking annotation '{}' with {} expected files", 
+        long now = System.currentTimeMillis();
+        this.currentAnnotationStartTime.set(now);
+        this.lastTileCompletionTime.set(now); // Initialize for tile timing tracking
+
+        logger.info("Started tracking annotation '{}' with {} expected files",
                    annotationName, expectedFiles);
     }
     
@@ -184,11 +205,31 @@ public class DualProgressDialog {
      * @param filesCompleted Number of files completed for current annotation
      */
     public void updateCurrentAnnotationProgress(int filesCompleted) {
-        currentAnnotationProgress.set(filesCompleted);
-        lastProgressTime.set(System.currentTimeMillis());
-        
+        int previousProgress = currentAnnotationProgress.getAndSet(filesCompleted);
+        long now = System.currentTimeMillis();
+        lastProgressTime.set(now);
+
+        // Track tile completion timing for better estimation
+        if (filesCompleted > previousProgress) {
+            // One or more tiles completed
+            long lastCompletion = lastTileCompletionTime.get();
+            if (lastCompletion > 0) {
+                // Calculate time since last tile and add to rolling window
+                long tileTime = now - lastCompletion;
+                recentTileTimes.addLast(tileTime);
+
+                // Keep only the most recent N tiles (based on dynamic timing window)
+                int windowSize = timingWindowSize.get();
+                while (recentTileTimes.size() > windowSize) {
+                    recentTileTimes.removeFirst();
+                }
+            }
+            lastTileCompletionTime.set(now);
+            totalTilesCompleted.addAndGet(filesCompleted - previousProgress);
+        }
+
         if (filesCompleted > 0 && filesCompleted % 10 == 0) {
-            logger.debug("Current annotation progress: {}/{} files", 
+            logger.debug("Current annotation progress: {}/{} files",
                         filesCompleted, currentAnnotationExpectedFiles);
         }
     }
@@ -199,16 +240,33 @@ public class DualProgressDialog {
     public void completeCurrentAnnotation() {
         int completed = completedAnnotations.incrementAndGet();
         currentAnnotationProgress.set(currentAnnotationExpectedFiles);
-        
-        logger.info("Completed annotation '{}' - {}/{} annotations done", 
+
+        logger.info("Completed annotation '{}' - {}/{} annotations done",
                    currentAnnotationName, completed, totalAnnotations);
-        
+
         if (completed >= totalAnnotations) {
             logger.info("All annotations completed - workflow finished");
             Platform.runLater(this::showCompletionAndClose);
         }
     }
-    
+
+    /**
+     * Updates the timing window size used for rolling average time estimation.
+     * This should be set based on autofocus settings (typically 5x n_steps for the objective).
+     *
+     * @param newSize New timing window size (must be > 0)
+     */
+    public void setTimingWindowSize(int newSize) {
+        if (newSize > 0) {
+            int oldSize = timingWindowSize.getAndSet(newSize);
+            if (oldSize != newSize) {
+                logger.info("Updated timing window size from {} to {} tiles", oldSize, newSize);
+            }
+        } else {
+            logger.warn("Attempted to set invalid timing window size: {}", newSize);
+        }
+    }
+
     /**
      * Updates the display with current progress and time estimates.
      */
@@ -255,7 +313,8 @@ public class DualProgressDialog {
      * Updates time estimation display for the complete workflow.
      */
     private void updateTimeEstimate(long now, int completed) {
-        if (workflowStartTime.get() == 0 || completed == 0) {
+        // Enable time estimation once we have any progress (even during first annotation)
+        if (workflowStartTime.get() == 0 || (completed == 0 && currentAnnotationProgress.get() == 0)) {
             timeLabel.setText("Estimating total time...");
             return;
         }
@@ -267,21 +326,52 @@ public class DualProgressDialog {
             timeLabel.setText("Total time: " + formatTime(totalSeconds));
             return;
         }
-        
-        // Calculate remaining time for complete workflow
-        long elapsed = now - workflowStartTime.get();
-        
-        // Estimate based on completed annotations plus current annotation progress
-        double effectiveCompleted = completed;
-        if (currentAnnotationExpectedFiles > 0) {
-            double currentProgress = currentAnnotationProgress.get() / (double) currentAnnotationExpectedFiles;
-            effectiveCompleted += currentProgress;
-        }
-        
-        if (effectiveCompleted > 0) {
-            long remainingMs = (long) ((elapsed / effectiveCompleted) * (totalAnnotations - effectiveCompleted));
-            long remainingSeconds = remainingMs / 1000;
-            timeLabel.setText("Complete workflow time remaining: " + formatTime(remainingSeconds));
+
+        // Calculate remaining time using rolling average of recent tile times
+        // This adapts to actual timing patterns (autofocus vs no autofocus) without hardcoded values
+
+        // First, calculate total tiles remaining across all annotations
+        int currentProgress = currentAnnotationProgress.get();
+        int tilesRemainingCurrentAnnotation = Math.max(0, currentAnnotationExpectedFiles - currentProgress);
+
+        // For simplicity, assume remaining annotations have similar tile counts
+        // (In practice, this could be improved by tracking per-annotation tile counts)
+        int avgTilesPerAnnotation = currentAnnotationExpectedFiles > 0 ? currentAnnotationExpectedFiles : 100;
+        int tilesRemainingFutureAnnotations = (totalAnnotations - completed - 1) * avgTilesPerAnnotation;
+        int totalTilesRemaining = tilesRemainingCurrentAnnotation + tilesRemainingFutureAnnotations;
+
+        int windowSize = timingWindowSize.get();
+        int tilesCollected = recentTileTimes.size();
+
+        // Check if we have collected enough tiles for accurate estimation
+        if (tilesCollected < windowSize && tilesCollected > 0) {
+            // Still collecting data for estimation
+            int tilesNeeded = windowSize - tilesCollected;
+            timeLabel.setText(String.format("Collecting data to estimate time... %d tiles remaining", tilesNeeded));
+        } else if (!recentTileTimes.isEmpty() && totalTilesRemaining > 0) {
+            // Use rolling average of recent tile times for prediction
+            long sum = recentTileTimes.stream().mapToLong(Long::longValue).sum();
+            long avgTileTime = sum / recentTileTimes.size();
+
+            long estimatedRemainingMs = avgTileTime * totalTilesRemaining;
+            long remainingSeconds = estimatedRemainingMs / 1000;
+
+            timeLabel.setText(String.format("Complete workflow time remaining: %s (based on last %d tiles)",
+                    formatTime(remainingSeconds), tilesCollected));
+        } else if (totalTilesCompleted.get() > 0) {
+            // Fallback to simple linear extrapolation if we don't have enough tile timing data yet
+            long elapsed = now - workflowStartTime.get();
+            double effectiveCompleted = completed;
+            if (currentAnnotationExpectedFiles > 0) {
+                double currentAnnotationProgress = currentProgress / (double) currentAnnotationExpectedFiles;
+                effectiveCompleted += currentAnnotationProgress;
+            }
+
+            if (effectiveCompleted > 0) {
+                long remainingMs = (long) ((elapsed / effectiveCompleted) * (totalAnnotations - effectiveCompleted));
+                long remainingSeconds = remainingMs / 1000;
+                timeLabel.setText("Complete workflow time remaining: " + formatTime(remainingSeconds));
+            }
         } else {
             timeLabel.setText("Estimating total time...");
         }
