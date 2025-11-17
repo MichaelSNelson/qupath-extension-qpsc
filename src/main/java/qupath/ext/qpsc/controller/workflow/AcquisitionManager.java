@@ -600,17 +600,21 @@ public class AcquisitionManager {
 
                                 // Check for manual focus request (only once per request)
                                 try {
-                                    if (socketClient.isManualFocusRequested() && !handlingManualFocus.get()) {
+                                    int retriesRemaining = socketClient.isManualFocusRequested();
+                                    if (retriesRemaining >= 0 && !handlingManualFocus.get()) {
                                         handlingManualFocus.set(true);
-                                        logger.info("Manual focus requested by server - showing dialog");
+                                        logger.info("Manual focus requested by server - showing dialog (retries remaining: {})", retriesRemaining);
 
                                         // Use CountDownLatch to block until dialog is closed and acknowledged
                                         java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
 
+                                        // Capture retries for use in Platform.runLater
+                                        final int retriesForDialog = retriesRemaining;
+
                                         // Show dialog on JavaFX thread
                                         Platform.runLater(() -> {
                                             try {
-                                                UIFunctions.ManualFocusResult result = UIFunctions.showManualFocusDialog();
+                                                UIFunctions.ManualFocusResult result = UIFunctions.showManualFocusDialog(retriesForDialog);
 
                                                 // Handle user's choice
                                                 try {

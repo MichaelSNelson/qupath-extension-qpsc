@@ -1308,16 +1308,31 @@ public class MicroscopeSocketClient implements AutoCloseable {
     }
 
     /**
-     * Checks if manual focus is requested by the server.
+     * Checks if manual focus is requested by the server and returns retry count.
      * This should be called periodically during acquisition to detect autofocus failures.
      *
-     * @return true if manual focus is requested
+     * @return number of retries remaining (0+) if manual focus is requested, or -1 if not needed
      * @throws IOException if communication fails
      */
-    public boolean isManualFocusRequested() throws IOException {
+    public int isManualFocusRequested() throws IOException {
         byte[] response = executeCommand(Command.REQMANF, null, 8);
         String status = new String(response, StandardCharsets.UTF_8).trim();
-        return "NEEDED__".equals(status);
+
+        if (status.equals("IDLE____")) {
+            return -1;  // No manual focus needed
+        } else if (status.startsWith("NEEDED")) {
+            // Format: "NEEDEDnn" where nn is 00-99
+            try {
+                String retriesStr = status.substring(6);  // Get last 2 characters
+                return Integer.parseInt(retriesStr);
+            } catch (NumberFormatException | IndexOutOfBoundsException e) {
+                logger.warn("Failed to parse retries from manual focus response: {}", status);
+                return 0;  // Default to 0 retries if parsing fails
+            }
+        } else {
+            logger.warn("Unknown manual focus status: {}", status);
+            return -1;
+        }
     }
 
     /**

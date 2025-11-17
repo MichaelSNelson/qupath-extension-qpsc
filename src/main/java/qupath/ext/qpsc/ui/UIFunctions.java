@@ -486,19 +486,29 @@ public class UIFunctions {
      * Used when autofocus fails and manual intervention is required.
      * Provides three options: retry autofocus, use current focus, or cancel.
      *
+     * @param retriesRemaining Number of autofocus retries remaining (0 means no retries left)
      * @return ManualFocusResult indicating user's choice
      */
-    public static ManualFocusResult showManualFocusDialog() {
+    public static ManualFocusResult showManualFocusDialog(int retriesRemaining) {
         Alert alert = new Alert(Alert.AlertType.WARNING);
         alert.setTitle("Manual Focus Required");
         alert.setHeaderText("Autofocus Failed");
-        alert.setContentText(
-                "Autofocus was unable to find a reliable focus position.\n\n" +
-                "Please manually focus the microscope on the tissue, then choose:\n\n" +
-                "• Retry Autofocus - Run autofocus again after manual adjustment\n" +
-                "• Use Current Focus - Accept current focus and continue\n" +
-                "• Cancel - Stop the acquisition"
-        );
+
+        // Update message based on retries remaining
+        String message;
+        if (retriesRemaining > 0) {
+            message = "Autofocus was unable to find a reliable focus position.\n\n" +
+                    "Please manually focus the microscope on the tissue, then choose:\n\n" +
+                    "• Retry Autofocus - Run autofocus again after manual adjustment (" + retriesRemaining + " retries left)\n" +
+                    "• Use Current Focus - Accept current focus and continue\n" +
+                    "• Cancel - Stop the acquisition";
+        } else {
+            message = "Autofocus was unable to find a reliable focus position after all retry attempts.\n\n" +
+                    "Please manually focus the microscope on the tissue, then choose:\n\n" +
+                    "• Use Current Focus - Accept current focus and continue\n" +
+                    "• Cancel - Stop the acquisition";
+        }
+        alert.setContentText(message);
         alert.initModality(Modality.APPLICATION_MODAL);
 
         // Add custom buttons
@@ -506,7 +516,13 @@ public class UIFunctions {
         ButtonType useCurrentButton = new ButtonType("Use Current Focus", ButtonBar.ButtonData.APPLY);
         ButtonType cancelButton = new ButtonType("Cancel", ButtonBar.ButtonData.CANCEL_CLOSE);
 
-        alert.getButtonTypes().setAll(retryButton, useCurrentButton, cancelButton);
+        // Add buttons based on retries remaining
+        if (retriesRemaining > 0) {
+            alert.getButtonTypes().setAll(retryButton, useCurrentButton, cancelButton);
+        } else {
+            // No retries left - only show use current and cancel
+            alert.getButtonTypes().setAll(useCurrentButton, cancelButton);
+        }
 
         // Make dialog always on top so it's visible above progress dialog
         alert.initOwner(null);
