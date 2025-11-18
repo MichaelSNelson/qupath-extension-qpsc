@@ -55,7 +55,10 @@ public class MicroscopeSocketClient implements AutoCloseable {
     private final AtomicBoolean connected = new AtomicBoolean(false);
     private final AtomicBoolean shuttingDown = new AtomicBoolean(false);
     private final AtomicLong lastActivityTime = new AtomicLong(System.currentTimeMillis());
-    
+
+    // Progress monitoring state - tracks last time progress was made or significant event occurred
+    private final AtomicLong lastProgressUpdateTime = new AtomicLong(System.currentTimeMillis());
+
     // Acquisition error tracking
     private volatile String lastFailureMessage = null;
 
@@ -1347,6 +1350,10 @@ public class MicroscopeSocketClient implements AutoCloseable {
         String ack = new String(response, StandardCharsets.UTF_8).trim();
         boolean acknowledged = "ACK".equals(ack);
         logger.info("Manual focus retry autofocus {}", acknowledged ? "acknowledged" : "failed");
+        // Reset progress timeout since user has responded and acquisition will resume
+        if (acknowledged) {
+            resetProgressTimeout();
+        }
         return acknowledged;
     }
 
@@ -1362,7 +1369,21 @@ public class MicroscopeSocketClient implements AutoCloseable {
         String ack = new String(response, StandardCharsets.UTF_8).trim();
         boolean acknowledged = "ACK".equals(ack);
         logger.info("Manual focus skip retry {}", acknowledged ? "acknowledged" : "failed");
+        // Reset progress timeout since user has responded and acquisition will resume
+        if (acknowledged) {
+            resetProgressTimeout();
+        }
         return acknowledged;
+    }
+
+    /**
+     * Resets the progress timeout timer.
+     * Call this when a significant event occurs that should reset the timeout
+     * (e.g., manual focus acknowledgment, user interaction).
+     */
+    public void resetProgressTimeout() {
+        lastProgressUpdateTime.set(System.currentTimeMillis());
+        logger.debug("Progress timeout reset");
     }
 
     /**
@@ -1382,7 +1403,8 @@ public class MicroscopeSocketClient implements AutoCloseable {
             long timeoutMs) throws IOException, InterruptedException {
 
         long startTime = System.currentTimeMillis();
-        long lastProgressTime = startTime;
+        // Use instance field instead of local variable so it can be reset externally
+        lastProgressUpdateTime.set(startTime);
         int lastProgressCount = -1;  // Initialize to -1 to detect first progress
         AcquisitionState lastState = AcquisitionState.IDLE;
         int retryCount = 0;
@@ -1410,7 +1432,7 @@ public class MicroscopeSocketClient implements AutoCloseable {
                     int manualFocusRetries = isManualFocusRequested();
                     if (manualFocusRetries >= 0) {
                         // Manual focus is requested - reset timeout since we're waiting for user input
-                        lastProgressTime = System.currentTimeMillis();
+                        lastProgressUpdateTime.set(System.currentTimeMillis());
                         logger.debug("Manual focus requested (retries: {}) - resetting progress timeout", manualFocusRetries);
                     }
                 } catch (IOException e) {
@@ -1430,13 +1452,13 @@ public class MicroscopeSocketClient implements AutoCloseable {
 
                             // Check if progress was actually made
                             if (progress.current > lastProgressCount) {
-                                lastProgressTime = System.currentTimeMillis();
+                                lastProgressUpdateTime.set(System.currentTimeMillis());
                                 lastProgressCount = progress.current;
                                 logger.debug("Progress updated: {}/{} files, resetting timeout", progress.current, progress.total);
                             }
                         } else {
                             // Invalid progress (-1/-1), but still reset timeout if we got a response
-                            lastProgressTime = System.currentTimeMillis();
+                            lastProgressUpdateTime.set(System.currentTimeMillis());
                             logger.debug("Received progress response (server still working): {}/{}",
                                     progress != null ? progress.current : "null",
                                     progress != null ? progress.total : "null");
@@ -1445,13 +1467,13 @@ public class MicroscopeSocketClient implements AutoCloseable {
                         logger.debug("Failed to get progress (expected during background acquisition): {}", e.getMessage());
                         // For background acquisition, progress queries might fail, so don't treat as error
                         // Just reset timeout to show server is still responsive
-                        lastProgressTime = System.currentTimeMillis();
+                        lastProgressUpdateTime.set(System.currentTimeMillis());
                     }
                 }
 
                 // Check timeout based on last progress, not total time
                 if (timeoutMs > 0) {
-                    long timeSinceProgress = System.currentTimeMillis() - lastProgressTime;
+                    long timeSinceProgress = System.currentTimeMillis() - lastProgressUpdateTime.get();
                     if (timeSinceProgress > timeoutMs) {
                         logger.warn("No progress for {} ms (last progress: {} files), timing out",
                                 timeSinceProgress, lastProgressCount);
@@ -1466,7 +1488,7 @@ public class MicroscopeSocketClient implements AutoCloseable {
 
                     // Reset progress timer on state change to RUNNING
                     if (currentState == AcquisitionState.RUNNING) {
-                        lastProgressTime = System.currentTimeMillis();
+                        lastProgressUpdateTime.set(System.currentTimeMillis());
                     }
                 }
 
