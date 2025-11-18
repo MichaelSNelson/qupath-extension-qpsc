@@ -1404,11 +1404,25 @@ public class MicroscopeSocketClient implements AutoCloseable {
                     return currentState;
                 }
 
+                // Check for manual focus request - if active, reset timeout
+                // This prevents timeout while waiting for user to respond to manual focus dialog
+                try {
+                    int manualFocusRetries = isManualFocusRequested();
+                    if (manualFocusRetries >= 0) {
+                        // Manual focus is requested - reset timeout since we're waiting for user input
+                        lastProgressTime = System.currentTimeMillis();
+                        logger.debug("Manual focus requested (retries: {}) - resetting progress timeout", manualFocusRetries);
+                    }
+                } catch (IOException e) {
+                    logger.debug("Failed to check manual focus status: {}", e.getMessage());
+                    // Not critical - just continue monitoring
+                }
+
                 // Get progress if running
                 if (currentState == AcquisitionState.RUNNING && progressCallback != null) {
                     try {
                         AcquisitionProgress progress = getAcquisitionProgress();
-                        
+
                         // For background acquisition, progress might start at -1/-1, which is normal
                         // Only report valid progress values
                         if (progress != null && progress.current >= 0 && progress.total >= 0) {
@@ -1423,8 +1437,8 @@ public class MicroscopeSocketClient implements AutoCloseable {
                         } else {
                             // Invalid progress (-1/-1), but still reset timeout if we got a response
                             lastProgressTime = System.currentTimeMillis();
-                            logger.debug("Received progress response (server still working): {}/{}", 
-                                    progress != null ? progress.current : "null", 
+                            logger.debug("Received progress response (server still working): {}/{}",
+                                    progress != null ? progress.current : "null",
                                     progress != null ? progress.total : "null");
                         }
                     } catch (IOException e) {
