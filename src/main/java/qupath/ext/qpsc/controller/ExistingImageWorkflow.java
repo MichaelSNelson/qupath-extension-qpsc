@@ -89,7 +89,11 @@ public class ExistingImageWorkflow {
                     .thenCompose(this::processAlignment)
                     .thenCompose(this::performAcquisition)
                     .thenCompose(this::waitForCompletion)
-                    .thenRun(this::cleanup)
+                    .thenAccept(result -> {
+                        // Only cleanup and show success if workflow completed successfully
+                        cleanup();
+                        showSuccessNotification();
+                    })
                     .exceptionally(this::handleError);
         }
 
@@ -299,7 +303,12 @@ public class ExistingImageWorkflow {
                 String tempTileDir = state.projectInfo.getTempTileDirectory();
                 TileCleanupHelper.performCleanup(tempTileDir);
             }
+        }
 
+        /**
+         * Shows success notification to user.
+         */
+        private void showSuccessNotification() {
             Platform.runLater(() -> {
                 Alert alert = new Alert(Alert.AlertType.INFORMATION);
                 alert.setTitle("Workflow Complete");
