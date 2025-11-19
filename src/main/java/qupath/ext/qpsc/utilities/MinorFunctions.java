@@ -38,13 +38,8 @@ import java.util.regex.Pattern;
 public class MinorFunctions {
     private static final Logger logger = LoggerFactory.getLogger(MinorFunctions.class);
 
-    /**
-     * @return true if running on Windows, false otherwise
-     */
-    public static boolean isWindows() {
-        String os = System.getProperty("os.name");
-        return os != null && os.toLowerCase().contains("win");
-    }
+    // Note: isWindows() has been removed - use GeneralTools.isWindows() instead
+    // GeneralTools also provides isMac(), isLinux(), isAppleSilicon()
 
     /**
      * Counts ".tif" lines in either TileConfiguration_QP.txt or TileConfiguration.txt

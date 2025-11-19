@@ -43,6 +43,13 @@ public class ImageMetadataManager {
     public static final String SAMPLE_NAME = "sample_name";
     public static final String ORIGINAL_IMAGE_ID = "original_image_id";
 
+    // Additional metadata keys for image identification
+    public static final String MODALITY = "modality";
+    public static final String OBJECTIVE = "objective";
+    public static final String ANGLE = "angle";
+    public static final String ANNOTATION_NAME = "annotation_name";
+    public static final String IMAGE_INDEX = "image_index";
+
     /**
      * Gets the next available image collection number for a project.
      * Scans all existing images to find the highest collection number and returns that + 1.
@@ -78,8 +85,7 @@ public class ImageMetadataManager {
     }
 
     /**
-     * Applies metadata to a new image entry based on its parent (if any).
-     * If parent exists, inherits the image_collection value.
+     * Applies comprehensive metadata to a new image entry including all identification fields.
      *
      * @param entry The image entry to apply metadata to
      * @param parentEntry Optional parent entry for collection inheritance
@@ -87,11 +93,19 @@ public class ImageMetadataManager {
      * @param yOffset Y offset from slide corner in microns
      * @param isFlipped Whether the image has been flipped
      * @param sampleName The sample name
+     * @param modality The imaging modality (e.g., "ppm", "bf")
+     * @param objective The objective/magnification (e.g., "20x", "10x")
+     * @param angle The angle for multi-angle acquisitions (null if not applicable)
+     * @param annotationName The annotation name (null if not applicable)
+     * @param imageIndex The image index number
      */
     public static void applyImageMetadata(ProjectImageEntry<?> entry,
                                           ProjectImageEntry<?> parentEntry,
                                           double xOffset, double yOffset,
-                                          boolean isFlipped, String sampleName) {
+                                          boolean isFlipped, String sampleName,
+                                          String modality, String objective,
+                                          String angle, String annotationName,
+                                          Integer imageIndex) {
         if (entry == null) {
             logger.error("Cannot apply metadata to null entry");
             return;
@@ -123,13 +137,54 @@ public class ImageMetadataManager {
             metadata.put(SAMPLE_NAME, sampleName);
         }
 
+        if (modality != null && !modality.isEmpty()) {
+            metadata.put(MODALITY, modality);
+        }
+
+        if (objective != null && !objective.isEmpty()) {
+            metadata.put(OBJECTIVE, objective);
+        }
+
+        if (angle != null && !angle.isEmpty()) {
+            metadata.put(ANGLE, angle);
+        }
+
+        if (annotationName != null && !annotationName.isEmpty()) {
+            metadata.put(ANNOTATION_NAME, annotationName);
+        }
+
+        if (imageIndex != null) {
+            metadata.put(IMAGE_INDEX, String.valueOf(imageIndex));
+        }
+
         // If this is a flipped duplicate, store reference to original
         if (parentEntry != null && isFlipped) {
             metadata.put(ORIGINAL_IMAGE_ID, parentEntry.getID());
         }
 
-        logger.debug("Applied metadata to {}: collection={}, offset=({},{}), flipped={}, sample={}",
-                entry.getImageName(), collectionNumber, xOffset, yOffset, isFlipped, sampleName);
+        logger.debug("Applied metadata to {}: collection={}, offset=({},{}), flipped={}, sample={}, modality={}, objective={}, angle={}, annotation={}, index={}",
+                entry.getImageName(), collectionNumber, xOffset, yOffset, isFlipped, sampleName,
+                modality, objective, angle, annotationName, imageIndex);
+    }
+
+    /**
+     * Applies metadata to a new image entry based on its parent (if any).
+     * If parent exists, inherits the image_collection value.
+     * This is a convenience method that calls the full version with null for optional fields.
+     *
+     * @param entry The image entry to apply metadata to
+     * @param parentEntry Optional parent entry for collection inheritance
+     * @param xOffset X offset from slide corner in microns
+     * @param yOffset Y offset from slide corner in microns
+     * @param isFlipped Whether the image has been flipped
+     * @param sampleName The sample name
+     */
+    public static void applyImageMetadata(ProjectImageEntry<?> entry,
+                                          ProjectImageEntry<?> parentEntry,
+                                          double xOffset, double yOffset,
+                                          boolean isFlipped, String sampleName) {
+        applyImageMetadata(entry, parentEntry, xOffset, yOffset, isFlipped, sampleName,
+                null, null, null, null, null);
     }
 
     /**

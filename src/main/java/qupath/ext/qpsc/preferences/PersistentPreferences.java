@@ -557,4 +557,7 @@ public class PersistentPreferences {
     public static void setRememberAnnotationSelection(final boolean remember) {
         rememberAnnotationSelectionSaved.setValue(String.valueOf(remember));
     }
+
+    // Note: Filename configuration preferences have been moved to QPPreferenceDialog
+    // to appear in the main preferences UI. Use QPPreferenceDialog.getFilenameInclude*() methods.
 }

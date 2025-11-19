@@ -97,17 +97,39 @@ public class BoundingBoxWorkflow {
                         // Use enhanced scan type for consistent folder structure
                         String enhancedModality = ObjectiveUtils.createEnhancedFolderName(
                                 sample.modality(), sample.objective());
-                        logger.info("Using enhanced modality for project: {} -> {}", 
+                        logger.info("Using enhanced modality for project: {} -> {}",
                                 sample.modality(), enhancedModality);
-                        
-                        pd = QPProjectFunctions.createAndOpenQuPathProject(
-                                qupathGUI,
-                                projectsFolder,
-                                sample.sampleName(),
-                                enhancedModality,
-                                invertX,
-                                invertY
-                        );
+
+                        // Check if a project is already open
+                        Project<BufferedImage> existingProject = qupathGUI.getProject();
+                        if (existingProject != null) {
+                            // Project exists - use it with the user-specified sample name (multi-sample support)
+                            logger.info("Using existing project: {}", existingProject.getPath());
+                            logger.info("Sample name '{}' will be used for metadata (separate from project name)",
+                                    sample.sampleName());
+
+                            pd = QPProjectFunctions.createAndOpenQuPathProject(
+                                    qupathGUI,
+                                    projectsFolder,
+                                    null,  // Don't create new project - use existing
+                                    enhancedModality,
+                                    invertX,
+                                    invertY
+                            );
+                        } else {
+                            // No project exists - create new project using sample name (backward compatibility)
+                            logger.info("No existing project - creating new project with sample name: {}",
+                                    sample.sampleName());
+
+                            pd = QPProjectFunctions.createAndOpenQuPathProject(
+                                    qupathGUI,
+                                    projectsFolder,
+                                    sample.sampleName(),  // Use sample name as project name
+                                    enhancedModality,
+                                    invertX,
+                                    invertY
+                            );
+                        }
                     } catch (IOException e) {
                         throw new UncheckedIOException(e);
                     }

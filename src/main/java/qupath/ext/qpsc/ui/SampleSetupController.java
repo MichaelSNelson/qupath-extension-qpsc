@@ -10,6 +10,7 @@ import javafx.stage.Modality;
 import javafx.stage.Window;
 import qupath.ext.qpsc.preferences.PersistentPreferences;
 import qupath.ext.qpsc.utilities.MicroscopeConfigManager;
+import qupath.ext.qpsc.utilities.SampleNameValidator;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.lib.gui.QuPathGUI;
 
@@ -45,6 +46,18 @@ public class SampleSetupController {
      *         or is cancelled if the user hits "Cancel."
      */
     public static CompletableFuture<SampleSetupResult> showDialog() {
+        return showDialog(null);  // No default sample name
+    }
+
+    /**
+     * Show a dialog to collect sample/project information with an optional default sample name.
+     * If a project is already open, adapts to only ask for modality.
+     *
+     * @param defaultSampleName Optional default value for sample name field (e.g., current image name without extension)
+     * @return a CompletableFuture that completes with the user's entries,
+     *         or is cancelled if the user hits "Cancel."
+     */
+    public static CompletableFuture<SampleSetupResult> showDialog(String defaultSampleName) {
         CompletableFuture<SampleSetupResult> future = new CompletableFuture<>();
 
         Platform.runLater(() -> {
@@ -87,14 +100,31 @@ public class SampleSetupController {
             TextField sampleNameField = new TextField();
             sampleNameField.setPromptText(res.getString("sampleSetup.prompt.sampleName"));
 
-            // Initialize with last used sample name if no project is open
-            if (!hasOpenProject) {
+            // Initialize sample name: use default if provided, otherwise use last used
+            if (defaultSampleName != null && !defaultSampleName.trim().isEmpty()) {
+                sampleNameField.setText(defaultSampleName.trim());
+                logger.debug("Using provided default sample name: {}", defaultSampleName);
+            } else {
                 String lastSampleName = PersistentPreferences.getLastSampleName();
                 if (!lastSampleName.isEmpty()) {
                     sampleNameField.setText(lastSampleName);
                     logger.debug("Loaded last sample name: {}", lastSampleName);
                 }
             }
+
+            // Add real-time validation feedback for sample name
+            Label sampleNameErrorLabel = new Label();
+            sampleNameErrorLabel.setStyle("-fx-text-fill: orange; -fx-font-size: 10px;");
+            sampleNameErrorLabel.setVisible(false);
+            sampleNameField.textProperty().addListener((obs, oldVal, newVal) -> {
+                String error = SampleNameValidator.getValidationError(newVal);
+                if (error != null) {
+                    sampleNameErrorLabel.setText(error);
+                    sampleNameErrorLabel.setVisible(true);
+                } else {
+                    sampleNameErrorLabel.setVisible(false);
+                }
+            });
 
             TextField folderField = new TextField();
             folderField.setPrefColumnCount(20);
@@ -305,12 +335,18 @@ public class SampleSetupController {
             grid.getColumnConstraints().addAll(col0, col1);
             int row = 0;
 
-            // Only show name/folder fields if no project is open
-            if (!hasOpenProject) {
-                grid.add(new Label(res.getString("sampleSetup.label.name")), 0, row);
-                grid.add(sampleNameField, 1, row);
-                row++;
+            // ALWAYS show sample name field (editable)
+            grid.add(new Label(res.getString("sampleSetup.label.name")), 0, row);
+            grid.add(sampleNameField, 1, row);
+            row++;
 
+            // Add sample name validation error label
+            grid.add(new Label(""), 0, row);  // Empty label for alignment
+            grid.add(sampleNameErrorLabel, 1, row);
+            row++;
+
+            // Show different context based on project state
+            if (!hasOpenProject) {
                 grid.add(new Label(res.getString("sampleSetup.label.projectsFolder")), 0, row);
                 grid.add(folderBox, 1, row);
                 row++;
@@ -335,8 +371,13 @@ public class SampleSetupController {
                 grid.add(locationLabel, 1, row);
                 row++;
 
-                // Pre-fill hidden fields with existing values
-                sampleNameField.setText(existingProjectName);
+                // Info about multi-sample support
+                Label multiSampleInfo = new Label("Sample will be added to the existing project.");
+                multiSampleInfo.setStyle("-fx-font-style: italic; -fx-font-size: 11px;");
+                grid.add(multiSampleInfo, 0, row, 2, 1);
+                row++;
+
+                // Pre-fill hidden folder field with existing value
                 folderField.setText(existingProjectFolder.getParent());
             }
 
@@ -387,12 +428,10 @@ public class SampleSetupController {
                 // Build validation error message
                 StringBuilder errors = new StringBuilder();
 
-                if (!hasOpenProject && name.isEmpty()) {
-                    errors.append("• Sample name cannot be empty\n");
-                }
-
-                if (!hasOpenProject && !name.isEmpty() && !name.matches("[a-zA-Z0-9_\\-]+")) {
-                    errors.append("• Sample name should only contain letters, numbers, _ and -\n");
+                // ALWAYS validate sample name (required for all workflows)
+                String sampleNameError = SampleNameValidator.getValidationError(name);
+                if (sampleNameError != null) {
+                    errors.append("• ").append(sampleNameError).append("\n");
                 }
 
                 if (!hasOpenProject && (!folder.exists() || !folder.isDirectory())) {
@@ -418,7 +457,7 @@ public class SampleSetupController {
                     event.consume();
 
                     // Focus the first problematic field
-                    if (!hasOpenProject && name.isEmpty()) {
+                    if (sampleNameError != null) {
                         sampleNameField.requestFocus();
                     } else if (!hasOpenProject && (!folder.exists() || !folder.isDirectory())) {
                         folderField.requestFocus();
@@ -433,12 +472,8 @@ public class SampleSetupController {
                     // Valid input - hide error label and save preferences
                     errorLabel.setVisible(false);
 
-                    // Save to persistent preferences for next time
-                    if (!hasOpenProject) {
-                        PersistentPreferences.setLastSampleName(name);
-
-                        //TODO maybe set QPPPreferenceDialog to new folder if that changed?
-                    }
+                    // ALWAYS save sample name preference (for all workflows)
+                    PersistentPreferences.setLastSampleName(name);
                     PersistentPreferences.setLastModality(mod);
                     PersistentPreferences.setLastObjective(obj);
                     PersistentPreferences.setLastDetector(det);
@@ -456,14 +491,12 @@ public class SampleSetupController {
                     String obj = extractIdFromDisplayString(objectiveBox.getValue());
                     String det = extractIdFromDisplayString(detectorBox.getValue());
 
-                    // Save to persistent preferences for next time
-                    if (!hasOpenProject) {
-                        PersistentPreferences.setLastSampleName(name);
-                        // DO NOT save projects folder - it comes from QPPreferenceDialog
-                    }
+                    // ALWAYS save preferences (for all workflows)
+                    PersistentPreferences.setLastSampleName(name);
                     PersistentPreferences.setLastModality(mod);
                     PersistentPreferences.setLastObjective(obj);
                     PersistentPreferences.setLastDetector(det);
+                    // DO NOT save projects folder - it comes from QPPreferenceDialog
 
                     logger.info("Saved sample setup preferences - name: {}, modality: {}, objective: {}, detector: {}",
                             name, mod, obj, det);

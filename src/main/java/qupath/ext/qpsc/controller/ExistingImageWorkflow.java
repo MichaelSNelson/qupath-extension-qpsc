@@ -131,11 +131,17 @@ public class ExistingImageWorkflow {
 
         /**
          * Shows sample setup dialog and stores results.
+         * Defaults sample name to current image name without extension.
          */
         private CompletableFuture<WorkflowState> setupSample() {
             logger.info("Showing sample setup dialog");
 
-            return SampleSetupController.showDialog()
+            // Get current image name without extension for default sample name
+            String currentImageName = gui.getImageData().getServer().getMetadata().getName();
+            String defaultSampleName = qupath.lib.common.GeneralTools.stripExtension(currentImageName);
+            logger.debug("Default sample name from image: {}", defaultSampleName);
+
+            return SampleSetupController.showDialog(defaultSampleName)
                     .thenApply(sample -> {
                         if (sample == null) {
                             throw new CancellationException("Sample setup cancelled");

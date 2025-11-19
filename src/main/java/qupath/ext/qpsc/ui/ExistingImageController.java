@@ -6,7 +6,9 @@ import javafx.scene.control.*;
 import javafx.scene.layout.GridPane;
 import javafx.stage.Modality;
 import qupath.ext.qpsc.preferences.PersistentPreferences;
+import qupath.ext.qpsc.utilities.SampleNameValidator;
 import qupath.fx.dialogs.Dialogs;
+import qupath.lib.common.GeneralTools;
 
 import java.util.ResourceBundle;
 import java.util.concurrent.CancellationException;
@@ -24,6 +26,7 @@ public class ExistingImageController {
      * Data structure to hold user inputs from the existing image dialog.
      */
     public record UserInput(
+            String sampleName,
             double macroPixelSize,
             String groovyScriptPath,
             boolean nonIsotropicPixels,
@@ -33,9 +36,10 @@ public class ExistingImageController {
     /**
      * Shows the dialog to collect details needed for the existing image workflow.
      *
+     * @param currentImageName The name of the currently open image (used to default sample name)
      * @return a CompletableFuture with user input results or cancellation
      */
-    public static CompletableFuture<UserInput> showDialog() {
+    public static CompletableFuture<UserInput> showDialog(String currentImageName) {
         CompletableFuture<UserInput> future = new CompletableFuture<>();
 
         Platform.runLater(() -> {
@@ -49,6 +53,27 @@ public class ExistingImageController {
             ButtonType okType = new ButtonType(res.getString("existingImage.button.ok"), ButtonBar.ButtonData.OK_DONE);
             ButtonType cancelType = new ButtonType(res.getString("existingImage.button.cancel"), ButtonBar.ButtonData.CANCEL_CLOSE);
             dlg.getDialogPane().getButtonTypes().addAll(okType, cancelType);
+
+            // Sample name field - default to image name without extension
+            // Use QuPath's GeneralTools which handles multi-part extensions (.ome.tif, .ome.zarr, etc.)
+            TextField sampleNameField = new TextField();
+            String baseName = GeneralTools.stripExtension(currentImageName != null ? currentImageName : "");
+            sampleNameField.setText(baseName);
+            sampleNameField.setPromptText("Enter sample name...");
+
+            // Add real-time validation feedback for sample name
+            Label sampleNameErrorLabel = new Label();
+            sampleNameErrorLabel.setStyle("-fx-text-fill: orange; -fx-font-size: 10px;");
+            sampleNameErrorLabel.setVisible(false);
+            sampleNameField.textProperty().addListener((obs, oldVal, newVal) -> {
+                String error = SampleNameValidator.getValidationError(newVal);
+                if (error != null) {
+                    sampleNameErrorLabel.setText(error);
+                    sampleNameErrorLabel.setVisible(true);
+                } else {
+                    sampleNameErrorLabel.setVisible(false);
+                }
+            });
 
             TextField pixelSizeField = new TextField();
             pixelSizeField.setText(PersistentPreferences.getMacroImagePixelSizeInMicrons());
@@ -67,16 +92,39 @@ public class ExistingImageController {
             grid.setHgap(10);
             grid.setVgap(10);
             grid.setPadding(new Insets(20));
-            grid.add(new Label(res.getString("existingImage.label.pixelSize")), 0, 0);
-            grid.add(pixelSizeField, 1, 0);
-            grid.add(nonIsotropicCheckBox, 1, 1);
-            grid.add(autoRegistrationCheckBox, 1, 2);
+
+            int row = 0;
+            grid.add(new Label("Sample name:"), 0, row);
+            grid.add(sampleNameField, 1, row);
+            row++;
+
+            grid.add(new Label(""), 0, row);  // Empty for alignment
+            grid.add(sampleNameErrorLabel, 1, row);
+            row++;
+
+            grid.add(new Label(res.getString("existingImage.label.pixelSize")), 0, row);
+            grid.add(pixelSizeField, 1, row);
+            row++;
+
+            grid.add(nonIsotropicCheckBox, 1, row);
+            row++;
+
+            grid.add(autoRegistrationCheckBox, 1, row);
 
             dlg.getDialogPane().setContent(grid);
 
             dlg.setResultConverter(btn -> {
                 if (btn == okType) {
                     try {
+                        String sampleName = sampleNameField.getText().trim();
+
+                        // Validate sample name
+                        String sampleError = SampleNameValidator.getValidationError(sampleName);
+                        if (sampleError != null) {
+                            Dialogs.showErrorNotification("Invalid Sample Name", sampleError);
+                            return null;
+                        }
+
                         double pixelSize = Double.parseDouble(pixelSizeField.getText().trim());
                         boolean pixelsNonIsotropic = nonIsotropicCheckBox.isSelected();
                         boolean useAutoRegistration = autoRegistrationCheckBox.isSelected();
@@ -84,8 +132,8 @@ public class ExistingImageController {
                         PersistentPreferences.setMacroImagePixelSizeInMicrons(String.valueOf(pixelSize));
                         String scriptPath = PersistentPreferences.getAnalysisScriptForAutomation();
 
-                        // Modified UserInput to include auto-registration flag
-                        return new UserInput(pixelSize, scriptPath, pixelsNonIsotropic, useAutoRegistration);
+                        // Return UserInput with sample name
+                        return new UserInput(sampleName, pixelSize, scriptPath, pixelsNonIsotropic, useAutoRegistration);
                     } catch (Exception e) {
                         Dialogs.showErrorNotification(res.getString("existingImage.error.title"), e.getMessage());
                         return null;

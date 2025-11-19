@@ -345,20 +345,30 @@ public class TileProcessingUtilities {
                 extension = ".ome.tif";  // Default to TIFF
             }
 
-            // Check if this is angle-based stitching (matching string is different from annotation)
+            // Extract modality, objective, and index from imagingModeWithIndex
+            String[] modalityParts = ImageNameGenerator.parseImagingMode(imagingModeWithIndex);
+            String modality = modalityParts[0];
+            String objective = modalityParts[1];
+            int imageIndex = ImageNameGenerator.extractImageIndex(imagingModeWithIndex);
+
+            // Extract and sanitize annotation name
+            String originalRegionName = extractOriginalRegionName(annotationName);
+            String sanitizedAnnotationName = ImageNameGenerator.sanitizeForFilename(originalRegionName);
+
+            // Determine if this is angle-based stitching
+            String angleSuffix = null;
             if (!matchingString.equals(annotationName)) {
-                String angleSuffix = matchingString;
+                // This is angle-based stitching - format the angle appropriately
+                angleSuffix = matchingString;
 
                 // Handle birefringence images specially
                 if (matchingString.contains(".biref")) {
-                    // Extract base angle and add birefringence indicator
                     String baseAngle = matchingString.replace(".biref", "");
                     if (modalityHandler != null) {
                         try {
                             String baseAngleSuffix = modalityHandler.getAngleSuffix(Double.parseDouble(baseAngle));
                             angleSuffix = baseAngleSuffix + "_biref";
                         } catch (NumberFormatException ignored) {
-                            // Keep original if parsing fails
                             angleSuffix = matchingString.replace(".", "_");
                         }
                     } else {
@@ -367,14 +377,12 @@ public class TileProcessingUtilities {
                 }
                 // Handle sum images specially
                 else if (matchingString.contains(".sum")) {
-                    // Extract base angle and add sum indicator
                     String baseAngle = matchingString.replace(".sum", "");
                     if (modalityHandler != null) {
                         try {
                             String baseAngleSuffix = modalityHandler.getAngleSuffix(Double.parseDouble(baseAngle));
                             angleSuffix = baseAngleSuffix + "_sum";
                         } catch (NumberFormatException ignored) {
-                            // Keep original if parsing fails
                             angleSuffix = matchingString.replace(".", "_");
                         }
                     } else {
@@ -387,31 +395,22 @@ public class TileProcessingUtilities {
                         // Keep original string if not a valid number
                     }
                 }
-
-                // This is angle-based stitching - include both annotation AND angle
-                // Format: sampleLabel_modality_annotation_angle.ome.zarr (or .ome.tif)
-                // Extract original region name from potentially combined path (e.g., "bounds\_temp_7_0" -> "bounds")
-                String originalRegionName = extractOriginalRegionName(annotationName);
-                // Sanitize annotation name to replace path separators with underscores for valid filenames
-                String sanitizedAnnotationName = originalRegionName.replace(File.separator, "_")
-                                                                   .replace("/", "_")
-                                                                   .replace("\\", "_");
-                baseName = sampleLabel + "_" + imagingModeWithIndex + "_" +
-                        sanitizedAnnotationName + "_" + angleSuffix + extension;
-                logger.info("Angle-based stitching detected - including annotation and angle in filename");
-            } else {
-                // Standard stitching - just annotation (or nothing for "bounds")
-                // Extract original region name from potentially combined path (e.g., "bounds\_temp_7_0" -> "bounds")
-                String originalRegionName = extractOriginalRegionName(annotationName);
-                // Sanitize annotation name to replace path separators with underscores for valid filenames
-                String sanitizedAnnotationName = originalRegionName.replace(File.separator, "_")
-                                                                   .replace("/", "_")
-                                                                   .replace("\\", "_");
-                baseName = sampleLabel + "_" + imagingModeWithIndex
-                        + (sanitizedAnnotationName.equals("bounds") ? "" : "_" + sanitizedAnnotationName)
-                        + extension;
-                logger.info("Standard stitching - using annotation-based filename");
+                logger.info("Angle-based stitching detected - angle: {}", angleSuffix);
             }
+
+            // Generate filename using preferences-based system
+            baseName = ImageNameGenerator.generateImageName(
+                    sampleLabel,
+                    imageIndex,
+                    modality,
+                    objective,
+                    sanitizedAnnotationName,
+                    angleSuffix,
+                    extension
+            );
+
+            logger.info("Generated filename: {} (modality={}, objective={}, annotation={}, angle={}, index={})",
+                    baseName, modality, objective, sanitizedAnnotationName, angleSuffix, imageIndex);
 
             File renamed = new File(orig.getParent(), baseName);
             logger.info("Renaming {} → {}", orig.getName(), baseName);
@@ -424,11 +423,18 @@ public class TileProcessingUtilities {
                 // Continue with original path if rename fails
             }
 
-            // Extract metadata if provided
+            // Extract metadata if provided, or create new with extracted components
             StitchingHelper.StitchingMetadata metadata = null;
             if (stitchParams != null && stitchParams.containsKey("metadata")) {
                 metadata = (StitchingHelper.StitchingMetadata) stitchParams.get("metadata");
             }
+
+            // If metadata doesn't have the identification fields, use the extracted values
+            final String finalModality = (metadata != null && metadata.modality != null) ? metadata.modality : modality;
+            final String finalObjective = (metadata != null && metadata.objective != null) ? metadata.objective : objective;
+            final String finalAngleSuffix = (metadata != null && metadata.angle != null) ? metadata.angle : angleSuffix;
+            final String finalAnnotation = (metadata != null && metadata.annotationName != null) ? metadata.annotationName : sanitizedAnnotationName;
+            final Integer finalIndex = (metadata != null && metadata.imageIndex != null) ? metadata.imageIndex : imageIndex;
 
             lastProcessedPath = outPath;
             final StitchingHelper.StitchingMetadata finalMetadata = metadata;
@@ -451,6 +457,11 @@ public class TileProcessingUtilities {
                                 false,  // isFlippedX - stitched images don't need flipping
                                 false,  // isFlippedY - stitched images don't need flipping
                                 finalMetadata.sampleName,
+                                finalModality,
+                                finalObjective,
+                                finalAngleSuffix,
+                                finalAnnotation,
+                                finalIndex,
                                 modalityHandler);
                     } else {
                         QPProjectFunctions.addImageToProject(

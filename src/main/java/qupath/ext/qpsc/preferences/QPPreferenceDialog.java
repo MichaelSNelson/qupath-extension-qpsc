@@ -90,6 +90,23 @@ public class QPPreferenceDialog {
                     StitchingConfig.OutputFormat.OME_TIFF,
                     StitchingConfig.OutputFormat.class);
 
+    // Filename configuration preferences
+    // Note: These control what information appears in the filename
+    // ALL information is stored in QuPath metadata regardless of these settings
+    private static final BooleanProperty includeObjectiveInFilenameProperty =
+            PathPrefs.createPersistentPreference("FilenameIncludeObjective", false);
+
+    private static final BooleanProperty includeModalityInFilenameProperty =
+            PathPrefs.createPersistentPreference("FilenameIncludeModality", false);
+
+    private static final BooleanProperty includeAnnotationInFilenameProperty =
+            PathPrefs.createPersistentPreference("FilenameIncludeAnnotation", false);
+
+    // Angle defaults to TRUE for multi-angle modalities like PPM
+    // where distinguishing between angles is critical
+    private static final BooleanProperty includeAngleInFilenameProperty =
+            PathPrefs.createPersistentPreference("FilenameIncludeAngle", true);
+
     /**
      * Register all preferences in QuPath's PreferencePane. Call once during extension installation.
      */
@@ -200,6 +217,41 @@ public class QPPreferenceDialog {
                 .name("Auto-connect to Server")
                 .category(CATEGORY)
                 .description("Automatically connect to microscope server when QuPath starts")
+                .build());
+
+        // Filename configuration section
+        items.add(new PropertyItemBuilder<>(includeObjectiveInFilenameProperty, Boolean.class)
+                .name("Image name includes: Objective")
+                .category(CATEGORY)
+                .description("Include objective/magnification (e.g., '20x') in image filenames.\n" +
+                             "Default: SampleName_001.ome.tif\n" +
+                             "With objective: SampleName_20x_001.ome.tif\n" +
+                             "Note: All metadata is always stored in QuPath regardless of filename settings.")
+                .build());
+
+        items.add(new PropertyItemBuilder<>(includeModalityInFilenameProperty, Boolean.class)
+                .name("Image name includes: Modality")
+                .category(CATEGORY)
+                .description("Include imaging modality (e.g., 'ppm', 'bf') in image filenames.\n" +
+                             "With modality: SampleName_ppm_001.ome.tif\n" +
+                             "Note: All metadata is always stored in QuPath regardless of filename settings.")
+                .build());
+
+        items.add(new PropertyItemBuilder<>(includeAnnotationInFilenameProperty, Boolean.class)
+                .name("Image name includes: Annotation")
+                .category(CATEGORY)
+                .description("Include annotation name in image filenames when acquiring specific regions.\n" +
+                             "With annotation: SampleName_Tissue_001.ome.tif\n" +
+                             "Note: All metadata is always stored in QuPath regardless of filename settings.")
+                .build());
+
+        items.add(new PropertyItemBuilder<>(includeAngleInFilenameProperty, Boolean.class)
+                .name("Image name includes: Angle")
+                .category(CATEGORY)
+                .description("Include angle information in image filenames for multi-angle acquisitions.\n" +
+                             "Critical for PPM and other polarized imaging modalities.\n" +
+                             "With angle: SampleName_001_7.0.ome.zarr, SampleName_001_-7.0.ome.zarr\n" +
+                             "Note: All metadata is always stored in QuPath regardless of filename settings.")
                 .build());
     }
 
@@ -318,5 +370,38 @@ public class QPPreferenceDialog {
         }
 
         return transforms;
+    }
+
+    // Filename configuration getters
+    public static boolean getFilenameIncludeObjective() {
+        return includeObjectiveInFilenameProperty.get();
+    }
+
+    public static void setFilenameIncludeObjective(boolean include) {
+        includeObjectiveInFilenameProperty.set(include);
+    }
+
+    public static boolean getFilenameIncludeModality() {
+        return includeModalityInFilenameProperty.get();
+    }
+
+    public static void setFilenameIncludeModality(boolean include) {
+        includeModalityInFilenameProperty.set(include);
+    }
+
+    public static boolean getFilenameIncludeAnnotation() {
+        return includeAnnotationInFilenameProperty.get();
+    }
+
+    public static void setFilenameIncludeAnnotation(boolean include) {
+        includeAnnotationInFilenameProperty.set(include);
+    }
+
+    public static boolean getFilenameIncludeAngle() {
+        return includeAngleInFilenameProperty.get();
+    }
+
+    public static void setFilenameIncludeAngle(boolean include) {
+        includeAngleInFilenameProperty.set(include);
     }
 }

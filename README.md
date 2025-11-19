@@ -146,6 +146,87 @@ This metadata system operates transparently in the background, ensuring data int
 
 ---
 
+## Image Naming and Metadata System
+
+QPSC uses a flexible, user-configurable image naming system that balances human readability with comprehensive metadata storage.
+
+### Default Naming Pattern
+
+Images are named using a clean, minimal format by default:
+```
+SampleName_001.ome.tif
+SampleName_002.ome.zarr
+```
+
+For multi-angle acquisitions (e.g., PPM):
+```
+SampleName_001_7.0.ome.zarr
+SampleName_001_-7.0.ome.zarr
+SampleName_002_7.0.ome.zarr
+```
+
+**Key Points:**
+- Index increments per acquisition/annotation, **NOT per angle**
+- Angles distinguish images within the same acquisition
+- All acquisition information is stored in QuPath metadata
+
+### Customizable Filename Components
+
+Users can configure which information appears in filenames via **QuPath Preferences → QPSC Extension**:
+
+**Image name includes:**
+- ☐ **Objective** - Add magnification (e.g., `SampleName_20x_001.ome.tif`)
+- ☐ **Modality** - Add imaging mode (e.g., `SampleName_ppm_001.ome.tif`)
+- ☐ **Annotation** - Add region name (e.g., `SampleName_Tissue_001.ome.tif`)
+- ☑ **Angle** - Add polarization angle (defaults to **ON** for PPM - critical for distinguishing images!)
+
+**Combining preferences:**
+```
+With Modality + Objective + Angle:
+SampleName_ppm_20x_001_7.0.ome.zarr
+```
+
+### Complete Metadata Storage
+
+**Important:** Regardless of filename configuration, **ALL** acquisition information is stored in QuPath metadata:
+- Sample name
+- Modality (ppm, bf, etc.)
+- Objective/magnification
+- Polarization angle (for multi-angle)
+- Annotation name
+- Image index
+- Image collection number
+- XY offsets (microns)
+- Flip status
+- Parent image relationships
+
+Metadata can be viewed in QuPath's **Image → Image Properties** panel.
+
+### Sample Name Validation
+
+Sample names are validated for cross-platform filename safety:
+- **Allowed**: Letters, numbers, spaces, underscores, hyphens
+- **Blocked**: `/ \ : * ? " < > | newlines`
+- **Protected**: Windows reserved names (CON, PRN, AUX, NUL, COM1-9, LPT1-9)
+- **Automatic sanitization**: Invalid characters replaced with underscores
+
+**Workflows:**
+- **BoundingBox Workflow**: User specifies sample name (editable, validated)
+- **ExistingImage Workflow**: Defaults to current image name without extension (editable)
+
+### Multi-Sample Projects
+
+Projects can now contain multiple samples with distinct names:
+- Each sample can have its own name (no longer tied to project name)
+- Metadata tracks which images belong to which sample
+- Essential for collaborative studies with multiple specimens
+
+**Legacy Compatibility:**
+- Creating a project without an existing project: project name = sample name (old behavior preserved)
+- Drag-and-drop image without project: creates project normally (old behavior preserved)
+
+---
+
 ## Calibration Workflows
 
 ### Background Collection

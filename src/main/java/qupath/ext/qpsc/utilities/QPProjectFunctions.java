@@ -404,6 +404,9 @@ public class QPProjectFunctions {
      * @param modalityHandler Optional modality handler for determining image type
      * @return The newly created ProjectImageEntry, or null on failure
      */
+    /**
+     * Adds an image to a project with comprehensive metadata including identification fields.
+     */
     public static ProjectImageEntry<BufferedImage> addImageToProjectWithMetadata(
             Project<BufferedImage> project,
             File imageFile,
@@ -413,6 +416,11 @@ public class QPProjectFunctions {
             boolean isFlippedX,
             boolean isFlippedY,
             String sampleName,
+            String modality,
+            String objective,
+            String angle,
+            String annotationName,
+            Integer imageIndex,
             qupath.ext.qpsc.modality.ModalityHandler modalityHandler) throws IOException {
 
         if (project == null) {
@@ -420,11 +428,11 @@ public class QPProjectFunctions {
             return null;
         }
 
-        logger.info("Adding image with metadata: {} (parent={}, offset=({},{}), flipped={}, sample={}, modality={})",
+        logger.info("Adding image with metadata: {} (parent={}, offset=({},{}), flipped={}, sample={}, modality={}, objective={}, angle={}, annotation={}, index={})",
                 imageFile.getName(),
                 parentEntry != null ? parentEntry.getImageName() : "none",
                 xOffset, yOffset, isFlippedX || isFlippedY, sampleName,
-                modalityHandler != null ? modalityHandler.getClass().getSimpleName() : "auto-detect");
+                modality, objective, angle, annotationName, imageIndex);
 
         // First add the image using existing logic (preserves original method)
         boolean success = addImageToProject(imageFile, project, isFlippedX, isFlippedY, modalityHandler);
@@ -440,19 +448,40 @@ public class QPProjectFunctions {
                 .orElse(null);
 
         if (newEntry != null) {
-            // Apply metadata
+            // Apply comprehensive metadata with all identification fields
             ImageMetadataManager.applyImageMetadata(
-                    newEntry, parentEntry, xOffset, yOffset, isFlippedX || isFlippedY, sampleName
+                    newEntry, parentEntry, xOffset, yOffset, isFlippedX || isFlippedY, sampleName,
+                    modality, objective, angle, annotationName, imageIndex
             );
 
             // Save project
             project.syncChanges();
-            logger.info("Successfully added image with metadata to project");
+            logger.info("Successfully added image with comprehensive metadata to project");
         } else {
             logger.error("Could not find newly added image in project: {}", imageName);
         }
 
         return newEntry;
+    }
+
+    /**
+     * Adds an image to a project with basic metadata (backward compatibility).
+     * This is a convenience method that calls the full version with null for optional fields.
+     */
+    public static ProjectImageEntry<BufferedImage> addImageToProjectWithMetadata(
+            Project<BufferedImage> project,
+            File imageFile,
+            ProjectImageEntry<BufferedImage> parentEntry,
+            double xOffset,
+            double yOffset,
+            boolean isFlippedX,
+            boolean isFlippedY,
+            String sampleName,
+            qupath.ext.qpsc.modality.ModalityHandler modalityHandler) throws IOException {
+
+        return addImageToProjectWithMetadata(project, imageFile, parentEntry,
+                xOffset, yOffset, isFlippedX, isFlippedY, sampleName,
+                null, null, null, null, null, modalityHandler);
     }
 
     /**
