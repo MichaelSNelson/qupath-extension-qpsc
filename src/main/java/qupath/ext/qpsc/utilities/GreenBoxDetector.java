@@ -30,6 +30,8 @@ public class GreenBoxDetector {
         public double saturationMin;      // Minimum saturation for green
         public double brightnessMin;      // Minimum brightness
         public double brightnessMax;      // Maximum brightness
+        public double hueMin;             // Minimum hue value (0.0-1.0, green ~0.25-0.42)
+        public double hueMax;             // Maximum hue value (0.0-1.0, green ~0.25-0.42)
         public int minBoxWidth;           // Minimum box width in pixels
         public int minBoxHeight;          // Minimum box height in pixels
         public int edgeThickness;        // Expected thickness of box edges
@@ -44,6 +46,8 @@ public class GreenBoxDetector {
                 this.saturationMin = PersistentPreferences.getGreenSaturationMin();
                 this.brightnessMin = PersistentPreferences.getGreenBrightnessMin();
                 this.brightnessMax = PersistentPreferences.getGreenBrightnessMax();
+                this.hueMin = PersistentPreferences.getGreenHueMin();
+                this.hueMax = PersistentPreferences.getGreenHueMax();
                 this.edgeThickness = PersistentPreferences.getGreenEdgeThickness();
                 this.minBoxWidth = PersistentPreferences.getGreenMinBoxWidth();
                 this.minBoxHeight = PersistentPreferences.getGreenMinBoxHeight();
@@ -76,6 +80,8 @@ public class GreenBoxDetector {
             this.saturationMin = 0.3;
             this.brightnessMin = 0.3;
             this.brightnessMax = 0.9;
+            this.hueMin = 0.25;  // Green hue range start (90 degrees)
+            this.hueMax = 0.42;  // Green hue range end (151 degrees)
             this.minBoxWidth = 100;
             this.minBoxHeight = 100;
             this.edgeThickness = 3;
@@ -89,6 +95,8 @@ public class GreenBoxDetector {
             PersistentPreferences.setGreenSaturationMin(saturationMin);
             PersistentPreferences.setGreenBrightnessMin(brightnessMin);
             PersistentPreferences.setGreenBrightnessMax(brightnessMax);
+            PersistentPreferences.setGreenHueMin(hueMin);
+            PersistentPreferences.setGreenHueMax(hueMax);
             PersistentPreferences.setGreenEdgeThickness(edgeThickness);
             PersistentPreferences.setGreenMinBoxWidth(minBoxWidth);
             PersistentPreferences.setGreenMinBoxHeight(minBoxHeight);
@@ -129,6 +137,9 @@ public class GreenBoxDetector {
 
         // Create binary mask of green pixels
         BufferedImage greenMask = createGreenMask(macroImage, params);
+
+        // Diagnostic: Analyze hue distribution of green-ish pixels to help troubleshoot
+        analyzeHueDistribution(macroImage, params);
 
         // Find connected components that could be box edges
         List<Rectangle> edges = findBoxEdges(greenMask, params);
@@ -227,12 +238,90 @@ public class GreenBoxDetector {
         float saturation = hsb[1];
         float brightness = hsb[2];
 
-        // Green hue is around 120 degrees (0.33 in normalized)
-        boolean isGreenHue = hue > 0.25 && hue < 0.42;
+        // Check hue range (configurable - green typically 0.25-0.42, i.e., 90-151 degrees)
+        boolean isGreenHue = hue > params.hueMin && hue < params.hueMax;
         boolean goodSaturation = saturation > params.saturationMin;
         boolean goodBrightness = brightness > params.brightnessMin && brightness < params.brightnessMax;
 
         return isGreenHue && goodSaturation && goodBrightness;
+    }
+
+    /**
+     * Analyzes the hue distribution of green-ish pixels in the image.
+     * This helps diagnose why detection might be failing by showing what hue values are actually present.
+     */
+    private static void analyzeHueDistribution(BufferedImage image, DetectionParams params) {
+        int width = image.getWidth();
+        int height = image.getHeight();
+
+        double minHue = 1.0;
+        double maxHue = 0.0;
+        int greenishPixelCount = 0;
+        int passedAllFilters = 0;
+
+        // Count pixels that fail at each stage
+        int failedGreenRatio = 0;
+        int failedHue = 0;
+        int failedSaturation = 0;
+        int failedBrightness = 0;
+
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int rgb = image.getRGB(x, y);
+                int r = (rgb >> 16) & 0xFF;
+                int g = (rgb >> 8) & 0xFF;
+                int b = rgb & 0xFF;
+
+                // Check if roughly green (g > r and g > b)
+                if (g > r && g > b) {
+                    greenishPixelCount++;
+                    float[] hsb = Color.RGBtoHSB(r, g, b, null);
+                    double hue = hsb[0];
+                    minHue = Math.min(minHue, hue);
+                    maxHue = Math.max(maxHue, hue);
+
+                    // Track why pixels fail
+                    double rNorm = r / 255.0;
+                    double gNorm = g / 255.0;
+                    double bNorm = b / 255.0;
+                    double total = rNorm + gNorm + bNorm;
+                    double greenRatio = total > 0 ? gNorm / total : 0;
+
+                    if (greenRatio < params.greenThreshold) {
+                        failedGreenRatio++;
+                    } else if (hue <= params.hueMin || hue >= params.hueMax) {
+                        failedHue++;
+                    } else if (hsb[1] <= params.saturationMin) {
+                        failedSaturation++;
+                    } else if (hsb[2] <= params.brightnessMin || hsb[2] >= params.brightnessMax) {
+                        failedBrightness++;
+                    } else {
+                        passedAllFilters++;
+                    }
+                }
+            }
+        }
+
+        if (greenishPixelCount > 0) {
+            logger.info("Hue analysis: Found {} green-ish pixels (g > r && g > b)", greenishPixelCount);
+            logger.info("  Hue range in image: [{}, {}] (expected: [{}, {}])",
+                    String.format("%.3f", minHue), String.format("%.3f", maxHue),
+                    String.format("%.3f", params.hueMin), String.format("%.3f", params.hueMax));
+            logger.info("  Filter results: {} passed all filters", passedAllFilters);
+            logger.info("    Failed green ratio (< {}): {}", String.format("%.2f", params.greenThreshold), failedGreenRatio);
+            logger.info("    Failed hue range: {}", failedHue);
+            logger.info("    Failed saturation (< {}): {}", String.format("%.2f", params.saturationMin), failedSaturation);
+            logger.info("    Failed brightness: {}", failedBrightness);
+
+            // Suggest adjustments if needed
+            if (failedHue > passedAllFilters && failedHue > 100) {
+                logger.warn("Many pixels failed hue filter. Consider adjusting hue range to [{}, {}]",
+                        String.format("%.2f", Math.max(0, minHue - 0.02)),
+                        String.format("%.2f", Math.min(1, maxHue + 0.02)));
+            }
+        } else {
+            logger.warn("No green-ish pixels found in image (g > r && g > b)");
+        }
     }
 
     /**
@@ -285,28 +374,34 @@ public class GreenBoxDetector {
 
     /**
      * Checks if a position contains a horizontal edge.
+     * Allows some tolerance for gaps due to compression artifacts or color variation.
      */
     private static boolean isHorizontalEdge(BufferedImage mask, int x, int y, DetectionParams params) {
         // Check if we have a thick horizontal line
+        // Allow 80% of pixels to be green (tolerance for JPEG artifacts, anti-aliasing, etc.)
+        int greenCount = 0;
         for (int dy = 0; dy < params.edgeThickness && y + dy < mask.getHeight(); dy++) {
-            if ((mask.getRGB(x, y + dy) & 0xFF) == 0) {
-                return false;
+            if ((mask.getRGB(x, y + dy) & 0xFF) > 0) {
+                greenCount++;
             }
         }
-        return true;
+        return greenCount >= params.edgeThickness * 0.8;
     }
 
     /**
      * Checks if a position contains a vertical edge.
+     * Allows some tolerance for gaps due to compression artifacts or color variation.
      */
     private static boolean isVerticalEdge(BufferedImage mask, int x, int y, DetectionParams params) {
         // Check if we have a thick vertical line
+        // Allow 80% of pixels to be green (tolerance for JPEG artifacts, anti-aliasing, etc.)
+        int greenCount = 0;
         for (int dx = 0; dx < params.edgeThickness && x + dx < mask.getWidth(); dx++) {
-            if ((mask.getRGB(x + dx, y) & 0xFF) == 0) {
-                return false;
+            if ((mask.getRGB(x + dx, y) & 0xFF) > 0) {
+                greenCount++;
             }
         }
-        return true;
+        return greenCount >= params.edgeThickness * 0.8;
     }
 
     /**

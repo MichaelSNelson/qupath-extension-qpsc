@@ -253,10 +253,12 @@ public class StitchingHelper {
                     // Log initial directory state
                     try {
                         if (Files.exists(tileBaseDir)) {
-                            logger.info("Initial tile base directory contents:");
+                            long dirCount = Files.list(tileBaseDir).filter(Files::isDirectory).count();
+                            logger.info("Initial tile base directory contains {} subdirectories", dirCount);
+                            logger.debug("Subdirectories:");
                             Files.list(tileBaseDir)
                                  .filter(Files::isDirectory)
-                                 .forEach(path -> logger.info("  - {}", path.getFileName()));
+                                 .forEach(path -> logger.debug("  - {}", path.getFileName()));
                         } else {
                             logger.warn("Tile base directory does not exist: {}", tileBaseDir);
                         }
@@ -296,10 +298,11 @@ public class StitchingHelper {
                         // Log directory state after each angle
                         try {
                             if (Files.exists(tileBaseDir)) {
-                                logger.info("Directory state after processing angle {}:", angleStr);
+                                long dirCount = Files.list(tileBaseDir).filter(Files::isDirectory).count();
+                                logger.debug("Directory contains {} subdirectories after processing angle {}", dirCount, angleStr);
                                 Files.list(tileBaseDir)
                                      .filter(Files::isDirectory)
-                                     .forEach(path -> logger.info("  - {}", path.getFileName()));
+                                     .forEach(path -> logger.debug("  - {}", path.getFileName()));
                             }
                         } catch (IOException e) {
                             logger.warn("Could not list directory after processing angle {}: {}", angleStr, e.getMessage());
@@ -342,8 +345,10 @@ public class StitchingHelper {
                         
                         // Log directory contents to understand what's inside
                         try {
-                            logger.info("Birefringence directory contents:");
-                            Files.list(birefPath).forEach(path -> logger.info("  - {}", path));
+                            long fileCount = Files.list(birefPath).count();
+                            logger.info("Birefringence directory contains {} files", fileCount);
+                            logger.debug("Birefringence directory contents:");
+                            Files.list(birefPath).forEach(path -> logger.debug("  - {}", path));
                         } catch (IOException e) {
                             logger.warn("Could not list birefringence directory contents: {}", e.getMessage());
                         }
@@ -374,11 +379,12 @@ public class StitchingHelper {
                         
                         // Log what directories DO exist to help debug
                         try {
-                            logger.info("Available directories in tile base ({}):)", tileBaseDir);
                             if (Files.exists(tileBaseDir)) {
+                                long dirCount = Files.list(tileBaseDir).filter(Files::isDirectory).count();
+                                logger.debug("Available directories in tile base ({}): {}", tileBaseDir, dirCount);
                                 Files.list(tileBaseDir)
                                      .filter(Files::isDirectory)
-                                     .forEach(path -> logger.info("  - {}", path.getFileName()));
+                                     .forEach(path -> logger.debug("  - {}", path.getFileName()));
                             } else {
                                 logger.warn("Tile base directory does not exist: {}", tileBaseDir);
                             }
@@ -421,8 +427,10 @@ public class StitchingHelper {
 
                         // Log directory contents to understand what's inside
                         try {
-                            logger.info("Sum directory contents:");
-                            Files.list(sumPath).forEach(path -> logger.info("  - {}", path));
+                            long fileCount = Files.list(sumPath).count();
+                            logger.info("Sum directory contains {} files", fileCount);
+                            logger.debug("Sum directory contents:");
+                            Files.list(sumPath).forEach(path -> logger.debug("  - {}", path));
                         } catch (IOException e) {
                             logger.warn("Could not list sum directory contents: {}", e.getMessage());
                         }
@@ -652,10 +660,12 @@ public class StitchingHelper {
                     // Log initial directory state
                     try {
                         if (Files.exists(tileBaseDir)) {
-                            logger.info("Initial tile base directory contents:");
+                            long dirCount = Files.list(tileBaseDir).filter(Files::isDirectory).count();
+                            logger.info("Initial tile base directory contains {} subdirectories", dirCount);
+                            logger.debug("Subdirectories:");
                             Files.list(tileBaseDir)
                                  .filter(Files::isDirectory)
-                                 .forEach(path -> logger.info("  - {}", path.getFileName()));
+                                 .forEach(path -> logger.debug("  - {}", path.getFileName()));
                         } else {
                             logger.warn("Tile base directory does not exist: {}", tileBaseDir);
                         }
@@ -695,10 +705,11 @@ public class StitchingHelper {
                         // Log directory state after each angle
                         try {
                             if (Files.exists(tileBaseDir)) {
-                                logger.info("Directory state after processing angle {}:", angleStr);
+                                long dirCount = Files.list(tileBaseDir).filter(Files::isDirectory).count();
+                                logger.debug("Directory contains {} subdirectories after processing angle {}", dirCount, angleStr);
                                 Files.list(tileBaseDir)
                                      .filter(Files::isDirectory)
-                                     .forEach(path -> logger.info("  - {}", path.getFileName()));
+                                     .forEach(path -> logger.debug("  - {}", path.getFileName()));
                             }
                         } catch (IOException e) {
                             logger.warn("Could not list directory after processing angle {}: {}", angleStr, e.getMessage());
@@ -741,8 +752,10 @@ public class StitchingHelper {
                         
                         // Log directory contents to understand what's inside
                         try {
-                            logger.info("Birefringence directory contents:");
-                            Files.list(birefPath).forEach(path -> logger.info("  - {}", path));
+                            long fileCount = Files.list(birefPath).count();
+                            logger.info("Birefringence directory contains {} files", fileCount);
+                            logger.debug("Birefringence directory contents:");
+                            Files.list(birefPath).forEach(path -> logger.debug("  - {}", path));
                         } catch (IOException e) {
                             logger.warn("Could not list birefringence directory contents: {}", e.getMessage());
                         }
@@ -773,11 +786,12 @@ public class StitchingHelper {
                         
                         // Log what directories DO exist to help debug
                         try {
-                            logger.info("Available directories in tile base ({}):)", tileBaseDir);
                             if (Files.exists(tileBaseDir)) {
+                                long dirCount = Files.list(tileBaseDir).filter(Files::isDirectory).count();
+                                logger.debug("Available directories in tile base ({}): {}", tileBaseDir, dirCount);
                                 Files.list(tileBaseDir)
                                      .filter(Files::isDirectory)
-                                     .forEach(path -> logger.info("  - {}", path.getFileName()));
+                                     .forEach(path -> logger.debug("  - {}", path.getFileName()));
                             } else {
                                 logger.warn("Tile base directory does not exist: {}", tileBaseDir);
                             }
@@ -820,8 +834,10 @@ public class StitchingHelper {
 
                         // Log directory contents to understand what's inside
                         try {
-                            logger.info("Sum directory contents:");
-                            Files.list(sumPath).forEach(path -> logger.info("  - {}", path));
+                            long fileCount = Files.list(sumPath).count();
+                            logger.info("Sum directory contains {} files", fileCount);
+                            logger.debug("Sum directory contents:");
+                            Files.list(sumPath).forEach(path -> logger.debug("  - {}", path));
                         } catch (IOException e) {
                             logger.warn("Could not list sum directory contents: {}", e.getMessage());
                         }

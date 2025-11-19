@@ -106,6 +106,11 @@
         <appender-ref ref="CONSOLE" />
     </logger>
 
+    <!-- Suppress verbose Bio-Formats LOCI logs during stitching -->
+    <logger name="loci.formats" level="WARN" />
+    <logger name="loci.formats.ImageReader" level="WARN" />
+    <logger name="loci.formats.in" level="WARN" />
+
     <!-- Root logger - catches everything not explicitly configured -->
     <root level="INFO">
         <appender-ref ref="CONSOLE" />

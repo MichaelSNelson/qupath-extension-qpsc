@@ -115,6 +115,12 @@ public class PersistentPreferences {
     private static final StringProperty greenBrightnessMaxSaved =
             PathPrefs.createPersistentPreference("GreenBoxBrightnessMax", "0.9");
 
+    private static final StringProperty greenHueMinSaved =
+            PathPrefs.createPersistentPreference("GreenBoxHueMin", "0.25");
+
+    private static final StringProperty greenHueMaxSaved =
+            PathPrefs.createPersistentPreference("GreenBoxHueMax", "0.42");
+
     private static final StringProperty greenEdgeThicknessSaved =
             PathPrefs.createPersistentPreference("GreenBoxEdgeThickness", "3");
 
@@ -154,6 +160,22 @@ public class PersistentPreferences {
 
     public static void setGreenBrightnessMax(final double brightness) {
         greenBrightnessMaxSaved.setValue(String.valueOf(brightness));
+    }
+
+    public static double getGreenHueMin() {
+        return Double.parseDouble(greenHueMinSaved.getValue());
+    }
+
+    public static void setGreenHueMin(final double hue) {
+        greenHueMinSaved.setValue(String.valueOf(hue));
+    }
+
+    public static double getGreenHueMax() {
+        return Double.parseDouble(greenHueMaxSaved.getValue());
+    }
+
+    public static void setGreenHueMax(final double hue) {
+        greenHueMaxSaved.setValue(String.valueOf(hue));
     }
 
     public static int getGreenEdgeThickness() {

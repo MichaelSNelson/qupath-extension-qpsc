@@ -140,6 +140,14 @@ public class GreenBoxPreviewController {
                 greenThreshold.setEditable(true);
                 greenThreshold.setPrefWidth(80);
 
+                Spinner<Double> hueMin = new Spinner<>(0.0, 1.0, params.hueMin, 0.01);
+                hueMin.setEditable(true);
+                hueMin.setPrefWidth(80);
+
+                Spinner<Double> hueMax = new Spinner<>(0.0, 1.0, params.hueMax, 0.01);
+                hueMax.setEditable(true);
+                hueMax.setPrefWidth(80);
+
                 Label statusLabel = new Label("Click 'Detect Green Box' to preview detection");
                 statusLabel.setStyle("-fx-text-fill: gray");
 
@@ -149,9 +157,11 @@ public class GreenBoxPreviewController {
                     // Update parameters
                     params.edgeThickness = edgeThickness.getValue();
                     params.greenThreshold = greenThreshold.getValue();
+                    params.hueMin = hueMin.getValue();
+                    params.hueMax = hueMax.getValue();
 
-                    logger.info("Running green box detection - Edge: {}, Threshold: {}",
-                            params.edgeThickness, params.greenThreshold);
+                    logger.info("Running green box detection - Edge: {}, Threshold: {}, Hue: [{}, {}]",
+                            params.edgeThickness, params.greenThreshold, params.hueMin, params.hueMax);
 
                     // Perform detection
                     var result = GreenBoxDetector.detectGreenBox(macroImage, params);
@@ -235,7 +245,9 @@ public class GreenBoxPreviewController {
                 paramBox.getChildren().addAll(
                         new Label("Detection Parameters:"),
                         new HBox(10, new Label("Edge thickness:"), edgeThickness, new Label("pixels")),
-                        new HBox(10, new Label("Green threshold:"), greenThreshold)
+                        new HBox(10, new Label("Green threshold:"), greenThreshold),
+                        new HBox(10, new Label("Hue min:"), hueMin, new Label("(0.0-1.0)")),
+                        new HBox(10, new Label("Hue max:"), hueMax, new Label("(0.0-1.0)"))
                 );
 
                 // Buttons

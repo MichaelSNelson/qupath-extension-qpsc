@@ -359,6 +359,14 @@ public class StitchingBlockingDialog {
                 // Show dialog non-blocking (modality will block interface, but not this thread)
                 instance.dialog.show();
 
+                // Immediately force dialog to front if possible (before Platform.runLater async execution)
+                if (instance.dialog.getDialogPane().getScene() != null &&
+                    instance.dialog.getDialogPane().getScene().getWindow() instanceof Stage immediateStage) {
+                    immediateStage.toFront();
+                    immediateStage.setAlwaysOnTop(true);
+                    immediateStage.requestFocus();
+                }
+
                 // Ensure dialog is always on top and stays visible
                 Platform.runLater(() -> {
                     if (instance.dialog.getDialogPane().getScene() != null &&
