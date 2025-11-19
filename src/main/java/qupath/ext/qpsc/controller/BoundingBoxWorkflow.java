@@ -103,18 +103,16 @@ public class BoundingBoxWorkflow {
                         // Check if a project is already open
                         Project<BufferedImage> existingProject = qupathGUI.getProject();
                         if (existingProject != null) {
-                            // Project exists - use it with the user-specified sample name (multi-sample support)
+                            // Project exists - use getCurrentProjectInformation instead of creating new
                             logger.info("Using existing project: {}", existingProject.getPath());
                             logger.info("Sample name '{}' will be used for metadata (separate from project name)",
                                     sample.sampleName());
 
-                            pd = QPProjectFunctions.createAndOpenQuPathProject(
-                                    qupathGUI,
+                            // Use getCurrentProjectInformation which doesn't try to create folders/project
+                            pd = QPProjectFunctions.getCurrentProjectInformation(
                                     projectsFolder,
-                                    null,  // Don't create new project - use existing
-                                    enhancedModality,
-                                    invertX,
-                                    invertY
+                                    sample.sampleName(),  // Use sample name for folder structure
+                                    enhancedModality
                             );
                         } else {
                             // No project exists - create new project using sample name (backward compatibility)
