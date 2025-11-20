@@ -125,10 +125,10 @@ public class PersistentPreferences {
             PathPrefs.createPersistentPreference("GreenBoxEdgeThickness", "3");
 
     private static final StringProperty greenMinBoxWidthSaved =
-            PathPrefs.createPersistentPreference("GreenBoxMinWidth", "100");
+            PathPrefs.createPersistentPreference("GreenBoxMinWidth", "20");
 
     private static final StringProperty greenMinBoxHeightSaved =
-            PathPrefs.createPersistentPreference("GreenBoxMinHeight", "100");
+            PathPrefs.createPersistentPreference("GreenBoxMinHeight", "20");
 
     public static double getGreenThreshold() {
         return Double.parseDouble(greenThresholdSaved.getValue());

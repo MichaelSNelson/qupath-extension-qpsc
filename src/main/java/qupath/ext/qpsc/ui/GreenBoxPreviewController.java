@@ -148,6 +148,26 @@ public class GreenBoxPreviewController {
                 hueMax.setEditable(true);
                 hueMax.setPrefWidth(80);
 
+                Spinner<Integer> minBoxWidth = new Spinner<>(10, 500, params.minBoxWidth, 10);
+                minBoxWidth.setEditable(true);
+                minBoxWidth.setPrefWidth(80);
+
+                Spinner<Integer> minBoxHeight = new Spinner<>(10, 500, params.minBoxHeight, 10);
+                minBoxHeight.setEditable(true);
+                minBoxHeight.setPrefWidth(80);
+
+                Spinner<Double> saturationMin = new Spinner<>(0.0, 1.0, params.saturationMin, 0.05);
+                saturationMin.setEditable(true);
+                saturationMin.setPrefWidth(80);
+
+                Spinner<Double> brightnessMin = new Spinner<>(0.0, 1.0, params.brightnessMin, 0.05);
+                brightnessMin.setEditable(true);
+                brightnessMin.setPrefWidth(80);
+
+                Spinner<Double> brightnessMax = new Spinner<>(0.0, 1.0, params.brightnessMax, 0.05);
+                brightnessMax.setEditable(true);
+                brightnessMax.setPrefWidth(80);
+
                 Label statusLabel = new Label("Click 'Detect Green Box' to preview detection");
                 statusLabel.setStyle("-fx-text-fill: gray");
 
@@ -159,9 +179,16 @@ public class GreenBoxPreviewController {
                     params.greenThreshold = greenThreshold.getValue();
                     params.hueMin = hueMin.getValue();
                     params.hueMax = hueMax.getValue();
+                    params.minBoxWidth = minBoxWidth.getValue();
+                    params.minBoxHeight = minBoxHeight.getValue();
+                    params.saturationMin = saturationMin.getValue();
+                    params.brightnessMin = brightnessMin.getValue();
+                    params.brightnessMax = brightnessMax.getValue();
 
-                    logger.info("Running green box detection - Edge: {}, Threshold: {}, Hue: [{}, {}]",
-                            params.edgeThickness, params.greenThreshold, params.hueMin, params.hueMax);
+                    logger.info("Running green box detection - Edge: {}, Threshold: {}, Hue: [{}, {}], MinBox: {}x{}, Sat: {}, Bright: [{}, {}]",
+                            params.edgeThickness, params.greenThreshold, params.hueMin, params.hueMax,
+                            params.minBoxWidth, params.minBoxHeight,
+                            params.saturationMin, params.brightnessMin, params.brightnessMax);
 
                     // Perform detection
                     var result = GreenBoxDetector.detectGreenBox(macroImage, params);
@@ -247,7 +274,12 @@ public class GreenBoxPreviewController {
                         new HBox(10, new Label("Edge thickness:"), edgeThickness, new Label("pixels")),
                         new HBox(10, new Label("Green threshold:"), greenThreshold),
                         new HBox(10, new Label("Hue min:"), hueMin, new Label("(0.0-1.0)")),
-                        new HBox(10, new Label("Hue max:"), hueMax, new Label("(0.0-1.0)"))
+                        new HBox(10, new Label("Hue max:"), hueMax, new Label("(0.0-1.0)")),
+                        new HBox(10, new Label("Min box width:"), minBoxWidth, new Label("pixels")),
+                        new HBox(10, new Label("Min box height:"), minBoxHeight, new Label("pixels")),
+                        new HBox(10, new Label("Saturation min:"), saturationMin, new Label("(0.0-1.0)")),
+                        new HBox(10, new Label("Brightness min:"), brightnessMin, new Label("(0.0-1.0)")),
+                        new HBox(10, new Label("Brightness max:"), brightnessMax, new Label("(0.0-1.0)"))
                 );
 
                 // Buttons

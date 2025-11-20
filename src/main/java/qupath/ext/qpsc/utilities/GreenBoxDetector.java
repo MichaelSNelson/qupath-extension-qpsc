@@ -82,8 +82,8 @@ public class GreenBoxDetector {
             this.brightnessMax = 0.9;
             this.hueMin = 0.25;  // Green hue range start (90 degrees)
             this.hueMax = 0.42;  // Green hue range end (151 degrees)
-            this.minBoxWidth = 100;
-            this.minBoxHeight = 100;
+            this.minBoxWidth = 20;   // Lowered to support small tissue samples
+            this.minBoxHeight = 20;  // Lowered to support small tissue samples
             this.edgeThickness = 3;
         }
 
@@ -343,7 +343,8 @@ public class GreenBoxDetector {
                     }
                     int endX = x;
 
-                    if (endX - startX > params.minBoxWidth) {
+                    // Accept edges that are at least 80% of minBoxWidth to handle smaller boxes
+                    if (endX - startX >= params.minBoxWidth * 0.8) {
                         edges.add(new Rectangle(startX, y, endX - startX, params.edgeThickness));
                     }
                 }
@@ -361,7 +362,8 @@ public class GreenBoxDetector {
                     }
                     int endY = y;
 
-                    if (endY - startY > params.minBoxHeight) {
+                    // Accept edges that are at least 80% of minBoxHeight to handle smaller boxes
+                    if (endY - startY >= params.minBoxHeight * 0.8) {
                         edges.add(new Rectangle(x, startY, params.edgeThickness, endY - startY));
                     }
                 }
