@@ -396,28 +396,32 @@ public class MacroImageUtility {
     /**
      * Retrieves macro image with fallback to saved version.
      * First attempts to get the macro image from the current slide's associated images.
-     * If not found and a sample name is provided, attempts to load a previously saved macro image.
+     * If not found, attempts to load a previously saved macro image using the IMAGE name.
      *
      * @param gui QuPath GUI instance
-     * @param sampleName Sample name for saved image lookup (optional, can be null)
+     * @param sampleName Sample name (DEPRECATED - now uses image name instead)
      * @return The macro image (either from slide or saved version), or null if neither is available
      */
     public static BufferedImage retrieveMacroImageWithFallback(QuPathGUI gui, String sampleName) {
         // First try to get from the current image
         BufferedImage macroImage = retrieveMacroImage(gui);
 
-        if (macroImage == null && sampleName != null && gui.getProject() != null) {
-            // Try to load saved macro image
+        if (macroImage == null && gui.getProject() != null && gui.getImageData() != null) {
+            // Get the image name (without extension) from the current image
+            String fullImageName = gui.getImageData().getServer().getMetadata().getName();
+            String imageName = qupath.lib.common.GeneralTools.stripExtension(fullImageName);
+
+            // Try to load saved macro image using IMAGE name (not sample name)
             logger.info("No macro image in slide, checking for saved version...");
             macroImage = AffineTransformManager.loadSavedMacroImage(
                     (Project<BufferedImage>) gui.getProject(),
-                    sampleName
+                    imageName
             );
 
             if (macroImage != null) {
-                logger.info("Successfully loaded saved macro image for sample: {}", sampleName);
+                logger.info("Successfully loaded saved macro image for image: {}", imageName);
             } else {
-                logger.debug("No saved macro image found for sample: {}", sampleName);
+                logger.debug("No saved macro image found for image: {}", imageName);
             }
         }
 

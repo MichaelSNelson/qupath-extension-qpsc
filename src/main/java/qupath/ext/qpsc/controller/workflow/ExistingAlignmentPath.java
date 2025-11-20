@@ -375,7 +375,8 @@ public class ExistingAlignmentPath {
      * Performs single-tile refinement if requested.
      *
      * <p>Allows the user to manually adjust alignment using a single tile
-     * for improved accuracy.
+     * for improved accuracy. The selected tile is stored in the workflow state
+     * to ensure its parent annotation is acquired first (so the sample is already in focus).
      *
      * @return CompletableFuture containing the refined workflow state
      */
@@ -391,10 +392,16 @@ public class ExistingAlignmentPath {
 
         return SingleTileRefinement.performRefinement(
                 gui, state.annotations, state.transform
-        ).thenApply(refinedTransform -> {
-            if (refinedTransform != null) {
-                state.transform = refinedTransform;
-                MicroscopeController.getInstance().setCurrentTransform(refinedTransform);
+        ).thenApply(result -> {
+            if (result.transform != null) {
+                state.transform = result.transform;
+                MicroscopeController.getInstance().setCurrentTransform(result.transform);
+            }
+            // Store the selected refinement tile for acquisition prioritization
+            state.refinementTile = result.selectedTile;
+            if (result.selectedTile != null) {
+                logger.info("Stored refinement tile '{}' for acquisition prioritization",
+                        result.selectedTile.getName());
             }
             saveSlideAlignment(context);
             return state;
@@ -405,24 +412,36 @@ public class ExistingAlignmentPath {
      * Saves the slide-specific alignment.
      *
      * <p>Saves the transform to the project for future reuse with this
-     * specific slide.
+     * specific slide. Uses the IMAGE name (not sample/project name) for storage.
      */
     private void saveSlideAlignment(GreenBoxContext context) {
         @SuppressWarnings("unchecked")
         Project<BufferedImage> project = (Project<BufferedImage>) state.projectInfo.getCurrentProject();
+
+        // Get the image name (without extension) from the current image
+        String imageName = null;
+        if (gui.getImageData() != null) {
+            String fullImageName = gui.getImageData().getServer().getMetadata().getName();
+            imageName = qupath.lib.common.GeneralTools.stripExtension(fullImageName);
+        }
+
+        if (imageName == null) {
+            logger.error("Cannot save slide alignment - no image name available");
+            return;
+        }
 
         // Get the processed macro image from the state
         BufferedImage processedMacroImage = context.getProcessedMacroImage();
 
         AffineTransformManager.saveSlideAlignment(
                 project,
-                state.sample.sampleName(),
+                imageName,  // Use image name instead of sample name
                 state.sample.modality(),
                 state.transform,
                 processedMacroImage
 
         );
-        logger.info("Saved slide-specific alignment");
+        logger.info("Saved slide-specific alignment for image: {}", imageName);
     }
 
     // Helper methods

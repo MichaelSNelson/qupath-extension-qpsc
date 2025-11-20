@@ -58,33 +58,47 @@ public class AlignmentHelper {
 
         CompletableFuture<AffineTransform> future = new CompletableFuture<>();
 
-        logger.info("Checking for slide-specific alignment for sample: {}", sample.sampleName());
+        // Get the image name (without extension) from the current image
+        String imageName = null;
+        if (gui.getImageData() != null) {
+            String fullImageName = gui.getImageData().getServer().getMetadata().getName();
+            imageName = qupath.lib.common.GeneralTools.stripExtension(fullImageName);
+        }
 
-        // Try to load slide-specific alignment
+        if (imageName == null) {
+            logger.warn("No image is currently open, cannot check for slide alignment");
+            future.complete(null);
+            return future;
+        }
+
+        logger.info("Checking for slide-specific alignment for image: {}", imageName);
+
+        // Try to load slide-specific alignment using IMAGE name (not sample name)
         AffineTransform slideTransform = null;
 
         // First try from current project
         Project<BufferedImage> project = gui.getProject();
         if (project != null) {
-            slideTransform = AffineTransformManager.loadSlideAlignment(project, sample.sampleName());
+            slideTransform = AffineTransformManager.loadSlideAlignment(project, imageName);
         } else {
             // Try from project directory if no project is open
             File projectDir = new File(sample.projectsFolder(), sample.sampleName());
             if (projectDir.exists()) {
                 slideTransform = AffineTransformManager.loadSlideAlignmentFromDirectory(
-                        projectDir, sample.sampleName());
+                        projectDir, imageName);
             }
         }
 
         if (slideTransform != null) {
             logger.info("Found existing slide-specific alignment");
             AffineTransform finalTransform = slideTransform;
+            String finalImageName = imageName;  // Make final for lambda
 
             // Show dialog on JavaFX thread
             Platform.runLater(() -> {
                 Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
                 alert.setTitle("Existing Slide Alignment Found");
-                alert.setHeaderText("Found existing alignment for slide '" + sample.sampleName() + "'");
+                alert.setHeaderText("Found existing alignment for image '" + finalImageName + "'");
                 alert.setContentText(
                         "Would you like to use the existing slide alignment?\n\n" +
                                 "Choose 'Yes' to proceed directly to acquisition.\n" +

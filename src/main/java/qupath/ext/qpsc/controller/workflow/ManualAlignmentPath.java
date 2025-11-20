@@ -207,15 +207,26 @@ public class ManualAlignmentPath {
             @SuppressWarnings("unchecked")
             Project<BufferedImage> project = (Project<BufferedImage>) state.projectInfo.getCurrentProject();
 
-            AffineTransformManager.saveSlideAlignment(
-                    project,
-                    state.sample.sampleName(),
-                    state.sample.modality(),
-                    transform,
-                    null
-            );
+            // Get the image name (without extension) from the current image
+            String imageName = null;
+            if (gui.getImageData() != null) {
+                String fullImageName = gui.getImageData().getServer().getMetadata().getName();
+                imageName = qupath.lib.common.GeneralTools.stripExtension(fullImageName);
+            }
 
-            logger.info("Saved slide-specific transform");
+            if (imageName != null) {
+                AffineTransformManager.saveSlideAlignment(
+                        project,
+                        imageName,  // Use image name instead of sample name
+                        state.sample.modality(),
+                        transform,
+                        null
+                );
+                logger.info("Saved slide-specific transform for image: {}", imageName);
+            } else {
+                logger.warn("Cannot save slide-specific transform - no image name available");
+            }
+
             return state;
         });
     }

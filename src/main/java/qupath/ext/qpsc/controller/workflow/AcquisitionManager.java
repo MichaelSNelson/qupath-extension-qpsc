@@ -357,9 +357,12 @@ public class AcquisitionManager {
             return CompletableFuture.completedFuture(false);
         }
 
+        // Reorder annotations to prioritize the one containing the refinement tile (if any)
+        prioritizeRefinementAnnotation();
+
         // Show initial progress notification
         showAcquisitionStartNotification(angleExposures);
-        
+
         // Create and show dual progress dialog on JavaFX Application Thread
         CompletableFuture<DualProgressDialog> dialogSetup = new CompletableFuture<>();
         Platform.runLater(() -> {
@@ -843,6 +846,51 @@ public class AcquisitionManager {
             logger.error("Failed to estimate tile count, defaulting to 1", e);
             return 1; // Safe default to prevent division by zero
         }
+    }
+
+    /**
+     * Reorders annotations to prioritize the one containing the refinement tile.
+     *
+     * <p>If a refinement tile was selected during alignment, this method finds the
+     * annotation that contains that tile and moves it to the front of the acquisition
+     * list. This ensures the sample is already in focus from the alignment when
+     * the first annotation is acquired.
+     */
+    private void prioritizeRefinementAnnotation() {
+        if (state.refinementTile == null) {
+            logger.debug("No refinement tile to prioritize");
+            return;
+        }
+
+        // Find the annotation that contains the refinement tile
+        PathObject parentAnnotation = state.refinementTile.getParent();
+
+        if (parentAnnotation == null) {
+            logger.warn("Refinement tile has no parent annotation");
+            return;
+        }
+
+        // Check if this annotation is in our list
+        int annotationIndex = state.annotations.indexOf(parentAnnotation);
+
+        if (annotationIndex == -1) {
+            logger.warn("Refinement tile's parent annotation '{}' not found in acquisition list",
+                    parentAnnotation.getName());
+            return;
+        }
+
+        if (annotationIndex == 0) {
+            logger.info("Refinement annotation '{}' is already first in acquisition order",
+                    parentAnnotation.getName());
+            return;
+        }
+
+        // Move the annotation to the front
+        state.annotations.remove(annotationIndex);
+        state.annotations.add(0, parentAnnotation);
+
+        logger.info("Prioritized annotation '{}' to be acquired first (contains refinement tile '{}')",
+                parentAnnotation.getName(), state.refinementTile.getName());
     }
 
     // UI notification methods

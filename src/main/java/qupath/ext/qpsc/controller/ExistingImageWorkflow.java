@@ -398,6 +398,7 @@ public class ExistingImageWorkflow {
         public double pixelSize;
         public List<String> selectedAnnotationClasses = Arrays.asList("Tissue", "Scanned Area", "Bounding Box");
         public java.util.Map<String, Double> angleOverrides; // User-specified angle overrides for modality
+        public PathObject refinementTile = null; // Tile used for alignment refinement (to prioritize in acquisition)
 
     }
 }

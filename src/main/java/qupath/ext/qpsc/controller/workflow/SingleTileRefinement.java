@@ -41,6 +41,19 @@ public class SingleTileRefinement {
     private static final Logger logger = LoggerFactory.getLogger(SingleTileRefinement.class);
 
     /**
+     * Result of refinement containing both the transform and the selected tile.
+     */
+    public static class RefinementResult {
+        public final AffineTransform transform;
+        public final PathObject selectedTile;
+
+        public RefinementResult(AffineTransform transform, PathObject selectedTile) {
+            this.transform = transform;
+            this.selectedTile = selectedTile;
+        }
+    }
+
+    /**
      * Performs single-tile refinement of alignment.
      *
      * <p>This method:
@@ -54,14 +67,14 @@ public class SingleTileRefinement {
      * @param gui QuPath GUI instance
      * @param annotations List of annotations containing tiles
      * @param initialTransform Initial transform to refine
-     * @return CompletableFuture with refined transform, or initial if cancelled
+     * @return CompletableFuture with RefinementResult containing refined transform and selected tile
      */
-    public static CompletableFuture<AffineTransform> performRefinement(
+    public static CompletableFuture<RefinementResult> performRefinement(
             QuPathGUI gui,
             List<PathObject> annotations,
             AffineTransform initialTransform) {
 
-        CompletableFuture<AffineTransform> future = new CompletableFuture<>();
+        CompletableFuture<RefinementResult> future = new CompletableFuture<>();
 
         logger.info("Starting single-tile refinement");
 
@@ -73,7 +86,7 @@ public class SingleTileRefinement {
         ).thenAccept(selectedTile -> {
             if (selectedTile == null) {
                 logger.info("User cancelled tile selection");
-                future.complete(initialTransform);
+                future.complete(new RefinementResult(initialTransform, null));
                 return;
             }
 
@@ -86,7 +99,7 @@ public class SingleTileRefinement {
                             "Error during refinement: " + e.getMessage(),
                             "Refinement Error"
                     );
-                    future.complete(initialTransform);
+                    future.complete(new RefinementResult(initialTransform, selectedTile));
                 }
             });
         });
@@ -110,14 +123,14 @@ public class SingleTileRefinement {
      * @param gui QuPath GUI instance
      * @param selectedTile The tile selected for refinement
      * @param initialTransform Initial transform
-     * @param future Future to complete with refined transform
+     * @param future Future to complete with RefinementResult
      * @throws Exception if refinement fails
      */
     private static void performTileRefinement(
             QuPathGUI gui,
             PathObject selectedTile,
             AffineTransform initialTransform,
-            CompletableFuture<AffineTransform> future) throws Exception {
+            CompletableFuture<RefinementResult> future) throws Exception {
 
         // Get tile coordinates
         double[] tileCoords = {
@@ -145,7 +158,7 @@ public class SingleTileRefinement {
         Thread.sleep(500);
 
         // Show refinement dialog
-        showRefinementDialog(tileCoords, initialTransform, future);
+        showRefinementDialog(tileCoords, initialTransform, selectedTile, future);
     }
 
 
@@ -178,13 +191,15 @@ public class SingleTileRefinement {
      *
      * @param tileCoords Original tile coordinates in QuPath
      * @param initialTransform Initial transform
+     * @param selectedTile The tile that was selected for refinement
      * @param future Future to complete with result
      * @throws IOException if stage position cannot be read
      */
     private static void showRefinementDialog(
             double[] tileCoords,
             AffineTransform initialTransform,
-            CompletableFuture<AffineTransform> future) throws IOException {
+            PathObject selectedTile,
+            CompletableFuture<RefinementResult> future) throws IOException {
 
         Alert dialog = new Alert(Alert.AlertType.CONFIRMATION);
         dialog.setTitle("Refine Alignment");
@@ -222,19 +237,19 @@ public class SingleTileRefinement {
                         "The alignment has been refined and saved for this slide."
                 );
 
-                future.complete(refinedTransform);
+                future.complete(new RefinementResult(refinedTransform, selectedTile));
 
             } else if (result.get() == skipButton) {
                 logger.info("User skipped refinement");
-                future.complete(initialTransform);
+                future.complete(new RefinementResult(initialTransform, selectedTile));
 
             } else if (result.get() == newAlignmentButton) {
                 logger.info("User requested new alignment");
-                future.complete(null); // Signal to switch to manual alignment
+                future.complete(new RefinementResult(null, selectedTile)); // Signal to switch to manual alignment
             }
         } else {
             // Dialog closed without selection
-            future.complete(initialTransform);
+            future.complete(new RefinementResult(initialTransform, selectedTile));
         }
     }
 }
