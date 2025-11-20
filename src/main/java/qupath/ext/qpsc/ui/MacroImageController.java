@@ -273,6 +273,18 @@ public class MacroImageController {
         minHeightSpinner.setEditable(true);
         minHeightSpinner.setPrefWidth(100);
 
+        Label hueMinLabel = new Label("Hue Min:");
+        Spinner<Double> hueMinSpinner = new Spinner<>(0.0, 1.0,
+                PersistentPreferences.getGreenHueMin(), 0.01);
+        hueMinSpinner.setEditable(true);
+        hueMinSpinner.setPrefWidth(100);
+
+        Label hueMaxLabel = new Label("Hue Max:");
+        Spinner<Double> hueMaxSpinner = new Spinner<>(0.0, 1.0,
+                PersistentPreferences.getGreenHueMax(), 0.01);
+        hueMaxSpinner.setEditable(true);
+        hueMaxSpinner.setPrefWidth(100);
+
         // CHANGED: Add spinners to grid in 3 columns instead of 2
         int row = 0;
 
@@ -294,9 +306,15 @@ public class MacroImageController {
         paramsGrid.add(minHeightLabel, 2, row);
         paramsGrid.add(minHeightSpinner, 3, row++);
 
-        // Row 3: Brightness Max (left column only)
+        // Row 3: Brightness Max and Hue Min
         paramsGrid.add(brightnessMaxLabel, 0, row);
-        paramsGrid.add(brightnessMaxSpinner, 1, row++);
+        paramsGrid.add(brightnessMaxSpinner, 1, row);
+        paramsGrid.add(hueMinLabel, 2, row);
+        paramsGrid.add(hueMinSpinner, 3, row++);
+
+        // Row 4: Hue Max (left column only)
+        paramsGrid.add(hueMaxLabel, 0, row);
+        paramsGrid.add(hueMaxSpinner, 1, row++);
 
         // Add value change listeners to save preferences
         greenThresholdSpinner.valueProperty().addListener((obs, old, val) -> {
@@ -332,6 +350,16 @@ public class MacroImageController {
         minHeightSpinner.valueProperty().addListener((obs, old, val) -> {
             PersistentPreferences.setGreenMinBoxHeight(val);
             logger.debug("Green min box height updated to: {}", val);
+        });
+
+        hueMinSpinner.valueProperty().addListener((obs, old, val) -> {
+            PersistentPreferences.setGreenHueMin(val);
+            logger.debug("Green hue min updated to: {}", val);
+        });
+
+        hueMaxSpinner.valueProperty().addListener((obs, old, val) -> {
+            PersistentPreferences.setGreenHueMax(val);
+            logger.debug("Green hue max updated to: {}", val);
         });
 
         // Bind enable state
@@ -516,16 +544,18 @@ public class MacroImageController {
         VBox.setVgrow(imageScroll, Priority.ALWAYS);
 
         // Store components for retrieval
-        content.setUserData(Map.of(
-                "enable", enableGreenBox,
-                "greenThreshold", greenThresholdSpinner,
-                "saturation", saturationSpinner,
-                "brightnessMin", brightnessMinSpinner,
-                "brightnessMax", brightnessMaxSpinner,
-                "edgeThickness", edgeThicknessSpinner,
-                "minWidth", minWidthSpinner,
-                "minHeight", minHeightSpinner
-        ));
+        Map<String, Object> greenBoxData = new HashMap<>();
+        greenBoxData.put("enable", enableGreenBox);
+        greenBoxData.put("greenThreshold", greenThresholdSpinner);
+        greenBoxData.put("saturation", saturationSpinner);
+        greenBoxData.put("brightnessMin", brightnessMinSpinner);
+        greenBoxData.put("brightnessMax", brightnessMaxSpinner);
+        greenBoxData.put("edgeThickness", edgeThicknessSpinner);
+        greenBoxData.put("minWidth", minWidthSpinner);
+        greenBoxData.put("minHeight", minHeightSpinner);
+        greenBoxData.put("hueMin", hueMinSpinner);
+        greenBoxData.put("hueMax", hueMaxSpinner);
+        content.setUserData(greenBoxData);
 
         tab.setContent(content);
         return tab;
@@ -1406,6 +1436,10 @@ public class MacroImageController {
         Spinner<Double> brightnessMinSpinner = (Spinner<Double>) greenBoxData.get("brightnessMin");
         Spinner<Double> brightnessMaxSpinner = (Spinner<Double>) greenBoxData.get("brightnessMax");
         Spinner<Integer> edgeThicknessSpinner = (Spinner<Integer>) greenBoxData.get("edgeThickness");
+        Spinner<Integer> minWidthSpinner = (Spinner<Integer>) greenBoxData.get("minWidth");
+        Spinner<Integer> minHeightSpinner = (Spinner<Integer>) greenBoxData.get("minHeight");
+        Spinner<Double> hueMinSpinner = (Spinner<Double>) greenBoxData.get("hueMin");
+        Spinner<Double> hueMaxSpinner = (Spinner<Double>) greenBoxData.get("hueMax");
 
         GreenBoxDetector.DetectionParams greenBoxParams = new GreenBoxDetector.DetectionParams();
         greenBoxParams.greenThreshold = greenThresholdSpinner.getValue();
@@ -1413,6 +1447,10 @@ public class MacroImageController {
         greenBoxParams.brightnessMin = brightnessMinSpinner.getValue();
         greenBoxParams.brightnessMax = brightnessMaxSpinner.getValue();
         greenBoxParams.edgeThickness = edgeThicknessSpinner.getValue();
+        greenBoxParams.minBoxWidth = minWidthSpinner.getValue();
+        greenBoxParams.minBoxHeight = minHeightSpinner.getValue();
+        greenBoxParams.hueMin = hueMinSpinner.getValue();
+        greenBoxParams.hueMax = hueMaxSpinner.getValue();
 
         // Get threshold settings
         var thresholdData = (Map<String, Object>) thresholdTab.getContent().getUserData();
