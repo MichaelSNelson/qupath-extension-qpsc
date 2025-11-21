@@ -439,8 +439,8 @@ public class MacroImageController {
             brightnessMinSpinner.getValueFactory().setValue(0.3);
             brightnessMaxSpinner.getValueFactory().setValue(0.9);
             edgeThicknessSpinner.getValueFactory().setValue(3);
-            minWidthSpinner.getValueFactory().setValue(100);
-            minHeightSpinner.getValueFactory().setValue(100);
+            minWidthSpinner.getValueFactory().setValue(20);
+            minHeightSpinner.getValueFactory().setValue(20);
         });
 
         previewButton.setOnAction(e -> {
