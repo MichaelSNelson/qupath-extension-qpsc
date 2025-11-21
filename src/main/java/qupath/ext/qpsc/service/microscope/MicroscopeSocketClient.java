@@ -941,8 +941,9 @@ public class MicroscopeSocketClient implements AutoCloseable {
             try {
                 originalTimeout = socket.getSoTimeout();
                 // Increase timeout for calibration (can take several minutes)
-                socket.setSoTimeout(300000); // 5 minutes
-                logger.debug("Increased socket timeout to 5 minutes for calibration");
+                // With stability check (3 runs), each run takes ~2-3 minutes, so allow 15 minutes total
+                socket.setSoTimeout(900000); // 15 minutes
+                logger.debug("Increased socket timeout to 15 minutes for calibration");
             } catch (IOException e) {
                 logger.warn("Failed to adjust socket timeout", e);
             }
