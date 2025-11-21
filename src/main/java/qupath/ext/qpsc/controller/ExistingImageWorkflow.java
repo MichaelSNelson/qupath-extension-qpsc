@@ -168,10 +168,15 @@ public class ExistingImageWorkflow {
             logger.info("Checking for existing slide alignment");
 
             return AlignmentHelper.checkForSlideAlignment(gui, state.sample)
-                    .thenApply(slideTransform -> {
-                        if (slideTransform != null) {
+                    .thenApply(slideAlignmentResult -> {
+                        if (slideAlignmentResult != null) {
                             state.useExistingSlideAlignment = true;
-                            state.transform = slideTransform;
+                            state.transform = slideAlignmentResult.getTransform();
+                            // Store whether refinement was requested
+                            if (slideAlignmentResult.isRefineRequested()) {
+                                logger.info("User requested refinement of existing slide alignment");
+                                state.slideAlignmentNeedsRefinement = true;
+                            }
                         }
                         return state;
                     });
@@ -195,6 +200,7 @@ public class ExistingImageWorkflow {
 
         /**
          * Fast path processing for existing slide alignment.
+         * If refinement was requested, performs single-tile refinement after setup.
          */
         private CompletableFuture<WorkflowState> processExistingSlideAlignment(WorkflowState state) {
             logger.info("Using existing slide-specific alignment - fast path");
@@ -219,15 +225,81 @@ public class ExistingImageWorkflow {
                             throw new RuntimeException("Image validation failed");
                         }
 
-                        state.annotations = AnnotationHelper.ensureAnnotationsExist(gui,
-                                getPixelSizeFromPreferences());
+                        state.pixelSize = getPixelSizeFromPreferences();
+                        state.annotations = AnnotationHelper.ensureAnnotationsExist(gui, state.pixelSize);
 
                         if (state.annotations.isEmpty()) {
                             throw new RuntimeException("No valid annotations found");
                         }
 
                         return state;
+                    })
+                    .thenCompose(currentState -> {
+                        // If refinement was requested, perform it now
+                        if (state.slideAlignmentNeedsRefinement) {
+                            logger.info("Performing single-tile refinement of existing alignment");
+                            return performSlideAlignmentRefinement();
+                        } else {
+                            return CompletableFuture.completedFuture(currentState);
+                        }
                     });
+        }
+
+        /**
+         * Performs single-tile refinement on existing slide alignment.
+         * Creates tiles and prompts user to select one for refinement.
+         */
+        private CompletableFuture<WorkflowState> performSlideAlignmentRefinement() {
+            // Create tiles for refinement
+            TileHelper.createTilesForAnnotations(
+                    state.annotations,
+                    state.sample,
+                    state.projectInfo.getTempTileDirectory(),
+                    state.projectInfo.getImagingModeWithIndex(),
+                    state.pixelSize
+            );
+
+            return SingleTileRefinement.performRefinement(
+                    gui, state.annotations, state.transform
+            ).thenApply(result -> {
+                if (result.transform != null) {
+                    state.transform = result.transform;
+                    MicroscopeController.getInstance().setCurrentTransform(result.transform);
+                    logger.info("Updated transform with refined alignment");
+                }
+                // Store the selected refinement tile for acquisition prioritization
+                state.refinementTile = result.selectedTile;
+                if (result.selectedTile != null) {
+                    logger.info("Stored refinement tile '{}' for acquisition prioritization",
+                            result.selectedTile.getName());
+                }
+
+                // Save the refined alignment
+                @SuppressWarnings("unchecked")
+                Project<BufferedImage> project = (Project<BufferedImage>) state.projectInfo.getCurrentProject();
+
+                // Get the image name (without extension) from the current image
+                String imageName = null;
+                if (gui.getImageData() != null) {
+                    String fullImageName = gui.getImageData().getServer().getMetadata().getName();
+                    imageName = qupath.lib.common.GeneralTools.stripExtension(fullImageName);
+                }
+
+                if (imageName != null) {
+                    AffineTransformManager.saveSlideAlignment(
+                            project,
+                            imageName,
+                            state.sample.modality(),
+                            state.transform,
+                            null  // No processed macro image for fast path refinement
+                    );
+                    logger.info("Saved refined slide-specific alignment for image: {}", imageName);
+                } else {
+                    logger.warn("Cannot save refined alignment - no image name available");
+                }
+
+                return state;
+            });
         }
 
         /**
@@ -394,6 +466,7 @@ public class ExistingImageWorkflow {
         public List<PathObject> annotations = new ArrayList<>();
         public List<CompletableFuture<Void>> stitchingFutures = new ArrayList<>();
         public boolean useExistingSlideAlignment = false;
+        public boolean slideAlignmentNeedsRefinement = false; // User requested refinement of existing slide alignment
         public boolean cancelled = false; // Tracks user cancellation
         public double pixelSize;
         public List<String> selectedAnnotationClasses = Arrays.asList("Tissue", "Scanned Area", "Bounding Box");

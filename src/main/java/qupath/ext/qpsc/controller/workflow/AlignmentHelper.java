@@ -37,26 +37,47 @@ public class AlignmentHelper {
     private static final Logger logger = LoggerFactory.getLogger(AlignmentHelper.class);
 
     /**
+     * Result from checking for existing slide alignment.
+     */
+    public static class SlideAlignmentResult {
+        private final AffineTransform transform;
+        private final boolean refineRequested;
+
+        public SlideAlignmentResult(AffineTransform transform, boolean refineRequested) {
+            this.transform = transform;
+            this.refineRequested = refineRequested;
+        }
+
+        public AffineTransform getTransform() {
+            return transform;
+        }
+
+        public boolean isRefineRequested() {
+            return refineRequested;
+        }
+    }
+
+    /**
      * Checks for existing slide-specific alignment and prompts user.
      *
      * <p>This method:
      * <ol>
      *   <li>Attempts to load a saved alignment for the specific slide</li>
-     *   <li>If found, prompts the user to reuse or create new alignment</li>
-     *   <li>Returns the loaded transform or null if user chooses new alignment</li>
+     *   <li>If found, prompts the user with three options: use as-is, refine with single tile, or start over</li>
+     *   <li>Returns the result containing the transform and whether refinement was requested</li>
      * </ol>
      *
-     * <p>The alignment is slide-specific, meaning it's saved per sample name and includes
+     * <p>The alignment is slide-specific, meaning it's saved per image name and includes
      * any refinements made during previous acquisitions.
      *
      * @param gui QuPath GUI instance
      * @param sample Sample setup information including name and project location
-     * @return CompletableFuture containing the loaded transform or null
+     * @return CompletableFuture containing the SlideAlignmentResult or null if starting over
      */
-    public static CompletableFuture<AffineTransform> checkForSlideAlignment(
+    public static CompletableFuture<SlideAlignmentResult> checkForSlideAlignment(
             QuPathGUI gui, SampleSetupController.SampleSetupResult sample) {
 
-        CompletableFuture<AffineTransform> future = new CompletableFuture<>();
+        CompletableFuture<SlideAlignmentResult> future = new CompletableFuture<>();
 
         // Get the image name (without extension) from the current image
         String imageName = null;
@@ -100,21 +121,33 @@ public class AlignmentHelper {
                 alert.setTitle("Existing Slide Alignment Found");
                 alert.setHeaderText("Found existing alignment for image '" + finalImageName + "'");
                 alert.setContentText(
-                        "Would you like to use the existing slide alignment?\n\n" +
-                                "Choose 'Yes' to proceed directly to acquisition.\n" +
-                                "Choose 'No' to select a different alignment or create a new one."
+                        "An existing alignment was found for this image.\n\n" +
+                                "How would you like to proceed?\n\n" +
+                                "'Use Existing' - Proceed directly to acquisition with saved alignment\n" +
+                                "'Refine Alignment' - Use single-tile refinement to improve accuracy\n" +
+                                "'Start Over' - Ignore saved alignment and create new alignment"
                 );
 
-                ButtonType yesButton = new ButtonType("Yes", ButtonBar.ButtonData.YES);
-                ButtonType noButton = new ButtonType("No", ButtonBar.ButtonData.NO);
-                alert.getButtonTypes().setAll(yesButton, noButton);
+                ButtonType useExistingButton = new ButtonType("Use Existing", ButtonBar.ButtonData.YES);
+                ButtonType refineButton = new ButtonType("Refine Alignment", ButtonBar.ButtonData.OK_DONE);
+                ButtonType startOverButton = new ButtonType("Start Over", ButtonBar.ButtonData.NO);
+                alert.getButtonTypes().setAll(useExistingButton, refineButton, startOverButton);
 
                 Optional<ButtonType> result = alert.showAndWait();
-                if (result.isPresent() && result.get() == yesButton) {
-                    logger.info("User chose to reuse existing alignment");
-                    future.complete(finalTransform);
+                if (result.isPresent()) {
+                    if (result.get() == useExistingButton) {
+                        logger.info("User chose to use existing alignment as-is");
+                        future.complete(new SlideAlignmentResult(finalTransform, false));
+                    } else if (result.get() == refineButton) {
+                        logger.info("User chose to refine existing alignment with single tile");
+                        future.complete(new SlideAlignmentResult(finalTransform, true));
+                    } else {
+                        logger.info("User chose to start over with new alignment");
+                        future.complete(null);
+                    }
                 } else {
-                    logger.info("User chose to create new alignment");
+                    // Dialog closed without selection - treat as start over
+                    logger.info("Dialog closed, starting over with new alignment");
                     future.complete(null);
                 }
             });
