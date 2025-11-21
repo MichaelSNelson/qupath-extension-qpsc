@@ -309,6 +309,26 @@ public class PolarizerCalibrationWorkflow {
         logger.info("Executing polarizer calibration: {} to {} deg, step {}",
                 params.startAngle(), params.endAngle(), params.stepSize());
 
+        // Create progress dialog
+        Alert progressDialog = new Alert(Alert.AlertType.INFORMATION);
+        progressDialog.setTitle("Calibration In Progress");
+        progressDialog.setHeaderText("Polarizer Calibration Running");
+        progressDialog.setContentText(
+                "Calibration is in progress. This may take several minutes (typically 5-10 minutes).\n\n" +
+                "IMPORTANT: Check the Python server logs for detailed progress information.\n" +
+                "The logs will show:\n" +
+                "  - Coarse sweep progress (finding approximate minima)\n" +
+                "  - Fine sweep progress (refining exact positions)\n" +
+                "  - Stability check results (if enabled)\n\n" +
+                "Please wait for the calibration to complete.\n" +
+                "This dialog will close automatically when finished."
+        );
+        progressDialog.getDialogPane().setMinWidth(500);
+        progressDialog.getButtonTypes().clear(); // Remove buttons - dialog stays open until calibration completes
+
+        // Show progress dialog on JavaFX thread
+        Platform.runLater(() -> progressDialog.show());
+
         try {
             // Get socket client
             MicroscopeSocketClient socketClient = MicroscopeController.getInstance().getSocketClient();
@@ -341,6 +361,9 @@ public class PolarizerCalibrationWorkflow {
 
             logger.info("Polarizer calibration completed successfully");
             logger.info("Report saved to: {}", reportPath);
+
+            // Close progress dialog
+            Platform.runLater(() -> progressDialog.close());
 
             // Show success and offer to open report
             Platform.runLater(() -> {
@@ -384,6 +407,11 @@ public class PolarizerCalibrationWorkflow {
 
         } catch (Exception e) {
             logger.error("Polarizer calibration failed", e);
+
+            // Close progress dialog
+            Platform.runLater(() -> progressDialog.close());
+
+            // Show error
             Platform.runLater(() -> {
                 Dialogs.showErrorMessage("Calibration Failed",
                         "Failed to complete polarizer calibration:\n" + e.getMessage());
