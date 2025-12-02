@@ -86,7 +86,7 @@ public class QPProjectFunctions {
         // 2) Create or load the actual QuPath project file
         Project<BufferedImage> project = createOrLoadProject(projectsFolderPath, sampleLabel);
 
-        // Initialize metadata for backward compatibility
+        // Initialize project metadata
         ImageMetadataManager.initializeProjectMetadata(project);
 
         // 3) Import + open the current image, if any
@@ -465,7 +465,7 @@ public class QPProjectFunctions {
     }
 
     /**
-     * Adds an image to a project with basic metadata (backward compatibility).
+     * Adds an image to a project with basic metadata.
      * This is a convenience method that calls the full version with null for optional fields.
      */
     public static ProjectImageEntry<BufferedImage> addImageToProjectWithMetadata(

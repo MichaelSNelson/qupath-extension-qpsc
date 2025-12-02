@@ -40,16 +40,16 @@ import java.util.concurrent.atomic.AtomicReference;
  * 
  * <p>Usage example:
  * <pre>
- * StitchingBlockingDialog blockingDialog = StitchingBlockingDialog.show("Sample123");
- * 
+ * StitchingBlockingDialog blockingDialog = StitchingBlockingDialog.show("Sample123", "Sample123");
+ *
  * // Perform stitching operation
  * CompletableFuture.runAsync(() -> {
  *     try {
  *         // Long-running stitching operation
  *         String result = TileProcessingUtilities.stitchImagesAndUpdateProject(...);
- *         Platform.runLater(() -> blockingDialog.close()); // Close dialog when complete
+ *         Platform.runLater(() -> blockingDialog.completeOperation("Sample123"));
  *     } catch (Exception e) {
- *         Platform.runLater(() -> blockingDialog.closeWithError(e.getMessage()));
+ *         Platform.runLater(() -> blockingDialog.failOperation("Sample123", e.getMessage()));
  *     }
  * });
  * </pre>
@@ -405,13 +405,6 @@ public class StitchingBlockingDialog {
     }
 
     /**
-     * Convenience method for backward compatibility - uses operationId as displayName.
-     */
-    public static StitchingBlockingDialog show(String sampleName) {
-        return show(sampleName, sampleName);
-    }
-    
-    /**
      * Updates the status message for a specific operation.
      * This method is thread-safe and can be called from any thread.
      *
@@ -513,32 +506,6 @@ public class StitchingBlockingDialog {
         });
     }
 
-    /**
-     * Legacy method for backward compatibility - completes the operation.
-     * @deprecated Use completeOperation(operationId) instead
-     */
-    @Deprecated
-    public void close() {
-        // For backward compatibility, complete the first operation or close if empty
-        if (!activeOperations.isEmpty()) {
-            String firstId = activeOperations.keySet().iterator().next();
-            completeOperation(firstId);
-        }
-    }
-
-    /**
-     * Legacy method for backward compatibility - fails the operation with error.
-     * @deprecated Use failOperation(operationId, errorMessage) instead
-     */
-    @Deprecated
-    public void closeWithError(String errorMessage) {
-        // For backward compatibility, fail the first operation or close if empty
-        if (!activeOperations.isEmpty()) {
-            String firstId = activeOperations.keySet().iterator().next();
-            failOperation(firstId, errorMessage);
-        }
-    }
-    
     /**
      * Checks if the dialog is currently showing.
      * 

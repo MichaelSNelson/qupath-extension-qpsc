@@ -103,7 +103,7 @@
 - `microscope`: Basic microscope identity and default settings
 - `stage`: Physical stage limits and component IDs  
 - `modalities`: Imaging mode definitions and parameters
-- `acq_profiles_new`: Acquisition profiles with defaults and specific configurations
+- `acq_profiles`: Acquisition profiles with defaults and specific configurations
 
 ## Version Compatibility
 

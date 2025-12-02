@@ -313,10 +313,10 @@ public class TestAutofocusWorkflow {
                 }
             }
 
-            logger.warn("objective_in_use not found in config, checking acq_profiles_new");
+            logger.warn("objective_in_use not found in config, checking acq_profiles");
 
-            // Fallback: try to get first objective from acq_profiles_new
-            Map<String, Object> acqProfiles = (Map<String, Object>) config.get("acq_profiles_new");
+            // Fallback: try to get first objective from acq_profiles
+            Map<String, Object> acqProfiles = (Map<String, Object>) config.get("acq_profiles");
             if (acqProfiles != null) {
                 java.util.List<Map<String, Object>> defaults =
                         (java.util.List<Map<String, Object>>) acqProfiles.get("defaults");
@@ -324,7 +324,7 @@ public class TestAutofocusWorkflow {
                 if (defaults != null && !defaults.isEmpty()) {
                     Object objective = defaults.get(0).get("objective");
                     if (objective != null) {
-                        logger.info("Using first objective from acq_profiles_new: {}", objective);
+                        logger.info("Using first objective from acq_profiles: {}", objective);
                         return objective.toString();
                     }
                 }

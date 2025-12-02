@@ -113,7 +113,7 @@ public class ConfigurationAccessorTest {
         logger.info("\n--- Testing Acquisition Profiles ---");
 
         // Get all profiles
-        List<Object> profiles = mgr.getList("acq_profiles_new", "profiles");
+        List<Object> profiles = mgr.getList("acq_profiles", "profiles");
         if (profiles != null) {
             logger.info("Found {} acquisition profiles", profiles.size());
 
@@ -155,7 +155,7 @@ public class ConfigurationAccessorTest {
                 defaultDetector.isEmpty() ? "Not configured" : defaultDetector);
 
         // Test with specific detectors from profiles
-        List<Object> profiles = mgr.getList("acq_profiles_new", "profiles");
+        List<Object> profiles = mgr.getList("acq_profiles", "profiles");
         if (profiles != null && !profiles.isEmpty()) {
             // Get first profile for testing
             @SuppressWarnings("unchecked")
@@ -211,7 +211,7 @@ public class ConfigurationAccessorTest {
         logger.info("\n--- Testing Autofocus Parameters ---");
 
         // Get objectives from defaults
-        List<Object> defaults = mgr.getList("acq_profiles_new", "defaults");
+        List<Object> defaults = mgr.getList("acq_profiles", "defaults");
         if (defaults != null && !defaults.isEmpty()) {
             @SuppressWarnings("unchecked")
             Map<String, Object> firstDefault = (Map<String, Object>) defaults.get(0);

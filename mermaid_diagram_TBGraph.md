@@ -270,7 +270,6 @@ classDiagram
 
     class PPMAngleSelectionController {
         +showDialog(double, double) CompletableFuture~AngleExposureResult~
-        +showDialogLegacy(double, double) CompletableFuture~List~Double~~
         -isValidPositiveInteger(String) boolean
     }
 

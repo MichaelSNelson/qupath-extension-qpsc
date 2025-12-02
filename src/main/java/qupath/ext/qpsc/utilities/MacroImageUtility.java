@@ -399,7 +399,7 @@ public class MacroImageUtility {
      * If not found, attempts to load a previously saved macro image using the IMAGE name.
      *
      * @param gui QuPath GUI instance
-     * @param sampleName Sample name (DEPRECATED - now uses image name instead)
+     * @param sampleName Sample name (parameter ignored - uses image name instead)
      * @return The macro image (either from slide or saved version), or null if neither is available
      */
     public static BufferedImage retrieveMacroImageWithFallback(QuPathGUI gui, String sampleName) {

@@ -221,10 +221,6 @@ Projects can now contain multiple samples with distinct names:
 - Metadata tracks which images belong to which sample
 - Essential for collaborative studies with multiple specimens
 
-**Legacy Compatibility:**
-- Creating a project without an existing project: project name = sample name (old behavior preserved)
-- Drag-and-drop image without project: creates project normally (old behavior preserved)
-
 ---
 
 ## Calibration Workflows

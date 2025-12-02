@@ -181,48 +181,25 @@ public class PPMPreferences {
         try {
             MicroscopeConfigManager mgr = MicroscopeConfigManager.getInstance(
                     QPPreferenceDialog.getMicroscopeConfigFileProperty());
-            
-            List<?> profiles = mgr.getList("acq_profiles_new", "profiles");
-            if (profiles == null) {
-                logger.warn("No acquisition profiles found in configuration");
-                return false;
+
+            // Use MicroscopeConfigManager's helper method which checks imageprocessing config first
+            Map<String, Object> exposures = mgr.getModalityExposures("ppm", objective, detector);
+
+            if (exposures != null) {
+                // Load exposures for each angle
+                loadExposureForAngle(exposures, "negative", "setMinusExposureMs");
+                loadExposureForAngle(exposures, "crossed", "setZeroExposureMs");
+                loadExposureForAngle(exposures, "positive", "setPlusExposureMs");
+                loadExposureForAngle(exposures, "uncrossed", "setUncrossedExposureMs");
+
+                logger.info("Loaded PPM exposures for {}/{} from configuration",
+                           objective, detector);
+                return true;
             }
 
-            // Find matching profile for ppm modality with specified objective/detector
-            for (Object profileObj : profiles) {
-                if (profileObj instanceof Map<?, ?> profile) {
-                    Object modalityObj = profile.get("modality");
-                    Object objectiveObj = profile.get("objective");
-                    Object detectorObj = profile.get("detector");
-                    
-                    if ("ppm".equals(modalityObj) && 
-                        objective.equals(objectiveObj) && 
-                        detector.equals(detectorObj)) {
-                        
-                        // Found matching profile, extract exposures
-                        Object settingsObj = profile.get("settings");
-                        if (settingsObj instanceof Map<?, ?> settings) {
-                            Object exposuresObj = settings.get("exposures_ms");
-                            if (exposuresObj instanceof Map<?, ?> exposures) {
-                                
-                                // Load exposures for each angle
-                                loadExposureForAngle(exposures, "negative", "setMinusExposureMs");
-                                loadExposureForAngle(exposures, "crossed", "setZeroExposureMs");
-                                loadExposureForAngle(exposures, "positive", "setPlusExposureMs");
-                                loadExposureForAngle(exposures, "uncrossed", "setUncrossedExposureMs");
-                                
-                                logger.info("Loaded PPM exposures for {}/{} from configuration", 
-                                           objective, detector);
-                                return true;
-                            }
-                        }
-                    }
-                }
-            }
-            
-            logger.warn("No PPM profile found for objective {} and detector {}", objective, detector);
+            logger.warn("No PPM exposures found for objective {} and detector {}", objective, detector);
             return false;
-            
+
         } catch (Exception e) {
             logger.warn("Failed to load PPM exposures for {}/{}", objective, detector, e);
             return false;

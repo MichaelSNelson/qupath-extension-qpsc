@@ -80,8 +80,8 @@ public class AffineTransformManager {
             this.greenBoxParams = greenBoxParams;
         }
         /**
-         * Backward-compatible constructor without green box parameters.
-         * Uses default parameters.
+         * Constructor without green box parameters.
+         * Uses default detection parameters.
          */
         public TransformPreset(String name, String microscope, String mountingMethod,
                                AffineTransform transform, String notes) {
@@ -175,13 +175,11 @@ public class AffineTransformManager {
             var type = new TypeToken<Map<String, TransformPreset>>(){}.getType();
             Map<String, TransformPreset> loaded = gson.fromJson(json, type);
 
-            // Handle backward compatibility - add default green box params if missing
+            // Verify all presets have green box params
             if (loaded != null) {
                 loaded.forEach((key, preset) -> {
                     if (preset.getGreenBoxParams() == null) {
-                        logger.info("Adding default green box params to legacy transform: {}", key);
-                        // This would require making the field non-final or recreating the preset
-                        // For now, the Gson deserialization will handle it with defaults
+                        logger.warn("Transform preset {} is missing green box params", key);
                     }
                 });
             }

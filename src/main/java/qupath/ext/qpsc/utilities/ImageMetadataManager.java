@@ -226,7 +226,7 @@ public class ImageMetadataManager {
 
     /**
      * Initializes metadata for all images in a project that don't have it.
-     * Used for backward compatibility with single-sample projects.
+     * Ensures all images have proper collection and sample metadata.
      *
      * @param project The project to initialize
      */

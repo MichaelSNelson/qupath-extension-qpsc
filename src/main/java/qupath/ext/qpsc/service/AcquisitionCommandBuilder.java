@@ -38,7 +38,7 @@ public class AcquisitionCommandBuilder {
     private List<Double> backgroundCorrectionDisabledAngles = new ArrayList<>();
 
     // White balance parameters
-    private boolean whiteBalanceEnabled = true; // Default enabled for backward compatibility
+    private boolean whiteBalanceEnabled = true;
 
     // Autofocus parameters
     private Integer autofocusNTiles;

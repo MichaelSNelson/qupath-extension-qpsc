@@ -277,7 +277,7 @@ modalities:
       base_folder: "/test/backgrounds"
 
 # ========== ACQUISITION PROFILES ==========
-acq_profiles_new:
+acq_profiles:
   defaults:
     - objective: 'LOCI_OBJECTIVE_TEST_10X_001'
       settings:
@@ -304,34 +304,15 @@ acq_profiles_new:
     - modality: 'test_brightfield'
       objective: 'LOCI_OBJECTIVE_TEST_10X_001'
       detector: 'LOCI_DETECTOR_TEST_001'
-      settings:
-        exposures_ms:
-          single: 100
-        gains:
-          single: 1.0
-          
+
     - modality: 'test_brightfield'
       objective: 'LOCI_OBJECTIVE_TEST_20X_001'
       detector: 'LOCI_DETECTOR_TEST_001'
-      settings:
-        exposures_ms:
-          single: 200
-        gains:
-          r: 1.1
-          g: 1.0
-          b: 1.2
-          
+
     # PPM profiles
     - modality: 'test_ppm'
       objective: 'LOCI_OBJECTIVE_TEST_10X_001'
       detector: 'LOCI_DETECTOR_TEST_002'
-      settings:
-        exposures_ms:
-          crossed: 500
-          uncrossed: 100
-        gains:
-          crossed: {r: 1.0, g: 1.0, b: 1.0}
-          uncrossed: {r: 1.1, g: 1.0, b: 1.05}
 
 # ========== STAGE CONFIGURATION ==========
 stage:

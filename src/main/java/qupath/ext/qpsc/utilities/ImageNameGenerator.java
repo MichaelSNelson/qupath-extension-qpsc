@@ -106,54 +106,6 @@ public class ImageNameGenerator {
     }
 
     /**
-     * Generates a filename for backward compatibility with legacy naming scheme.
-     * Uses the full modality+magnification+index format.
-     *
-     * @param sampleName The sample name
-     * @param imagingModeWithIndex The imaging mode with index (e.g., "ppm_20x_1")
-     * @param annotationName The annotation name (null for bounds)
-     * @param angleSuffix The angle suffix (null if not applicable)
-     * @param extension The file extension
-     * @return The generated filename
-     */
-    public static String generateLegacyImageName(
-            String sampleName,
-            String imagingModeWithIndex,
-            String annotationName,
-            String angleSuffix,
-            String extension) {
-
-        if (sampleName == null || sampleName.isEmpty()) {
-            logger.warn("Sample name is null or empty, using 'Unknown'");
-            sampleName = "Unknown";
-        }
-
-        if (extension == null || extension.isEmpty()) {
-            extension = ".ome.tif";
-        }
-
-        StringBuilder nameBuilder = new StringBuilder();
-        nameBuilder.append(sampleName).append("_").append(imagingModeWithIndex);
-
-        // Add annotation if not "bounds"
-        if (annotationName != null && !annotationName.isEmpty()) {
-            String sanitized = sanitizeForFilename(annotationName);
-            if (!sanitized.equals("bounds")) {
-                nameBuilder.append("_").append(sanitized);
-            }
-        }
-
-        // Add angle if provided
-        if (angleSuffix != null && !angleSuffix.isEmpty()) {
-            nameBuilder.append("_").append(angleSuffix);
-        }
-
-        nameBuilder.append(extension);
-
-        return nameBuilder.toString();
-    }
-
-    /**
      * Sanitizes a string for use in filenames by replacing invalid characters with underscores.
      * Uses the same pattern as QuPath's GeneralTools.stripInvalidFilenameChars() but replaces
      * instead of removing characters for better readability.

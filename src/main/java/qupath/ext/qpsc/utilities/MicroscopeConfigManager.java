@@ -40,8 +40,12 @@ public class MicroscopeConfigManager {
     // Maps objective ID -> autofocus parameters map
     private final Map<String, Map<String, Object>> autofocusData;
 
+    // External imageprocessing settings loaded from imageprocessing_{microscope}.yml
+    // Contains imaging_profiles and background_correction settings
+    private final Map<String, Object> imageprocessingData;
+
     /**
-     * Private constructor: loads microscope YAML, shared LOCI resources, and external autofocus settings.
+     * Private constructor: loads microscope YAML, shared LOCI resources, external autofocus settings, and imageprocessing settings.
      *
      * @param configPath Filesystem path to the microscope YAML configuration file.
      */
@@ -53,6 +57,9 @@ public class MicroscopeConfigManager {
 
         // Load external autofocus settings if available
         this.autofocusData = loadAutofocusConfig(configPath);
+
+        // Load external imageprocessing settings if available
+        this.imageprocessingData = loadImageprocessingConfig(configPath);
 
         // Dynamically build field-to-section map from the top-level of resources_LOCI.yml
         this.lociSectionMap = new HashMap<>();
@@ -95,7 +102,7 @@ public class MicroscopeConfigManager {
     }
 
     /**
-     * Reloads the microscope YAML, shared LOCI resources, and external autofocus settings.
+     * Reloads the microscope YAML, shared LOCI resources, external autofocus settings, and imageprocessing settings.
      *
      * @param configPath Path to the microscope YAML file.
      */
@@ -107,6 +114,8 @@ public class MicroscopeConfigManager {
         resourceData.putAll(loadConfig(resPath));
         autofocusData.clear();
         autofocusData.putAll(loadAutofocusConfig(configPath));
+        imageprocessingData.clear();
+        imageprocessingData.putAll(loadImageprocessingConfig(configPath));
     }
 
     /**
@@ -232,6 +241,61 @@ public class MicroscopeConfigManager {
         }
 
         return autofocusMap;
+    }
+
+    /**
+     * Loads external imageprocessing configuration from imageprocessing_{microscope}.yml file.
+     * This file contains imaging profiles (exposure, gain, white balance) and background correction settings
+     * organized by modality -> objective -> detector hierarchy.
+     *
+     * @param configPath Path to the main microscope YAML file
+     * @return Map containing imageprocessing data (imaging_profiles and background_correction), or empty map if file doesn't exist
+     */
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> loadImageprocessingConfig(String configPath) {
+        Map<String, Object> imageprocessingMap = new LinkedHashMap<>();
+
+        try {
+            File configFile = new File(configPath);
+            if (!configFile.exists()) {
+                logger.debug("Config file not found for imageprocessing lookup: {}", configPath);
+                return imageprocessingMap;
+            }
+
+            // Extract microscope name from config filename (e.g., "config_PPM.yml" -> "PPM")
+            String microscopeName = extractMicroscopeName(configFile.getName());
+
+            // Construct imageprocessing config path in same directory
+            File configDir = configFile.getParentFile();
+            File imageprocessingFile = new File(configDir, "imageprocessing_" + microscopeName + ".yml");
+
+            if (!imageprocessingFile.exists()) {
+                logger.info("No external imageprocessing config file found: {}", imageprocessingFile.getAbsolutePath());
+                return imageprocessingMap;
+            }
+
+            // Load and parse imageprocessing YAML
+            Yaml yaml = new Yaml();
+            Map<String, Object> data = yaml.load(Files.newInputStream(imageprocessingFile.toPath()));
+
+            if (data != null) {
+                // Store the entire imageprocessing config
+                imageprocessingMap.putAll(data);
+
+                logger.info("Loaded external imageprocessing config from: {}", imageprocessingFile.getAbsolutePath());
+                if (data.containsKey("imaging_profiles")) {
+                    logger.debug("  - Found imaging_profiles section");
+                }
+                if (data.containsKey("background_correction")) {
+                    logger.debug("  - Found background_correction section");
+                }
+            }
+
+        } catch (Exception e) {
+            logger.warn("Error loading external imageprocessing config", e);
+        }
+
+        return imageprocessingMap;
     }
 
     /**
@@ -441,7 +505,7 @@ public class MicroscopeConfigManager {
      */
     @SuppressWarnings("unchecked")
     public Map<String, Object> getAcquisitionProfile(String modality, String objective, String detector) {
-        List<Object> profiles = getList("acq_profiles_new", "profiles");
+        List<Object> profiles = getList("acq_profiles", "profiles");
         if (profiles == null) {
             logger.warn("No acquisition profiles found in configuration");
             return null;
@@ -465,8 +529,10 @@ public class MicroscopeConfigManager {
     }
 
     /**
-     * Get a setting from acquisition profile with defaults fallback.
-     * First checks specific profile, then falls back to defaults.
+     * Get a setting from imaging profile or acquisition profile with defaults fallback.
+     * Priority order:
+     * 1. External imageprocessing_{microscope}.yml -> imaging_profiles -> modality -> objective -> detector -> settingPath
+     * 2. Main config -> acq_profiles -> defaults -> objective -> settings -> settingPath
      *
      * @param modality The modality name
      * @param objective The objective ID
@@ -476,18 +542,30 @@ public class MicroscopeConfigManager {
      */
     @SuppressWarnings("unchecked")
     public Object getProfileSetting(String modality, String objective, String detector, String... settingPath) {
-        // First check specific profile
-        Map<String, Object> profile = getAcquisitionProfile(modality, objective, detector);
-        if (profile != null && profile.containsKey("settings")) {
-            Object value = getNestedValue((Map<String, Object>) profile.get("settings"), settingPath);
-            if (value != null) {
-                logger.debug("Found setting in specific profile: {}", Arrays.toString(settingPath));
-                return value;
+        // First check external imageprocessing config
+        if (imageprocessingData != null && imageprocessingData.containsKey("imaging_profiles")) {
+            Map<String, Object> imagingProfiles = (Map<String, Object>) imageprocessingData.get("imaging_profiles");
+            if (imagingProfiles != null && imagingProfiles.containsKey(modality)) {
+                Map<String, Object> modalityProfiles = (Map<String, Object>) imagingProfiles.get(modality);
+                if (modalityProfiles != null && modalityProfiles.containsKey(objective)) {
+                    Map<String, Object> objectiveProfiles = (Map<String, Object>) modalityProfiles.get(objective);
+                    if (objectiveProfiles != null && objectiveProfiles.containsKey(detector)) {
+                        Map<String, Object> detectorProfile = (Map<String, Object>) objectiveProfiles.get(detector);
+                        if (detectorProfile != null) {
+                            Object value = getNestedValue(detectorProfile, settingPath);
+                            if (value != null) {
+                                logger.debug("Found setting in imaging_profiles: {} for {}/{}/{}",
+                                        Arrays.toString(settingPath), modality, objective, detector);
+                                return value;
+                            }
+                        }
+                    }
+                }
             }
         }
 
-        // Fall back to defaults
-        List<Object> defaults = getList("acq_profiles_new", "defaults");
+        // Fall back to defaults in main config (for settings not in imageprocessing like pixel_size_xy_um)
+        List<Object> defaults = getList("acq_profiles", "defaults");
         if (defaults != null) {
             for (Object def : defaults) {
                 if (def instanceof Map<?, ?>) {
@@ -495,7 +573,8 @@ public class MicroscopeConfigManager {
                     if (objective.equals(d.get("objective")) && d.containsKey("settings")) {
                         Object value = getNestedValue((Map<String, Object>) d.get("settings"), settingPath);
                         if (value != null) {
-                            logger.debug("Found setting in defaults: {}", Arrays.toString(settingPath));
+                            logger.debug("Found setting in acq_profiles defaults: {} for objective {}",
+                                    Arrays.toString(settingPath), objective);
                             return value;
                         }
                     }
@@ -503,7 +582,7 @@ public class MicroscopeConfigManager {
             }
         }
 
-        logger.warn("Setting not found: {} for {}/{}/{}",
+        logger.debug("Setting not found: {} for {}/{}/{}",
                 Arrays.toString(settingPath), modality, objective, detector);
         return null;
     }
@@ -592,7 +671,7 @@ public class MicroscopeConfigManager {
     public double getPixelSizeForModality(String modalityName) {
         logger.debug("Finding pixel size for modality: {}", modalityName);
 
-        List<Object> profiles = getList("acq_profiles_new", "profiles");
+        List<Object> profiles = getList("acq_profiles", "profiles");
         if (profiles == null || profiles.isEmpty()) {
             throw new IllegalArgumentException("No acquisition profiles defined in configuration");
         }
@@ -637,7 +716,7 @@ public class MicroscopeConfigManager {
      * Get autofocus parameters for a specific objective.
      * Priority order:
      * 1. External autofocus_{microscope}.yml file (preferred)
-     * 2. Embedded config: acq_profiles_new -> defaults -> settings -> autofocus
+     * 2. Embedded config: acq_profiles -> defaults -> settings -> autofocus
      *
      * @param objective The objective ID
      * @return Map of autofocus parameters, or null if not found
@@ -654,7 +733,7 @@ public class MicroscopeConfigManager {
         }
 
         // Priority 2: Check embedded config (defaults section)
-        List<Object> defaults = getList("acq_profiles_new", "defaults");
+        List<Object> defaults = getList("acq_profiles", "defaults");
         if (defaults != null) {
             for (Object def : defaults) {
                 if (def instanceof Map<?, ?>) {
@@ -805,8 +884,6 @@ public class MicroscopeConfigManager {
         logger.info("FOV for {}/{}/{}: {:.1f} x {:.1f} µm", modality, objective, detector, width, height);
         return new double[]{width, height};
     }
-
-    // ========== COMPATIBILITY METHODS ==========
 
     /**
      * Get rotation angles configuration for PPM modalities.
@@ -1077,15 +1154,24 @@ public class MicroscopeConfigManager {
 
     /**
      * Get background correction folder for a specific modality.
+     * Reads from imageprocessing_{microscope}.yml -> background_correction -> modality -> base_folder
      * Returns null if not found.
      */
+    @SuppressWarnings("unchecked")
     public String getBackgroundCorrectionFolder(String modality) {
         logger.debug("Getting background correction folder for modality: {}", modality);
 
-        // Check modality-specific setting
-        Map<String, Object> bgCorrection = getSection("modalities", modality, "background_correction");
-        if (bgCorrection != null && bgCorrection.containsKey("base_folder")) {
-            return bgCorrection.get("base_folder").toString();
+        // Check external imageprocessing config
+        if (imageprocessingData != null && imageprocessingData.containsKey("background_correction")) {
+            Map<String, Object> bgCorrection = (Map<String, Object>) imageprocessingData.get("background_correction");
+            if (bgCorrection != null && bgCorrection.containsKey(modality)) {
+                Map<String, Object> modalityBg = (Map<String, Object>) bgCorrection.get(modality);
+                if (modalityBg != null && modalityBg.containsKey("base_folder")) {
+                    String folder = modalityBg.get("base_folder").toString();
+                    logger.debug("Found background folder in imageprocessing config: {}", folder);
+                    return folder;
+                }
+            }
         }
 
         logger.warn("No background correction folder found for {}", modality);
@@ -1094,18 +1180,47 @@ public class MicroscopeConfigManager {
 
     /**
      * Check if background correction is enabled for a modality.
+     * Reads from imageprocessing_{microscope}.yml -> background_correction -> modality -> enabled
      */
+    @SuppressWarnings("unchecked")
     public boolean isBackgroundCorrectionEnabled(String modality) {
-        Boolean enabled = getBoolean("modalities", modality, "background_correction", "enabled");
-        return enabled != null && enabled;
+        // Check external imageprocessing config
+        if (imageprocessingData != null && imageprocessingData.containsKey("background_correction")) {
+            Map<String, Object> bgCorrection = (Map<String, Object>) imageprocessingData.get("background_correction");
+            if (bgCorrection != null && bgCorrection.containsKey(modality)) {
+                Map<String, Object> modalityBg = (Map<String, Object>) bgCorrection.get(modality);
+                if (modalityBg != null && modalityBg.containsKey("enabled")) {
+                    Boolean enabled = (Boolean) modalityBg.get("enabled");
+                    logger.debug("Found background_correction.enabled in imageprocessing config for {}: {}", modality, enabled);
+                    return enabled != null && enabled;
+                }
+            }
+        }
+
+        return false;
     }
 
     /**
      * Get background correction method for a modality.
+     * Reads from imageprocessing_{microscope}.yml -> background_correction -> modality -> method
      * Returns null if not configured.
      */
+    @SuppressWarnings("unchecked")
     public String getBackgroundCorrectionMethod(String modality) {
-        return getString("modalities", modality, "background_correction", "method");
+        // Check external imageprocessing config
+        if (imageprocessingData != null && imageprocessingData.containsKey("background_correction")) {
+            Map<String, Object> bgCorrection = (Map<String, Object>) imageprocessingData.get("background_correction");
+            if (bgCorrection != null && bgCorrection.containsKey(modality)) {
+                Map<String, Object> modalityBg = (Map<String, Object>) bgCorrection.get(modality);
+                if (modalityBg != null && modalityBg.containsKey("method")) {
+                    String method = modalityBg.get("method").toString();
+                    logger.debug("Found background_correction.method in imageprocessing config for {}: {}", modality, method);
+                    return method;
+                }
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -1260,7 +1375,7 @@ public class MicroscopeConfigManager {
 
                 // Core sections
                 new String[]{"modalities"},
-                new String[]{"acq_profiles_new"},
+                new String[]{"acq_profiles"},
                 new String[]{"slide_size_um"}
         );
 
@@ -1277,7 +1392,7 @@ public class MicroscopeConfigManager {
         }
 
         // Check acquisition profiles
-        List<Object> profiles = getList("acq_profiles_new", "profiles");
+        List<Object> profiles = getList("acq_profiles", "profiles");
         if (profiles == null || profiles.isEmpty()) {
             errors.add("No acquisition profiles defined in configuration");
         } else {
@@ -1286,7 +1401,7 @@ public class MicroscopeConfigManager {
         }
 
         // Check defaults for objectives
-        List<Object> defaults = getList("acq_profiles_new", "defaults");
+        List<Object> defaults = getList("acq_profiles", "defaults");
         if (defaults != null && profiles != null) {
             errors.addAll(validateObjectiveDefaults(defaults, profiles));
         }
@@ -1358,19 +1473,10 @@ public class MicroscopeConfigManager {
                 continue;
             }
 
-            // Check if settings exist
-            if (!profile.containsKey("settings")) {
-                errors.add(String.format("Profile %s/%s/%s missing settings",
-                        modality, objective, detector));
-                continue;
-            }
-
-            @SuppressWarnings("unchecked")
-            Map<String, Object> settings = (Map<String, Object>) profile.get("settings");
-
-            // Validate exposure settings
-            if (!settings.containsKey("exposures_ms")) {
-                errors.add(String.format("Profile %s/%s/%s missing exposures_ms",
+            // Validate exposure settings from imageprocessing config
+            Map<String, Object> exposures = getModalityExposures(modality, objective, detector);
+            if (exposures == null || exposures.isEmpty()) {
+                errors.add(String.format("Profile %s/%s/%s missing exposures_ms (check imageprocessing config)",
                         modality, objective, detector));
                 continue;
             }
@@ -1514,7 +1620,7 @@ public class MicroscopeConfigManager {
         logger.debug("Finding available objectives for modality: {}", modalityName);
         
         Set<String> objectives = new HashSet<>();
-        List<Object> profiles = getList("acq_profiles_new", "profiles");
+        List<Object> profiles = getList("acq_profiles", "profiles");
         
         if (profiles == null) {
             logger.warn("No acquisition profiles found in configuration - profiles is null");
@@ -1553,7 +1659,7 @@ public class MicroscopeConfigManager {
         logger.debug("Finding available detectors for modality: {}, objective: {}", modalityName, objectiveId);
         
         Set<String> detectors = new HashSet<>();
-        List<Object> profiles = getList("acq_profiles_new", "profiles");
+        List<Object> profiles = getList("acq_profiles", "profiles");
         
         if (profiles != null) {
             for (Object profileObj : profiles) {
@@ -1591,7 +1697,7 @@ public class MicroscopeConfigManager {
             return (Boolean) wbSetting;
         }
 
-        // Default to true for backward compatibility
+        // Default to true if not specified
         logger.debug("No white balance setting found for {}/{}/{}, defaulting to enabled",
                 modality, objective, detector);
         return true;

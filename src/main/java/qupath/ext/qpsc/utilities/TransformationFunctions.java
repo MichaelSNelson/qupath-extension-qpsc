@@ -747,17 +747,6 @@ public class TransformationFunctions {
         return String.join(" | ", types);
     }
 
-    // ==================== LEGACY FUNCTIONS (kept for compatibility) ====================
-
-    /**
-     * Legacy function - transforms QuPath coordinates to microscope coordinates.
-     * @deprecated Use {@link #transformQuPathFullResToStage} instead
-     */
-    @Deprecated
-    public static double[] qpToMicroscopeCoordinates(double[] qpCoordinates, AffineTransform transform) {
-        return transformQuPathFullResToStage(qpCoordinates, transform);
-    }
-
     /**
      * Walks each subdirectory looking for TileConfiguration files and transforms them.
      */

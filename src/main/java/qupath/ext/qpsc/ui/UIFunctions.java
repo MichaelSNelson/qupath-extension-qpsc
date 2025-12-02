@@ -294,9 +294,6 @@ public class UIFunctions {
         return handleHolder[0];
     }
 
-    /**
-     * Original method signature for backward compatibility
-     */
     public static ProgressHandle showProgressBarAsync(
             AtomicInteger progressCounter,
             int totalFiles,

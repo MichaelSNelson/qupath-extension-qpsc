@@ -563,7 +563,6 @@ public class TileProcessingUtilities {
 
     /**
      * Convenience overload that uses annotationName as the matching string.
-     * This maintains backward compatibility with code that doesn't specify angles.
      *
      * @param projectsFolderPath  Root folder containing per-sample subfolders
      * @param sampleLabel         Sample identifier
@@ -592,20 +591,20 @@ public class TileProcessingUtilities {
 
         logger.debug("Using convenience method - annotation name as matching string");
 
-        // Call the new method with annotationName as the matching string and null metadata
+        // Call the full method with annotationName as the matching string and null metadata
         return stitchImagesAndUpdateProject(
                 projectsFolderPath,
                 sampleLabel,
                 imagingModeWithIndex,
                 annotationName,
-                annotationName,  // Use annotation name as matching string for backward compatibility
+                annotationName,  // Use annotation name as matching string
                 qupathGUI,
                 project,
                 compression,
                 pixelSizeMicrons,
                 downsample,
                 modalityHandler,
-                null  // No metadata for backward compatibility
+                null  // No metadata
         );
     }
 

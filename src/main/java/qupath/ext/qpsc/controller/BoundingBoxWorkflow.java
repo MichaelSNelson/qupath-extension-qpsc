@@ -115,7 +115,7 @@ public class BoundingBoxWorkflow {
                                     enhancedModality
                             );
                         } else {
-                            // No project exists - create new project using sample name (backward compatibility)
+                            // No project exists - create new project using sample name
                             logger.info("No existing project - creating new project with sample name: {}",
                                     sample.sampleName());
 

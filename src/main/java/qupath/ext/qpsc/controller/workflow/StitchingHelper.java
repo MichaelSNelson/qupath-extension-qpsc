@@ -98,7 +98,7 @@ public class StitchingHelper {
         }
 
         /**
-         * Convenience constructor for backward compatibility.
+         * Convenience constructor for basic metadata.
          * Creates metadata with null for optional identification fields.
          */
         public StitchingMetadata(ProjectImageEntry<BufferedImage> parentEntry,

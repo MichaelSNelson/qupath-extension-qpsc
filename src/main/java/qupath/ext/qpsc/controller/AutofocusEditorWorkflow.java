@@ -867,7 +867,7 @@ public class AutofocusEditorWorkflow {
 
         try {
             Map<String, Object> config = configManager.getAllConfig();
-            Map<String, Object> acqProfiles = (Map<String, Object>) config.get("acq_profiles_new");
+            Map<String, Object> acqProfiles = (Map<String, Object>) config.get("acq_profiles");
 
             if (acqProfiles != null) {
                 List<Map<String, Object>> defaults = (List<Map<String, Object>>) acqProfiles.get("defaults");
@@ -913,7 +913,7 @@ public class AutofocusEditorWorkflow {
                         double searchRange = ((Number) entry.get("search_range_um")).doubleValue();
                         int nTiles = ((Number) entry.get("n_tiles")).intValue();
 
-                        // New parameters with defaults for backward compatibility
+                        // Optional parameters with defaults
                         int interpStrength = entry.containsKey("interp_strength") ?
                             ((Number) entry.get("interp_strength")).intValue() : 100;
                         String interpKind = entry.containsKey("interp_kind") ?

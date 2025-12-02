@@ -57,10 +57,10 @@ public class AcquisitionConfigurationBuilder {
         String detector = sample.detector();
         String baseModality = sample.modality();
         
-        // Get background correction settings
-        boolean bgEnabled = configManager.getBoolean("modalities", baseModality, "background_correction", "enabled");
-        String bgMethod = configManager.getString("modalities", baseModality, "background_correction", "method");
-        String bgBaseFolder = configManager.getString("modalities", baseModality, "background_correction", "base_folder");
+        // Get background correction settings (checks imageprocessing config first, then main config)
+        boolean bgEnabled = configManager.isBackgroundCorrectionEnabled(baseModality);
+        String bgMethod = configManager.getBackgroundCorrectionMethod(baseModality);
+        String bgBaseFolder = configManager.getBackgroundCorrectionFolder(baseModality);
         
         // Construct detector-specific background folder path
         String bgFolder = null;
