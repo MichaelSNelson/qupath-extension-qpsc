@@ -191,7 +191,7 @@ public class StitchingHelper {
         try {
             Platform.runLater(() -> {
                 try {
-                    dialogRef[0] = StitchingBlockingDialog.show(operationId);
+                    dialogRef[0] = StitchingBlockingDialog.show(operationId, operationId);
                 } finally {
                     dialogLatch.countDown();
                 }
@@ -601,7 +601,7 @@ public class StitchingHelper {
         try {
             Platform.runLater(() -> {
                 try {
-                    dialogRef[0] = StitchingBlockingDialog.show(operationId);
+                    dialogRef[0] = StitchingBlockingDialog.show(operationId, operationId);
                 } finally {
                     dialogLatch.countDown();
                 }
