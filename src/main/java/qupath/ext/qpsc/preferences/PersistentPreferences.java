@@ -61,9 +61,6 @@ public class PersistentPreferences {
     private static final StringProperty boundingBoxString =
             PathPrefs.createPersistentPreference("BoundingBox", "27000,7000,20000,10000");
 
-    private static final StringProperty boundingBoxInFocusSaved =
-            PathPrefs.createPersistentPreference("BoundingBoxInFocus", "false");
-
     private static final StringProperty boundingBoxWidthSaved =
             PathPrefs.createPersistentPreference("BoundingBoxWidth", "2000");
 
@@ -76,14 +73,6 @@ public class PersistentPreferences {
 
     public static void setBoundingBoxString(final String boundingBox) {
         boundingBoxString.setValue(boundingBox);
-    }
-
-    public static boolean getBoundingBoxInFocus() {
-        return Boolean.parseBoolean(boundingBoxInFocusSaved.getValue());
-    }
-
-    public static void setBoundingBoxInFocus(final boolean inFocus) {
-        boundingBoxInFocusSaved.setValue(String.valueOf(inFocus));
     }
 
     public static String getBoundingBoxWidth() {
