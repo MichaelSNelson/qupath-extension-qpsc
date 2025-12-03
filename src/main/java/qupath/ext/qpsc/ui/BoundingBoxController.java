@@ -63,7 +63,8 @@ public class BoundingBoxController {
             dlg.initModality(Modality.APPLICATION_MODAL);
             dlg.setTitle(res.getString("boundingBox.title"));
 
-            String headerText = "Enter bounding box coordinates either as four values (x1,y1,x2,y2) " +
+            String headerText = "IMPORTANT: Ensure the sample is roughly in focus via the eyepiece or camera control before proceeding.\n\n" +
+                    "Enter bounding box coordinates either as four values (x1,y1,x2,y2) " +
                     "or specify a starting point with width and height." +
                     "\n\nNote: All coordinates are in microscope stage units (microns).";
 
@@ -260,17 +261,7 @@ public class BoundingBoxController {
 
             tabs.getTabs().addAll(csvTab, centerSizeTab);
 
-            // 4) In-focus checkbox - initialized with saved value
-            String inFocusLabel = "Keep stage in focus while moving";
-            try {
-                inFocusLabel = res.getString("boundingBox.label.inFocus");
-            } catch (MissingResourceException e) {
-                // Use default if key not found
-            }
-            CheckBox inFocusCheckbox = new CheckBox(inFocusLabel);
-            inFocusCheckbox.setSelected(PersistentPreferences.getBoundingBoxInFocus());
-
-            // 5) Modality-specific configuration pane (if provided)
+            // 4) Modality-specific configuration pane (if provided)
             Node modalityNode = modalityUI.map(ModalityHandler.BoundingBoxUI::getNode).orElse(null);
 
             // 6) Error label for validation
@@ -427,9 +418,9 @@ public class BoundingBoxController {
             // 9) Assemble content
             VBox content;
             if (modalityNode != null) {
-                content = new VBox(10, tabs, inFocusCheckbox, modalityNode, errorLabel);
+                content = new VBox(10, tabs, modalityNode, errorLabel);
             } else {
-                content = new VBox(10, tabs, inFocusCheckbox, errorLabel);
+                content = new VBox(10, tabs, errorLabel);
             }
             content.setPadding(new Insets(20));
             dlg.getDialogPane().setContent(content);
@@ -449,7 +440,6 @@ public class BoundingBoxController {
 
                     // Save preferences before returning
                     PersistentPreferences.setBoundingBoxString(csvField.getText());
-                    PersistentPreferences.setBoundingBoxInFocus(inFocusCheckbox.isSelected());
 
                     Map<String, Double> angleOverrides = modalityUI
                             .map(ModalityHandler.BoundingBoxUI::getAngleOverrides)
@@ -458,7 +448,8 @@ public class BoundingBoxController {
                         logger.info("User overrode angles: {}", angleOverrides);
                     }
 
-                    return new BoundingBoxResult(x1, y1, x2, y2, inFocusCheckbox.isSelected(), angleOverrides);
+                    // Always assume in focus - user is warned to verify focus before proceeding
+                    return new BoundingBoxResult(x1, y1, x2, y2, true, angleOverrides);
                 } catch (Exception e) {
                     logger.error("Error creating bounding box result", e);
                     return null;
