@@ -134,8 +134,12 @@ public class QPScopeController {
         logger.info("Starting workflow mode: {}", mode);
         
         switch (mode) {
+            case "boundedAcquisition" -> {
+                logger.debug("Launching bounded acquisition workflow (unified dialog)");
+                BoundedAcquisitionWorkflow.run();
+            }
             case "boundingBox" -> {
-                logger.debug("Launching bounding box acquisition workflow");
+                logger.debug("Launching bounding box acquisition workflow (legacy)");
                 BoundingBoxWorkflow.run();
             }
             case "existingImage" -> {

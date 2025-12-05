@@ -100,7 +100,18 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 
 		// === WORKFLOW MENU ITEMS ===
 
-		// 1) Start with a bounding box workflow
+		// 1) Bounded Acquisition (new unified dialog workflow)
+		MenuItem boundedAcquisitionOption = new MenuItem(res.getString("menu.boundedAcquisition"));
+		boundedAcquisitionOption.setDisable(!configValid);
+		boundedAcquisitionOption.setOnAction(e -> {
+			try {
+				QPScopeController.getInstance().startWorkflow("boundedAcquisition");
+			} catch (IOException ex) {
+				throw new RuntimeException(ex);
+			}
+		});
+
+		// 2) Start with a bounding box workflow (legacy - to be deprecated)
 		MenuItem boundingBoxOption = new MenuItem(res.getString("menu.boundingbox"));
 		boundingBoxOption.setDisable(!configValid);
 		boundingBoxOption.setOnAction(e ->
@@ -263,10 +274,11 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 		// Add all menu items with proper organization
 		extensionMenu.getItems().addAll(
 				// Main workflows
-				boundingBoxOption,
+				boundedAcquisitionOption,
 				existingImageOption,
 				alignmentOption,
 				new SeparatorMenuItem(),  // Visual separator
+				boundingBoxOption,  // Legacy workflow (to be deprecated)
 				// Calibration and configuration
 				backgroundCollectionOption,
 				polarizerCalibrationOption,
