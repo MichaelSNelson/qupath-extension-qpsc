@@ -17,6 +17,7 @@ import qupath.lib.projects.ProjectImageEntry;
 
 import java.awt.image.BufferedImage;
 import java.io.File;
+import java.nio.file.Path;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
@@ -147,16 +148,27 @@ public class ProjectHelper {
                     }
                 } else {
                     logger.info("Using existing project");
-                    
-                    // Use enhanced modality name for consistent folder structure  
+
+                    // CRITICAL: Derive paths from actual project location, not user preferences
+                    // This ensures all folders (tiles, stitched images) are created WITHIN
+                    // the existing project structure, not in a separate location
+                    Path projectFilePath = gui.getProject().getPath();
+                    Path projectDir = projectFilePath.getParent();
+                    String actualSampleName = projectDir.getFileName().toString();
+                    Path projectsFolder = projectDir.getParent();
+
+                    logger.info("Actual project location: {}", projectDir);
+                    logger.info("Derived sample name from project folder: {}", actualSampleName);
+
+                    // Use enhanced modality name for consistent folder structure
                     String enhancedModality = ObjectiveUtils.createEnhancedFolderName(
                             sample.modality(), sample.objective());
-                    logger.info("Using enhanced modality for existing project: {} -> {}", 
+                    logger.info("Using enhanced modality for existing project: {} -> {}",
                             sample.modality(), enhancedModality);
-                    
+
                     projectDetails = QPProjectFunctions.getCurrentProjectInformation(
-                            sample.projectsFolder().getAbsolutePath(),
-                            sample.sampleName(),
+                            projectsFolder.toString(),
+                            actualSampleName,
                             enhancedModality
                     );
 

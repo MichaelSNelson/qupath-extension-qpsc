@@ -14,6 +14,7 @@ import qupath.lib.objects.PathObject;
 import qupath.lib.scripting.QP;
 
 import java.io.File;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -61,8 +62,9 @@ public class AnnotationHelper {
     public static List<PathObject> ensureAnnotationsExist(QuPathGUI gui, double macroPixelSize, List<String> validClasses) {
         logger.info("Ensuring annotations exist for acquisition with classes: {}", validClasses);
 
-        // Get existing annotations
-        List<PathObject> annotations = getCurrentValidAnnotations(validClasses);
+        // Get existing annotations using GUI hierarchy (not QP static context)
+        // This is critical after image flip operations to get the correct annotations
+        List<PathObject> annotations = getCurrentValidAnnotations(gui, validClasses);
 
         if (!annotations.isEmpty()) {
             logger.info("Found {} existing valid annotations", annotations.size());
@@ -100,8 +102,8 @@ public class AnnotationHelper {
                 gui.runScript(null, modifiedScript);
                 logger.info("Tissue detection completed");
 
-                // Re-collect annotations after tissue detection
-                annotations = getCurrentValidAnnotations(validClasses);
+                // Re-collect annotations after tissue detection using GUI hierarchy
+                annotations = getCurrentValidAnnotations(gui, validClasses);
                 logger.info("Found {} annotations after tissue detection", annotations.size());
 
             } catch (Exception e) {
@@ -141,9 +143,56 @@ public class AnnotationHelper {
     /**
      * Gets current valid annotations from the image hierarchy using custom class list.
      *
+     * <p>IMPORTANT: This method uses the GUI's current image hierarchy directly,
+     * ensuring we get annotations from the currently displayed image (including
+     * after flip operations). This is more reliable than using QP.getAnnotationObjects()
+     * which relies on the static scripting context that may not be synchronized.
+     *
+     * @param gui QuPath GUI instance
      * @param validClasses List of class names to consider valid
      * @return List of valid annotations
      */
+    public static List<PathObject> getCurrentValidAnnotations(QuPathGUI gui, List<String> validClasses) {
+        if (gui.getImageData() == null) {
+            logger.warn("No image data available - cannot get annotations");
+            return Collections.emptyList();
+        }
+
+        var hierarchy = gui.getImageData().getHierarchy();
+        var allAnnotations = hierarchy.getAnnotationObjects();
+
+        var annotations = allAnnotations.stream()
+                .filter(ann -> ann.getROI() != null && !ann.getROI().isEmpty())
+                .filter(ann -> ann.getPathClass() != null &&
+                        validClasses.contains(ann.getPathClass().getName()))
+                .collect(Collectors.toList());
+
+        logger.debug("Found {} valid annotations from {} total with classes: {} (using GUI hierarchy)",
+                annotations.size(), allAnnotations.size(), validClasses);
+
+        return annotations;
+    }
+
+    /**
+     * Gets current valid annotations using selected classes from preferences.
+     *
+     * @param gui QuPath GUI instance
+     * @return List of valid annotations
+     */
+    public static List<PathObject> getCurrentValidAnnotations(QuPathGUI gui) {
+        List<String> selectedClasses = PersistentPreferences.getSelectedAnnotationClasses();
+        return getCurrentValidAnnotations(gui, selectedClasses);
+    }
+
+    /**
+     * Gets current valid annotations from the image hierarchy using custom class list.
+     *
+     * @param validClasses List of class names to consider valid
+     * @return List of valid annotations
+     * @deprecated Use {@link #getCurrentValidAnnotations(QuPathGUI, List)} instead for reliable
+     *             annotation retrieval after image flip operations.
+     */
+    @Deprecated
     public static List<PathObject> getCurrentValidAnnotations(List<String> validClasses) {
         var annotations = QP.getAnnotationObjects().stream()
                 .filter(ann -> ann.getROI() != null && !ann.getROI().isEmpty())
@@ -161,7 +210,10 @@ public class AnnotationHelper {
      * Gets current valid annotations using selected classes from preferences.
      *
      * @return List of valid annotations
+     * @deprecated Use {@link #getCurrentValidAnnotations(QuPathGUI)} instead for reliable
+     *             annotation retrieval after image flip operations.
      */
+    @Deprecated
     public static List<PathObject> getCurrentValidAnnotations() {
         List<String> selectedClasses = PersistentPreferences.getSelectedAnnotationClasses();
         return getCurrentValidAnnotations(selectedClasses);

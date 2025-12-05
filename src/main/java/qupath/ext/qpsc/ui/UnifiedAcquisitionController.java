@@ -117,7 +117,13 @@ public class UnifiedAcquisitionController {
         private TextField startYField;
         private TextField widthField;
         private TextField heightField;
+        private TextField endXField;
+        private TextField endYField;
         private Label calculatedBoundsLabel;
+        private RadioButton startSizeMode;
+        private RadioButton twoCornersMode;
+        private GridPane startSizePane;
+        private GridPane twoCornersPane;
 
         // UI Components - Preview Section
         private Label previewRegionLabel;
@@ -391,20 +397,32 @@ public class UnifiedAcquisitionController {
         }
 
         private void createRegionSection() {
-            GridPane grid = new GridPane();
-            grid.setHgap(10);
-            grid.setVgap(8);
-            grid.setPadding(new Insets(10));
+            VBox content = new VBox(10);
+            content.setPadding(new Insets(10));
 
-            // Start point fields
+            // Mode selection toggle
+            ToggleGroup modeGroup = new ToggleGroup();
+            startSizeMode = new RadioButton("Start Point + Size");
+            twoCornersMode = new RadioButton("Two Corners");
+            startSizeMode.setToggleGroup(modeGroup);
+            twoCornersMode.setToggleGroup(modeGroup);
+            startSizeMode.setSelected(true);
+
+            HBox modeBox = new HBox(20, startSizeMode, twoCornersMode);
+            modeBox.setAlignment(Pos.CENTER_LEFT);
+
+            // === Start + Size Mode Pane ===
+            startSizePane = new GridPane();
+            startSizePane.setHgap(10);
+            startSizePane.setVgap(8);
+
             startXField = new TextField();
             startYField = new TextField();
-            startXField.setPromptText("Start X");
-            startYField.setPromptText("Start Y");
+            startXField.setPromptText("X");
+            startYField.setPromptText("Y");
             startXField.setPrefWidth(120);
             startYField.setPrefWidth(120);
 
-            // Size fields - load saved values
             widthField = new TextField(PersistentPreferences.getBoundingBoxWidth());
             heightField = new TextField(PersistentPreferences.getBoundingBoxHeight());
             widthField.setPromptText("Width");
@@ -412,37 +430,16 @@ public class UnifiedAcquisitionController {
             widthField.setPrefWidth(120);
             heightField.setPrefWidth(120);
 
-            // If we have a saved bounding box, parse and populate start fields
-            String savedBounds = PersistentPreferences.getBoundingBoxString();
-            if (savedBounds != null && !savedBounds.trim().isEmpty()) {
-                String[] parts = savedBounds.split(",");
-                if (parts.length == 4) {
-                    try {
-                        startXField.setText(parts[0].trim());
-                        startYField.setText(parts[1].trim());
-                    } catch (Exception e) {
-                        // Ignore parsing errors
-                    }
-                }
-            }
-
-            // Get Stage Position button
-            Button getPositionBtn = new Button("Get Stage Position");
-            getPositionBtn.setOnAction(e -> {
+            Button getStartPosBtn = new Button("Get Stage Position");
+            getStartPosBtn.setOnAction(e -> {
                 try {
                     double[] coords = MicroscopeController.getInstance().getStagePositionXY();
                     if (coords != null && coords.length >= 2) {
                         startXField.setText(String.format("%.2f", coords[0]));
                         startYField.setText(String.format("%.2f", coords[1]));
                         logger.info("Updated start position from stage: X={}, Y={}", coords[0], coords[1]);
-
-                        // Set defaults if empty
-                        if (widthField.getText().trim().isEmpty()) {
-                            widthField.setText("2000");
-                        }
-                        if (heightField.getText().trim().isEmpty()) {
-                            heightField.setText("2000");
-                        }
+                        if (widthField.getText().trim().isEmpty()) widthField.setText("2000");
+                        if (heightField.getText().trim().isEmpty()) heightField.setText("2000");
                     }
                 } catch (Exception ex) {
                     logger.error("Failed to get stage position", ex);
@@ -450,10 +447,103 @@ public class UnifiedAcquisitionController {
                 }
             });
 
+            int row = 0;
+            startSizePane.add(new Label("Start X (um):"), 0, row);
+            startSizePane.add(startXField, 1, row);
+            startSizePane.add(new Label("Start Y (um):"), 2, row);
+            startSizePane.add(startYField, 3, row);
+            startSizePane.add(getStartPosBtn, 4, row);
+            row++;
+            startSizePane.add(new Label("Width (um):"), 0, row);
+            startSizePane.add(widthField, 1, row);
+            startSizePane.add(new Label("Height (um):"), 2, row);
+            startSizePane.add(heightField, 3, row);
+
+            // === Two Corners Mode Pane ===
+            twoCornersPane = new GridPane();
+            twoCornersPane.setHgap(10);
+            twoCornersPane.setVgap(8);
+            twoCornersPane.setVisible(false);
+            twoCornersPane.setManaged(false);
+
+            endXField = new TextField();
+            endYField = new TextField();
+            endXField.setPromptText("X");
+            endYField.setPromptText("Y");
+            endXField.setPrefWidth(120);
+            endYField.setPrefWidth(120);
+
+            // Reuse startX/Y for corner 1 in two-corners mode
+            TextField corner1XField = new TextField();
+            TextField corner1YField = new TextField();
+            corner1XField.setPromptText("X");
+            corner1YField.setPromptText("Y");
+            corner1XField.setPrefWidth(120);
+            corner1YField.setPrefWidth(120);
+
+            Button getCorner1Btn = new Button("Get Stage Position");
+            getCorner1Btn.setOnAction(e -> {
+                try {
+                    double[] coords = MicroscopeController.getInstance().getStagePositionXY();
+                    if (coords != null && coords.length >= 2) {
+                        corner1XField.setText(String.format("%.2f", coords[0]));
+                        corner1YField.setText(String.format("%.2f", coords[1]));
+                        logger.info("Updated corner 1 from stage: X={}, Y={}", coords[0], coords[1]);
+                    }
+                } catch (Exception ex) {
+                    logger.error("Failed to get stage position", ex);
+                    UIFunctions.showAlertDialog("Failed to get stage position: " + ex.getMessage());
+                }
+            });
+
+            Button getCorner2Btn = new Button("Get Stage Position");
+            getCorner2Btn.setOnAction(e -> {
+                try {
+                    double[] coords = MicroscopeController.getInstance().getStagePositionXY();
+                    if (coords != null && coords.length >= 2) {
+                        endXField.setText(String.format("%.2f", coords[0]));
+                        endYField.setText(String.format("%.2f", coords[1]));
+                        logger.info("Updated corner 2 from stage: X={}, Y={}", coords[0], coords[1]);
+                    }
+                } catch (Exception ex) {
+                    logger.error("Failed to get stage position", ex);
+                    UIFunctions.showAlertDialog("Failed to get stage position: " + ex.getMessage());
+                }
+            });
+
+            row = 0;
+            twoCornersPane.add(new Label("Corner 1 X (um):"), 0, row);
+            twoCornersPane.add(corner1XField, 1, row);
+            twoCornersPane.add(new Label("Y (um):"), 2, row);
+            twoCornersPane.add(corner1YField, 3, row);
+            twoCornersPane.add(getCorner1Btn, 4, row);
+            row++;
+            twoCornersPane.add(new Label("Corner 2 X (um):"), 0, row);
+            twoCornersPane.add(endXField, 1, row);
+            twoCornersPane.add(new Label("Y (um):"), 2, row);
+            twoCornersPane.add(endYField, 3, row);
+            twoCornersPane.add(getCorner2Btn, 4, row);
+
+            // Sync corner1 fields with startX/Y fields for consistency
+            corner1XField.textProperty().bindBidirectional(startXField.textProperty());
+            corner1YField.textProperty().bindBidirectional(startYField.textProperty());
+
+            // Mode switching logic
+            modeGroup.selectedToggleProperty().addListener((obs, oldVal, newVal) -> {
+                boolean isStartSize = newVal == startSizeMode;
+                startSizePane.setVisible(isStartSize);
+                startSizePane.setManaged(isStartSize);
+                twoCornersPane.setVisible(!isStartSize);
+                twoCornersPane.setManaged(!isStartSize);
+                validateRegion();
+                triggerPreviewUpdate();
+            });
+
+            // Calculated bounds label
             calculatedBoundsLabel = new Label("Enter coordinates to see calculated bounds");
             calculatedBoundsLabel.setStyle("-fx-font-size: 11px; -fx-text-fill: gray;");
 
-            // Validation listeners
+            // Validation listeners for Start+Size mode
             startXField.textProperty().addListener((obs, old, newVal) -> {
                 validateRegion();
                 triggerPreviewUpdate();
@@ -477,33 +567,36 @@ public class UnifiedAcquisitionController {
                 }
             });
 
-            int row = 0;
+            // Validation listeners for Two Corners mode
+            endXField.textProperty().addListener((obs, old, newVal) -> {
+                validateRegion();
+                triggerPreviewUpdate();
+            });
+            endYField.textProperty().addListener((obs, old, newVal) -> {
+                validateRegion();
+                triggerPreviewUpdate();
+            });
 
-            Label instructionLabel = new Label("Enter a starting point and acquisition size in microns:");
-            instructionLabel.setStyle("-fx-font-style: italic; -fx-font-size: 11px;");
-            grid.add(instructionLabel, 0, row, 4, 1);
-            row++;
+            // Load saved bounding box
+            String savedBounds = PersistentPreferences.getBoundingBoxString();
+            if (savedBounds != null && !savedBounds.trim().isEmpty()) {
+                String[] parts = savedBounds.split(",");
+                if (parts.length == 4) {
+                    try {
+                        startXField.setText(parts[0].trim());
+                        startYField.setText(parts[1].trim());
+                        endXField.setText(parts[2].trim());
+                        endYField.setText(parts[3].trim());
+                    } catch (Exception e) {
+                        // Ignore parsing errors
+                    }
+                }
+            }
 
-            grid.add(new Label("Start X (um):"), 0, row);
-            grid.add(startXField, 1, row);
-            grid.add(new Label("Start Y (um):"), 2, row);
-            grid.add(startYField, 3, row);
-            row++;
+            // Assemble content
+            content.getChildren().addAll(modeBox, startSizePane, twoCornersPane, calculatedBoundsLabel);
 
-            grid.add(new Label("Width (um):"), 0, row);
-            grid.add(widthField, 1, row);
-            grid.add(new Label("Height (um):"), 2, row);
-            grid.add(heightField, 3, row);
-            row++;
-
-            HBox buttonBox = new HBox(10, getPositionBtn);
-            buttonBox.setAlignment(Pos.CENTER_LEFT);
-            grid.add(buttonBox, 0, row, 4, 1);
-            row++;
-
-            grid.add(calculatedBoundsLabel, 0, row, 4, 1);
-
-            regionPane = new TitledPane("ACQUISITION REGION", grid);
+            regionPane = new TitledPane("ACQUISITION REGION", content);
             regionPane.setExpanded(true);
             regionPane.setStyle("-fx-font-weight: bold;");
         }
@@ -677,25 +770,52 @@ public class UnifiedAcquisitionController {
 
         private void updatePreviewPanel() {
             try {
-                // Parse coordinates
+                boolean isStartSizeMode = startSizeMode.isSelected();
+                double startX, startY, width, height;
+
                 String startXStr = startXField.getText().trim();
                 String startYStr = startYField.getText().trim();
-                String widthStr = widthField.getText().trim();
-                String heightStr = heightField.getText().trim();
 
-                if (startXStr.isEmpty() || startYStr.isEmpty() ||
-                    widthStr.isEmpty() || heightStr.isEmpty()) {
+                if (startXStr.isEmpty() || startYStr.isEmpty()) {
                     showPreviewPlaceholder("Enter all coordinates to see preview");
                     return;
                 }
 
-                double startX = Double.parseDouble(startXStr);
-                double startY = Double.parseDouble(startYStr);
-                double width = Double.parseDouble(widthStr);
-                double height = Double.parseDouble(heightStr);
+                startX = Double.parseDouble(startXStr);
+                startY = Double.parseDouble(startYStr);
+
+                if (isStartSizeMode) {
+                    // Start + Size mode
+                    String widthStr = widthField.getText().trim();
+                    String heightStr = heightField.getText().trim();
+
+                    if (widthStr.isEmpty() || heightStr.isEmpty()) {
+                        showPreviewPlaceholder("Enter all coordinates to see preview");
+                        return;
+                    }
+
+                    width = Double.parseDouble(widthStr);
+                    height = Double.parseDouble(heightStr);
+                } else {
+                    // Two Corners mode
+                    String endXStr = endXField.getText().trim();
+                    String endYStr = endYField.getText().trim();
+
+                    if (endXStr.isEmpty() || endYStr.isEmpty()) {
+                        showPreviewPlaceholder("Enter all coordinates to see preview");
+                        return;
+                    }
+
+                    double endX = Double.parseDouble(endXStr);
+                    double endY = Double.parseDouble(endYStr);
+
+                    // Calculate width and height from corners (use absolute values)
+                    width = Math.abs(endX - startX);
+                    height = Math.abs(endY - startY);
+                }
 
                 if (width <= 0 || height <= 0) {
-                    showPreviewPlaceholder("Width and height must be positive");
+                    showPreviewPlaceholder("Region must have positive width and height");
                     return;
                 }
 
@@ -746,10 +866,21 @@ public class UnifiedAcquisitionController {
                 String storageEstimate = formatStorage(estimatedMB);
 
                 // Update calculated bounds
-                double x1 = startX;
-                double y1 = startY;
-                double x2 = startX + width;
-                double y2 = startY + height;
+                double x1, y1, x2, y2;
+                if (isStartSizeMode) {
+                    x1 = startX;
+                    y1 = startY;
+                    x2 = startX + width;
+                    y2 = startY + height;
+                } else {
+                    // Two corners mode - ensure proper min/max ordering
+                    double endX = Double.parseDouble(endXField.getText().trim());
+                    double endY = Double.parseDouble(endYField.getText().trim());
+                    x1 = Math.min(startX, endX);
+                    y1 = Math.min(startY, endY);
+                    x2 = Math.max(startX, endX);
+                    y2 = Math.max(startY, endY);
+                }
                 calculatedBoundsLabel.setText(String.format(
                         "Calculated bounds: (%.1f, %.1f) to (%.1f, %.1f)", x1, y1, x2, y2));
                 calculatedBoundsLabel.setStyle("-fx-font-size: 11px; -fx-text-fill: #28a745;");
@@ -809,27 +940,48 @@ public class UnifiedAcquisitionController {
 
         private void validateRegion() {
             try {
+                StringBuilder errors = new StringBuilder();
+                boolean isStartSizeMode = startSizeMode.isSelected();
+
                 String startXStr = startXField.getText().trim();
                 String startYStr = startYField.getText().trim();
-                String widthStr = widthField.getText().trim();
-                String heightStr = heightField.getText().trim();
 
-                StringBuilder errors = new StringBuilder();
+                if (startXStr.isEmpty()) errors.append("Start/Corner 1 X is required. ");
+                if (startYStr.isEmpty()) errors.append("Start/Corner 1 Y is required. ");
 
-                if (startXStr.isEmpty()) errors.append("Start X is required. ");
-                if (startYStr.isEmpty()) errors.append("Start Y is required. ");
-                if (widthStr.isEmpty()) errors.append("Width is required. ");
-                if (heightStr.isEmpty()) errors.append("Height is required. ");
+                if (isStartSizeMode) {
+                    // Start + Size mode validation
+                    String widthStr = widthField.getText().trim();
+                    String heightStr = heightField.getText().trim();
 
-                if (errors.length() == 0) {
-                    double width = Double.parseDouble(widthStr);
-                    double height = Double.parseDouble(heightStr);
-                    if (width <= 0) errors.append("Width must be positive. ");
-                    if (height <= 0) errors.append("Height must be positive. ");
+                    if (widthStr.isEmpty()) errors.append("Width is required. ");
+                    if (heightStr.isEmpty()) errors.append("Height is required. ");
 
-                    // Also validate start coordinates are numbers
-                    Double.parseDouble(startXStr);
-                    Double.parseDouble(startYStr);
+                    if (errors.length() == 0) {
+                        double width = Double.parseDouble(widthStr);
+                        double height = Double.parseDouble(heightStr);
+                        if (width <= 0) errors.append("Width must be positive. ");
+                        if (height <= 0) errors.append("Height must be positive. ");
+                        Double.parseDouble(startXStr);
+                        Double.parseDouble(startYStr);
+                    }
+                } else {
+                    // Two Corners mode validation
+                    String endXStr = endXField.getText().trim();
+                    String endYStr = endYField.getText().trim();
+
+                    if (endXStr.isEmpty()) errors.append("Corner 2 X is required. ");
+                    if (endYStr.isEmpty()) errors.append("Corner 2 Y is required. ");
+
+                    if (errors.length() == 0) {
+                        double x1 = Double.parseDouble(startXStr);
+                        double y1 = Double.parseDouble(startYStr);
+                        double x2 = Double.parseDouble(endXStr);
+                        double y2 = Double.parseDouble(endYStr);
+                        if (x1 == x2 && y1 == y2) {
+                            errors.append("The two corners must be different points. ");
+                        }
+                    }
                 }
 
                 if (errors.length() > 0) {
@@ -907,15 +1059,28 @@ public class UnifiedAcquisitionController {
                 String objective = extractIdFromDisplayString(objectiveBox.getValue());
                 String detector = extractIdFromDisplayString(detectorBox.getValue());
 
+                double x1, y1, x2, y2;
+                boolean isStartSizeMode = startSizeMode.isSelected();
+
                 double startX = Double.parseDouble(startXField.getText().trim());
                 double startY = Double.parseDouble(startYField.getText().trim());
-                double width = Double.parseDouble(widthField.getText().trim());
-                double height = Double.parseDouble(heightField.getText().trim());
 
-                double x1 = startX;
-                double y1 = startY;
-                double x2 = startX + width;
-                double y2 = startY + height;
+                if (isStartSizeMode) {
+                    double width = Double.parseDouble(widthField.getText().trim());
+                    double height = Double.parseDouble(heightField.getText().trim());
+                    x1 = startX;
+                    y1 = startY;
+                    x2 = startX + width;
+                    y2 = startY + height;
+                } else {
+                    double endX = Double.parseDouble(endXField.getText().trim());
+                    double endY = Double.parseDouble(endYField.getText().trim());
+                    // Ensure proper min/max ordering
+                    x1 = Math.min(startX, endX);
+                    y1 = Math.min(startY, endY);
+                    x2 = Math.max(startX, endX);
+                    y2 = Math.max(startY, endY);
+                }
 
                 // Save preferences
                 PersistentPreferences.setLastSampleName(sampleName);
