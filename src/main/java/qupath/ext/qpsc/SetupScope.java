@@ -150,6 +150,28 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 				}
 		);
 
+		// 2b) Existing Image V2 - Consolidated dialog version (New UI)
+		MenuItem existingImageV2Option = new MenuItem("Acquire from Existing Image (New UI)");
+		existingImageV2Option.disableProperty().bind(
+				Bindings.or(
+						Bindings.createBooleanBinding(
+								() -> qupath.getImageData() == null,
+								qupath.imageDataProperty()
+						),
+						Bindings.createBooleanBinding(
+								() -> !configValid,
+								qupath.imageDataProperty()
+						)
+				)
+		);
+		existingImageV2Option.setOnAction(e -> {
+			try {
+				QPScopeController.getInstance().startWorkflow("existingImageV2");
+			} catch (IOException ex) {
+				throw new RuntimeException(ex);
+			}
+		});
+
 		// 3) Microscope alignment workflow (only enabled if image has macro)
 		MenuItem alignmentOption = new MenuItem(res.getString("menu.microscopeAlignment"));
 
@@ -276,6 +298,7 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 				// Main workflows
 				boundedAcquisitionOption,
 				existingImageOption,
+				existingImageV2Option,  // New consolidated dialog version
 				alignmentOption,
 				new SeparatorMenuItem(),  // Visual separator
 				boundingBoxOption,  // Legacy workflow (to be deprecated)

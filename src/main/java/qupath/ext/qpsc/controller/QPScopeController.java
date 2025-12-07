@@ -146,6 +146,10 @@ public class QPScopeController {
                 logger.debug("Launching existing image targeted acquisition workflow");
                 ExistingImageWorkflow.run();
             }
+            case "existingImageV2" -> {
+                logger.debug("Launching existing image workflow with consolidated dialog (V2)");
+                ExistingImageWorkflowV2.start();
+            }
             case "basicStageInterface" -> {
                 logger.debug("Launching basic stage movement interface");
                 StageMovementController.showTestStageMovementDialog();

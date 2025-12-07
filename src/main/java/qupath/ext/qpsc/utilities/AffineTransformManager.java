@@ -586,6 +586,61 @@ public class AffineTransformManager {
     }
 
     /**
+     * Gets the creation date of a slide-specific alignment from a project.
+     *
+     * @param project The QuPath project
+     * @param sampleName The sample name
+     * @return The timestamp string from the alignment file, or null if not found
+     */
+    public static String getSlideAlignmentDate(Project<BufferedImage> project, String sampleName) {
+        try {
+            File projectDir = project.getPath().toFile().getParentFile();
+            return getSlideAlignmentDateFromDirectory(projectDir, sampleName);
+        } catch (Exception e) {
+            logger.debug("Could not get slide alignment date for {}: {}", sampleName, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Gets the creation date of a slide-specific alignment from a directory.
+     *
+     * @param projectDir The project directory
+     * @param sampleName The sample name
+     * @return The timestamp string from the alignment file, or null if not found
+     */
+    public static String getSlideAlignmentDateFromDirectory(File projectDir, String sampleName) {
+        if (projectDir == null || !projectDir.exists() || sampleName == null) {
+            return null;
+        }
+
+        File alignmentDir = new File(projectDir, "alignmentFiles");
+        if (!alignmentDir.exists()) {
+            return null;
+        }
+
+        File alignmentFile = new File(alignmentDir, sampleName + "_alignment.json");
+        if (!alignmentFile.exists()) {
+            return null;
+        }
+
+        try {
+            String json = new String(Files.readAllBytes(alignmentFile.toPath()), StandardCharsets.UTF_8);
+            Type mapType = new TypeToken<Map<String, Object>>(){}.getType();
+            Map<String, Object> alignmentData = new Gson().fromJson(json, mapType);
+
+            Object timestamp = alignmentData.get("timestamp");
+            if (timestamp != null) {
+                return timestamp.toString();
+            }
+        } catch (Exception e) {
+            logger.debug("Could not read alignment date from {}: {}", alignmentFile, e.getMessage());
+        }
+
+        return null;
+    }
+
+    /**
      * Loads the saved macro image for a specific slide alignment.
      *
      * @param project The QuPath project

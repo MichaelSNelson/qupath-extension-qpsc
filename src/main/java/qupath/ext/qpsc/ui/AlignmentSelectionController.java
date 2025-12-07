@@ -2,11 +2,13 @@ package qupath.ext.qpsc.ui;
 
 import javafx.application.Platform;
 import javafx.geometry.Insets;
+import javafx.geometry.Pos;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
 import javafx.stage.Modality;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import qupath.ext.qpsc.controller.workflow.AlignmentHelper;
 import qupath.ext.qpsc.preferences.PersistentPreferences;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.utilities.AffineTransformManager;
@@ -20,18 +22,46 @@ import java.util.concurrent.CompletableFuture;
 /**
  * Controller for selecting between existing alignment transforms or creating new ones.
  * This dialog appears in the Existing Image workflow after sample setup.
+ *
+ * <p><b>Note:</b> Refinement options are now handled by {@link RefinementSelectionController}
+ * which provides a unified interface with confidence-based recommendations. This dialog
+ * focuses solely on choosing the alignment method (existing vs manual).
+ *
+ * <p>Smart defaults are applied based on:
+ * <ul>
+ *   <li>Availability of saved transforms</li>
+ *   <li>Confidence score of the best available transform</li>
+ *   <li>User's previous preferences</li>
+ * </ul>
  */
 public class AlignmentSelectionController {
     private static final Logger logger = LoggerFactory.getLogger(AlignmentSelectionController.class);
 
     /**
      * Result of the alignment selection dialog.
+     *
+     * @param useExistingAlignment Whether user selected to use existing alignment
+     * @param selectedTransform The transform preset selected (null if manual)
+     * @param confidence Confidence score of the selected alignment (0.0-1.0)
+     * @param wasAutoSelected Whether the choice was auto-selected based on smart defaults
      */
     public record AlignmentChoice(
             boolean useExistingAlignment,
             AffineTransformManager.TransformPreset selectedTransform,
-            boolean refinementRequested
-    ) {}
+            double confidence,
+            boolean wasAutoSelected
+    ) {
+        /**
+         * Legacy constructor for backward compatibility.
+         * @deprecated Use the full constructor with confidence and wasAutoSelected
+         */
+        @Deprecated
+        public AlignmentChoice(boolean useExistingAlignment,
+                               AffineTransformManager.TransformPreset selectedTransform,
+                               boolean refinementRequested) {
+            this(useExistingAlignment, selectedTransform, 0.7, false);
+        }
+    }
     /**
      * Updates the transform information display based on the selected transform.
      * Extracted to a separate method to avoid code duplication between initial display
@@ -115,9 +145,13 @@ public class AlignmentSelectionController {
                 // Create content
                 VBox content = new VBox(15);
                 content.setPadding(new Insets(20));
-                content.setPrefWidth(500);
+                content.setPrefWidth(600);
 
-// Radio buttons for choice
+                // Header
+                Label headerLabel = new Label("Choose Alignment Method");
+                headerLabel.setStyle("-fx-font-size: 14px; -fx-font-weight: bold;");
+
+                // Radio buttons for choice
                 ToggleGroup toggleGroup = new ToggleGroup();
 
                 RadioButton useExistingRadio = new RadioButton("Use existing alignment");
@@ -234,34 +268,52 @@ public class AlignmentSelectionController {
                 }
 
 
-                // Refinement checkbox
-                CheckBox refineCheckBox = new CheckBox("Refine alignment with single tile");
-                refineCheckBox.setDisable(!useExistingRadio.isSelected());
-                refineCheckBox.setTooltip(new Tooltip(
-                        "After using the saved alignment, verify position with a single tile"
-                ));
+                // Confidence label - shows calculated confidence for selected transform
+                Label confidenceLabel = new Label();
+                confidenceLabel.setStyle("-fx-font-size: 11px;");
+                confidenceLabel.setDisable(!useExistingRadio.isSelected());
 
-                // Load saved refinement preference
-                refineCheckBox.setSelected(PersistentPreferences.getRefineAlignment());
-
-                // Save when changed
-                refineCheckBox.selectedProperty().addListener((obs, old, selected) -> {
-                    PersistentPreferences.setRefineAlignment(selected);
-                    logger.info("Refinement checkbox changed to: {}", selected);
+                // Update confidence when transform changes
+                transformCombo.getSelectionModel().selectedItemProperty().addListener((obs, old, preset) -> {
+                    if (preset != null) {
+                        double conf = AlignmentHelper.calculateConfidence(preset);
+                        String level = conf >= 0.8 ? "HIGH" : (conf >= 0.5 ? "MEDIUM" : "LOW");
+                        String color = conf >= 0.8 ? "#2E7D32" : (conf >= 0.5 ? "#F57F17" : "#C62828");
+                        confidenceLabel.setText(String.format("Confidence: %s (%.0f%%)", level, conf * 100));
+                        confidenceLabel.setStyle("-fx-font-size: 11px; -fx-font-weight: bold; -fx-text-fill: " + color + ";");
+                    } else {
+                        confidenceLabel.setText("");
+                    }
                 });
+
+                // Trigger initial confidence update
+                if (transformCombo.getValue() != null) {
+                    double conf = AlignmentHelper.calculateConfidence(transformCombo.getValue());
+                    String level = conf >= 0.8 ? "HIGH" : (conf >= 0.5 ? "MEDIUM" : "LOW");
+                    String color = conf >= 0.8 ? "#2E7D32" : (conf >= 0.5 ? "#F57F17" : "#C62828");
+                    confidenceLabel.setText(String.format("Confidence: %s (%.0f%%)", level, conf * 100));
+                    confidenceLabel.setStyle("-fx-font-size: 11px; -fx-font-weight: bold; -fx-text-fill: " + color + ";");
+                }
+
+                // Note: Refinement options moved to RefinementSelectionController
+                Label refinementNote = new Label("[i] Refinement options available in next step");
+                refinementNote.setStyle("-fx-font-size: 10px; -fx-text-fill: #666; -fx-font-style: italic;");
+                refinementNote.setDisable(!useExistingRadio.isSelected());
 
                 transformSelectionBox.getChildren().addAll(
                         new Label("Select saved transform:"),
                         transformCombo,
                         detailsArea,
-                        refineCheckBox
+                        confidenceLabel,
+                        refinementNote
                 );
 
                 // Enable/disable based on radio selection
                 useExistingRadio.selectedProperty().addListener((obs, old, selected) -> {
                     transformCombo.setDisable(!selected);
                     detailsArea.setDisable(!selected);
-                    refineCheckBox.setDisable(!selected);
+                    confidenceLabel.setDisable(!selected);
+                    refinementNote.setDisable(!selected);
                     // Save preference when changed
                     PersistentPreferences.setUseExistingAlignment(selected);
 
@@ -275,56 +327,105 @@ public class AlignmentSelectionController {
                     }
                 });
 
-                // Info label
-                Label infoLabel = new Label();
-                infoLabel.setWrapText(true);
-                infoLabel.setStyle("-fx-font-size: 11px; -fx-text-fill: #666;");
+                // Determine availability for requirements
+                boolean hasTransforms = !availableTransforms.isEmpty();
 
-                if (availableTransforms.isEmpty()) {
-                    infoLabel.setText(
-                            "No saved alignments found for microscope '" + microscopeName + "'.\n" +
-                                    "You'll need to create a new alignment using the manual process."
-                    );
+                // Disable existing alignment option if no transforms
+                if (!hasTransforms) {
                     useExistingRadio.setDisable(true);
-                } else {
-                    infoLabel.setText(
-                            "Found " + availableTransforms.size() + " saved alignment(s) for this microscope.\n" +
-                                    "Using an existing alignment will apply the saved transform and detect the green box location."
-                    );
                 }
 
-                // Create new alignment description with better styling
-                VBox createNewBox = new VBox(5);
-                createNewBox.setPadding(new Insets(0, 0, 0, 30));
+                // Create comparison cards
+                java.util.List<RequirementItem> existingReqs = java.util.List.of(
+                        new RequirementItem("Saved transform available", hasTransforms),
+                        new RequirementItem("Macro image with green box", true)  // Assumed available if in this workflow
+                );
 
-                Label createNewDescription = new Label("This will guide you through:");
-                createNewDescription.setStyle("-fx-font-weight: bold; -fx-text-fill: -fx-text-base-color;");
+                VBox existingCard = createPathComparisonCard(
+                        "Use Existing Alignment",
+                        "Quick Setup (2-5 min)",
+                        "Good Accuracy (+/- 20 um)",
+                        existingReqs,
+                        "Repeated acquisitions, same scanner setup",
+                        hasTransforms
+                );
 
-                Label step1 = new Label("• Tissue detection or manual annotation creation");
-                Label step2 = new Label("• Tile generation for the regions of interest");
-                Label step3 = new Label("• Manual alignment of microscope stage to tiles");
-                Label step4 = new Label("• Optional multi-tile refinement for accuracy");
+                java.util.List<RequirementItem> manualReqs = java.util.List.of(
+                        new RequirementItem("Manual microscope control", true),
+                        new RequirementItem("Multiple tile selections", true)
+                );
 
-                // Use theme-aware text color
-                step1.setStyle("-fx-text-fill: -fx-text-base-color;");
-                step2.setStyle("-fx-text-fill: -fx-text-base-color;");
-                step3.setStyle("-fx-text-fill: -fx-text-base-color;");
-                step4.setStyle("-fx-text-fill: -fx-text-base-color;");
+                VBox manualCard = createPathComparisonCard(
+                        "Perform Manual Alignment",
+                        "Detailed Setup (10-20 min)",
+                        "Excellent Accuracy (+/- 5 um)",
+                        manualReqs,
+                        "First-time setup, new slides, maximum precision",
+                        true  // Always available
+                );
 
-                createNewBox.getChildren().addAll(createNewDescription, step1, step2, step3, step4);
+                // Make cards clickable to select radio buttons
+                existingCard.setOnMouseClicked(e -> {
+                    if (!useExistingRadio.isDisabled()) {
+                        useExistingRadio.setSelected(true);
+                    }
+                });
+                existingCard.setCursor(hasTransforms ? javafx.scene.Cursor.HAND : javafx.scene.Cursor.DEFAULT);
 
-                // Assemble content
+                manualCard.setOnMouseClicked(e -> createNewRadio.setSelected(true));
+                manualCard.setCursor(javafx.scene.Cursor.HAND);
+
+                // Visual feedback for selected card
+                useExistingRadio.selectedProperty().addListener((obs, old, selected) -> {
+                    if (selected) {
+                        existingCard.setStyle("-fx-border-color: #1976D2; -fx-border-width: 2; -fx-border-radius: 4; -fx-background-color: #E3F2FD; -fx-background-radius: 4;");
+                        manualCard.setStyle("-fx-border-color: #CCCCCC; -fx-border-radius: 4; -fx-background-color: #FAFAFA; -fx-background-radius: 4;");
+                    }
+                });
+
+                createNewRadio.selectedProperty().addListener((obs, old, selected) -> {
+                    if (selected) {
+                        manualCard.setStyle("-fx-border-color: #1976D2; -fx-border-width: 2; -fx-border-radius: 4; -fx-background-color: #E3F2FD; -fx-background-radius: 4;");
+                        if (hasTransforms) {
+                            existingCard.setStyle("-fx-border-color: #CCCCCC; -fx-border-radius: 4; -fx-background-color: #FAFAFA; -fx-background-radius: 4;");
+                        }
+                    }
+                });
+
+                // Create recommendation label
+                Label recommendationLabel = createRecommendationLabel(hasTransforms, availableTransforms.size());
+
+                // Cards container with radio buttons beside them
+                HBox existingRow = new HBox(10);
+                existingRow.setAlignment(Pos.TOP_LEFT);
+                existingRow.getChildren().addAll(useExistingRadio, existingCard);
+                HBox.setHgrow(existingCard, Priority.ALWAYS);
+
+                HBox manualRow = new HBox(10);
+                manualRow.setAlignment(Pos.TOP_LEFT);
+                manualRow.getChildren().addAll(createNewRadio, manualCard);
+                HBox.setHgrow(manualCard, Priority.ALWAYS);
+
+                // Assemble content with comparison cards
                 content.getChildren().addAll(
-                        new Label("How would you like to align the microscope to the image?"),
+                        headerLabel,
                         new Separator(),
-                        useExistingRadio,
+                        existingRow,
                         transformSelectionBox,
                         new Separator(),
-                        createNewRadio,
-                        createNewBox,
+                        manualRow,
                         new Separator(),
-                        infoLabel
+                        recommendationLabel
                 );
+
+                // Apply initial card highlighting based on selection
+                Platform.runLater(() -> {
+                    if (useExistingRadio.isSelected()) {
+                        existingCard.setStyle("-fx-border-color: #1976D2; -fx-border-width: 2; -fx-border-radius: 4; -fx-background-color: #E3F2FD; -fx-background-radius: 4;");
+                    } else if (createNewRadio.isSelected()) {
+                        manualCard.setStyle("-fx-border-color: #1976D2; -fx-border-width: 2; -fx-border-radius: 4; -fx-background-color: #E3F2FD; -fx-background-radius: 4;");
+                    }
+                });
 
                 // Set up dialog buttons
                 ButtonType okButton = new ButtonType("Continue", ButtonBar.ButtonData.OK_DONE);
@@ -333,21 +434,32 @@ public class AlignmentSelectionController {
 
                 dialog.getDialogPane().setContent(content);
 
+                // Track if user changed from auto-selected default
+                final boolean[] wasAutoSelected = {true};
+                toggleGroup.selectedToggleProperty().addListener((obs, old, newVal) -> {
+                    wasAutoSelected[0] = false;
+                });
+                transformCombo.valueProperty().addListener((obs, old, newVal) -> {
+                    wasAutoSelected[0] = false;
+                });
+
                 // Convert result
                 dialog.setResultConverter(buttonType -> {
                     if (buttonType == okButton) {
                         if (useExistingRadio.isSelected() && transformCombo.getValue() != null) {
-                            logger.info("Dialog result: Use existing alignment - transform: '{}', refinement: {}",
-                                    transformCombo.getValue() != null ? transformCombo.getValue().getName() : "null",
-                                    refineCheckBox.isSelected());
+                            AffineTransformManager.TransformPreset selected = transformCombo.getValue();
+                            double confidence = AlignmentHelper.calculateConfidence(selected);
+                            logger.info("Dialog result: Use existing alignment - transform: '{}', confidence: {:.2f}, auto-selected: {}",
+                                    selected.getName(), confidence, wasAutoSelected[0]);
                             return new AlignmentChoice(
                                     true,
-                                    transformCombo.getValue(),
-                                    refineCheckBox.isSelected()
+                                    selected,
+                                    confidence,
+                                    wasAutoSelected[0]
                             );
                         } else {
-                            logger.info("Dialog closed without result");
-                            return new AlignmentChoice(false, null, false);
+                            logger.info("Dialog result: Manual alignment selected");
+                            return new AlignmentChoice(false, null, 0.0, wasAutoSelected[0]);
                         }
                     }
                     return null;
@@ -367,4 +479,101 @@ public class AlignmentSelectionController {
 
         return future;
     }
+
+    // ==================== Path Comparison Card Helpers ====================
+
+    /**
+     * Creates a styled comparison card for an alignment path option.
+     *
+     * @param title The card title (e.g., "Use Existing Alignment")
+     * @param timeInfo Time estimate (e.g., "Quick Setup (2-5 minutes)")
+     * @param accuracyInfo Accuracy estimate (e.g., "Good Accuracy (+/- 20 um)")
+     * @param requirements List of requirements with availability status
+     * @param bestFor Description of ideal use case
+     * @param isAvailable Whether this option is currently available
+     * @return VBox containing the styled card
+     */
+    private static VBox createPathComparisonCard(String title, String timeInfo, String accuracyInfo,
+                                                  java.util.List<RequirementItem> requirements,
+                                                  String bestFor, boolean isAvailable) {
+        VBox card = new VBox(8);
+        card.setPadding(new Insets(12));
+        card.setStyle("-fx-border-color: #CCCCCC; -fx-border-radius: 4; -fx-background-color: #FAFAFA; -fx-background-radius: 4;");
+
+        if (!isAvailable) {
+            card.setStyle(card.getStyle() + " -fx-opacity: 0.6;");
+        }
+
+        // Title
+        Label titleLabel = new Label(title);
+        titleLabel.setStyle("-fx-font-weight: bold; -fx-font-size: 13px;");
+
+        // Time and accuracy row with icons
+        HBox metricsRow = new HBox(20);
+        metricsRow.setAlignment(Pos.CENTER_LEFT);
+
+        // Time info with clock icon
+        Label timeLabel = new Label("[T] " + timeInfo);
+        timeLabel.setStyle("-fx-font-size: 11px;");
+
+        // Accuracy info with target icon
+        Label accuracyLabel = new Label("[A] " + accuracyInfo);
+        accuracyLabel.setStyle("-fx-font-size: 11px;");
+
+        metricsRow.getChildren().addAll(timeLabel, accuracyLabel);
+
+        // Requirements list
+        VBox requirementsBox = new VBox(3);
+        requirementsBox.setPadding(new Insets(5, 0, 5, 0));
+
+        for (RequirementItem req : requirements) {
+            Label reqLabel = new Label();
+            if (req.met()) {
+                reqLabel.setText("[OK] " + req.description());
+                reqLabel.setStyle("-fx-text-fill: #2E7D32; -fx-font-size: 11px;");
+            } else {
+                reqLabel.setText("[ - ] " + req.description());
+                reqLabel.setStyle("-fx-text-fill: #666666; -fx-font-size: 11px;");
+            }
+            requirementsBox.getChildren().add(reqLabel);
+        }
+
+        // Best for description
+        Label bestForLabel = new Label("Best for: " + bestFor);
+        bestForLabel.setStyle("-fx-font-size: 11px; -fx-font-style: italic; -fx-text-fill: #555;");
+
+        card.getChildren().addAll(titleLabel, metricsRow, requirementsBox, bestForLabel);
+
+        return card;
+    }
+
+    /**
+     * Creates a recommendation label based on available alignments.
+     *
+     * @param hasTransforms Whether saved transforms are available
+     * @param transformCount Number of available transforms
+     * @return Label with styled recommendation text
+     */
+    private static Label createRecommendationLabel(boolean hasTransforms, int transformCount) {
+        Label label = new Label();
+        label.setWrapText(true);
+        label.setPadding(new Insets(8, 10, 8, 10));
+        label.setStyle("-fx-background-color: #FFF8E1; -fx-background-radius: 4; -fx-font-size: 11px;");
+
+        if (hasTransforms) {
+            label.setText("[i] Recommendation: Use Existing Alignment (found " + transformCount +
+                    " saved transform" + (transformCount > 1 ? "s" : "") + " for this microscope)");
+            label.setStyle(label.getStyle() + " -fx-text-fill: #F57F17;");
+        } else {
+            label.setText("[i] Recommendation: Perform Manual Alignment (no saved transforms found)");
+            label.setStyle(label.getStyle() + " -fx-text-fill: #E65100;");
+        }
+
+        return label;
+    }
+
+    /**
+     * Record for requirement items in the comparison cards.
+     */
+    private record RequirementItem(String description, boolean met) {}
 }

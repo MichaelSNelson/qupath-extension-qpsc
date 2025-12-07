@@ -3,6 +3,7 @@ package qupath.ext.qpsc.ui;
 import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.geometry.Insets;
+import javafx.geometry.Pos;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
 import javafx.stage.DirectoryChooser;
@@ -317,11 +318,6 @@ public class SampleSetupController {
             errorLabel.setWrapText(true);
             errorLabel.setVisible(false);
 
-            // --- Info label for existing project ---
-            Label infoLabel = new Label();
-            infoLabel.setStyle("-fx-text-fill: -fx-accent; -fx-font-size: 11px; -fx-font-style: italic;");
-            infoLabel.setWrapText(true);
-            infoLabel.setVisible(false);
 
             // --- Layout ---
             GridPane grid = new GridPane();
@@ -346,38 +342,13 @@ public class SampleSetupController {
             row++;
 
             // Show different context based on project state
+            // Note: Variant banner at top provides context (new vs existing project)
             if (!hasOpenProject) {
                 grid.add(new Label(res.getString("sampleSetup.label.projectsFolder")), 0, row);
                 grid.add(folderBox, 1, row);
                 row++;
-
-                // Add info about what will happen
-                infoLabel.setText("A new project will be created in: " +
-                        folderField.getText() + File.separator + "[Sample Name]");
-                infoLabel.setVisible(true);
-                grid.add(infoLabel, 0, row, 2, 1);
-                row++;
             } else {
-                // Show existing project info as non-editable
-                grid.add(new Label("Project:"), 0, row);
-                Label projectLabel = new Label(existingProjectName);
-                projectLabel.setStyle("-fx-font-weight: bold;");
-                grid.add(projectLabel, 1, row);
-                row++;
-
-                grid.add(new Label("Location:"), 0, row);
-                Label locationLabel = new Label(existingProjectFolder.getParent());
-                locationLabel.setStyle("-fx-font-size: 11px;");
-                grid.add(locationLabel, 1, row);
-                row++;
-
-                // Info about multi-sample support
-                Label multiSampleInfo = new Label("Sample will be added to the existing project.");
-                multiSampleInfo.setStyle("-fx-font-style: italic; -fx-font-size: 11px;");
-                grid.add(multiSampleInfo, 0, row, 2, 1);
-                row++;
-
-                // Pre-fill hidden folder field with existing value
+                // Pre-fill hidden folder field with existing value for result
                 folderField.setText(existingProjectFolder.getParent());
             }
 
@@ -395,25 +366,17 @@ public class SampleSetupController {
 
             grid.add(errorLabel, 0, row, 2, 1);
 
-            dlg.getDialogPane().setContent(grid);
+            // Create variant detection banner
+            HBox variantBanner = createVariantBanner(hasOpenProject, existingProjectName, folderField, sampleNameField);
+
+            // Wrap banner and grid in a VBox
+            VBox dialogContent = new VBox(0);
+            dialogContent.getChildren().addAll(variantBanner, grid);
+
+            dlg.getDialogPane().setContent(dialogContent);
             dlg.getDialogPane().setPrefWidth(600);
 
-            // Update info label when sample name changes
-            if (!hasOpenProject) {
-                sampleNameField.textProperty().addListener((obs, old, newVal) -> {
-                    if (!newVal.trim().isEmpty()) {
-                        infoLabel.setText("A new project will be created in: " +
-                                folderField.getText() + File.separator + newVal.trim());
-                    }
-                });
-
-                folderField.textProperty().addListener((obs, old, newVal) -> {
-                    if (!sampleNameField.getText().trim().isEmpty()) {
-                        infoLabel.setText("A new project will be created in: " +
-                                newVal + File.separator + sampleNameField.getText().trim());
-                    }
-                });
-            }
+            // Note: Banner dynamically updates path display via listeners in createVariantBanner()
 
             // Prevent dialog from closing on OK if validation fails
             Button okButton = (Button) dlg.getDialogPane().lookupButton(okType);
@@ -550,4 +513,102 @@ public class SampleSetupController {
 
     /** Holds the user's choices from the "sample setup" dialog. */
     public record SampleSetupResult(String sampleName, File projectsFolder, String modality, String objective, String detector) { }
+
+    // ==================== Variant Detection Banner ====================
+
+    /**
+     * Banner background color for creating a new project (blue tint).
+     */
+    private static final String BANNER_COLOR_NEW_PROJECT = "-fx-background-color: #E3F2FD; -fx-border-color: #90CAF9; -fx-border-width: 0 0 1 0;";
+
+    /**
+     * Banner background color for adding to an existing project (green tint).
+     */
+    private static final String BANNER_COLOR_EXISTING_PROJECT = "-fx-background-color: #E8F5E9; -fx-border-color: #A5D6A7; -fx-border-width: 0 0 1 0;";
+
+    /**
+     * Creates a variant detection banner that shows context about whether
+     * a new project is being created or images are being added to an existing project.
+     *
+     * @param hasOpenProject True if adding to existing project, false if creating new
+     * @param existingProjectName Name of the existing project (if hasOpenProject is true)
+     * @param projectsFolder Folder where new projects will be created (if hasOpenProject is false)
+     * @param sampleNameField The sample name text field (for dynamic updates to new project path)
+     * @return HBox containing the styled banner
+     */
+    private static HBox createVariantBanner(boolean hasOpenProject, String existingProjectName,
+                                            TextField folderField, TextField sampleNameField) {
+        HBox banner = new HBox(10);
+        banner.setPadding(new Insets(12, 15, 12, 15));
+        banner.setAlignment(Pos.CENTER_LEFT);
+
+        // Icon label - use text symbols for cross-platform compatibility
+        Label iconLabel = new Label();
+        iconLabel.setStyle("-fx-font-size: 16px; -fx-font-weight: bold;");
+
+        // Primary text (bold)
+        Label primaryText = new Label();
+        primaryText.setStyle("-fx-font-weight: bold; -fx-font-size: 13px;");
+
+        // Secondary text (path/details)
+        Label secondaryText = new Label();
+        secondaryText.setStyle("-fx-font-size: 11px; -fx-text-fill: #555;");
+
+        if (hasOpenProject) {
+            // Adding to existing project - green banner
+            banner.setStyle(BANNER_COLOR_EXISTING_PROJECT);
+            iconLabel.setText("[+]");
+            iconLabel.setStyle(iconLabel.getStyle() + " -fx-text-fill: #2E7D32;");
+            primaryText.setText("Adding to existing project: " + existingProjectName);
+            primaryText.setStyle(primaryText.getStyle() + " -fx-text-fill: #1B5E20;");
+            secondaryText.setText("New sample will be added to this project");
+            secondaryText.setStyle(secondaryText.getStyle() + " -fx-text-fill: #388E3C;");
+        } else {
+            // Creating new project - blue banner
+            banner.setStyle(BANNER_COLOR_NEW_PROJECT);
+            iconLabel.setText("[*]");
+            iconLabel.setStyle(iconLabel.getStyle() + " -fx-text-fill: #1565C0;");
+            primaryText.setText("Creating new project");
+            primaryText.setStyle(primaryText.getStyle() + " -fx-text-fill: #0D47A1;");
+
+            // Dynamic path display - will be updated as user types
+            String initialPath = folderField.getText();
+            String sampleName = sampleNameField.getText().trim();
+            if (!sampleName.isEmpty()) {
+                secondaryText.setText("Location: " + initialPath + File.separator + sampleName);
+            } else {
+                secondaryText.setText("Location: " + initialPath + File.separator + "[Sample Name]");
+            }
+            secondaryText.setStyle(secondaryText.getStyle() + " -fx-text-fill: #1976D2;");
+
+            // Add listeners to update path dynamically
+            sampleNameField.textProperty().addListener((obs, oldVal, newVal) -> {
+                String path = folderField.getText();
+                String name = newVal.trim();
+                if (!name.isEmpty()) {
+                    secondaryText.setText("Location: " + path + File.separator + name);
+                } else {
+                    secondaryText.setText("Location: " + path + File.separator + "[Sample Name]");
+                }
+            });
+
+            folderField.textProperty().addListener((obs, oldVal, newVal) -> {
+                String name = sampleNameField.getText().trim();
+                if (!name.isEmpty()) {
+                    secondaryText.setText("Location: " + newVal + File.separator + name);
+                } else {
+                    secondaryText.setText("Location: " + newVal + File.separator + "[Sample Name]");
+                }
+            });
+        }
+
+        // Layout: icon | primary text | secondary text (stacked vertically)
+        VBox textBox = new VBox(2);
+        textBox.getChildren().addAll(primaryText, secondaryText);
+        HBox.setHgrow(textBox, Priority.ALWAYS);
+
+        banner.getChildren().addAll(iconLabel, textBox);
+
+        return banner;
+    }
 }

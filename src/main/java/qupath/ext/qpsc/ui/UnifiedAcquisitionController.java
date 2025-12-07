@@ -193,13 +193,15 @@ public class UnifiedAcquisitionController {
             okButton = (Button) dialog.getDialogPane().lookupButton(okType);
             okButton.setDisable(true); // Start disabled until validation passes
 
+            // Build error summary panel FIRST - other sections may trigger validation during init
+            createErrorSummaryPanel();
+
             // Build all sections
             createProjectSection();
             createHardwareSection();
             createRegionSection();
             createPreviewPanel();
             createAdvancedSection();
-            createErrorSummaryPanel();
 
             // Setup debounced preview updates
             setupPreviewUpdateListeners();

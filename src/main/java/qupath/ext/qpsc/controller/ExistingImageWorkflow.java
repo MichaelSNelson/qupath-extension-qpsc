@@ -22,6 +22,10 @@ import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.*;
 
+// Import for RefinementSelectionController
+import qupath.ext.qpsc.ui.RefinementSelectionController.RefinementChoice;
+import qupath.ext.qpsc.ui.RefinementSelectionController.AlignmentInfo;
+
 /**
  * ExistingImageWorkflow - Refactored version with improved structure and readability.
  *
@@ -76,6 +80,18 @@ public class ExistingImageWorkflow {
 
         /**
          * Executes the complete workflow from validation through acquisition and stitching.
+         *
+         * <p>Workflow stages:
+         * <ol>
+         *   <li>Validate prerequisites (image open, microscope connected)</li>
+         *   <li>Sample setup dialog</li>
+         *   <li>Check for existing slide-specific alignment</li>
+         *   <li>Alignment selection (if no slide alignment found)</li>
+         *   <li>Refinement selection (for existing alignments)</li>
+         *   <li>Execute alignment path (existing or manual)</li>
+         *   <li>Perform acquisition</li>
+         *   <li>Wait for stitching completion</li>
+         * </ol>
          */
         public void execute() {
             // Step 1: Validate prerequisites
@@ -83,10 +99,12 @@ public class ExistingImageWorkflow {
                 return;
             }
 
-            // Step 2: Setup sample
+            // Step 2: Setup sample and process workflow
             setupSample()
                     .thenCompose(this::checkExistingAlignment)
                     .thenCompose(this::processAlignment)
+                    .thenCompose(this::showRefinementSelection)  // Phase 2: New refinement stage
+                    .thenCompose(this::handleRefinementChoice)   // Phase 2: Execute refinement
                     .thenCompose(this::performAcquisition)
                     .thenCompose(this::waitForCompletion)
                     .thenAccept(result -> {
@@ -161,6 +179,10 @@ public class ExistingImageWorkflow {
 
         /**
          * Checks for existing slide-specific alignment.
+         *
+         * <p>If found, stores the transform and confidence information in the state.
+         * Refinement selection is now handled by the separate {@code showRefinementSelection}
+         * stage using {@link RefinementSelectionController}.
          */
         private CompletableFuture<WorkflowState> checkExistingAlignment(WorkflowState state) {
             if (state == null) return CompletableFuture.completedFuture(null);
@@ -172,11 +194,11 @@ public class ExistingImageWorkflow {
                         if (slideAlignmentResult != null) {
                             state.useExistingSlideAlignment = true;
                             state.transform = slideAlignmentResult.getTransform();
-                            // Store whether refinement was requested
-                            if (slideAlignmentResult.isRefineRequested()) {
-                                logger.info("User requested refinement of existing slide alignment");
-                                state.slideAlignmentNeedsRefinement = true;
-                            }
+                            // Store confidence and source for refinement dialog
+                            state.alignmentConfidence = slideAlignmentResult.getConfidence();
+                            state.alignmentSource = slideAlignmentResult.getSource();
+                            logger.info("Found slide-specific alignment - confidence: {}, source: {}",
+                                    String.format("%.2f", state.alignmentConfidence), state.alignmentSource);
                         }
                         return state;
                     });
@@ -341,6 +363,185 @@ public class ExistingImageWorkflow {
         }
 
         /**
+         * Shows the refinement selection dialog for existing alignments.
+         *
+         * <p>This stage is only shown when using an existing alignment (not manual).
+         * It allows users to choose between:
+         * <ul>
+         *   <li>Proceed without refinement (fastest)</li>
+         *   <li>Single-tile refinement (quick verification)</li>
+         *   <li>Full manual alignment (start over)</li>
+         * </ul>
+         *
+         * @param state Current workflow state
+         * @return Updated workflow state with refinement choice
+         */
+        private CompletableFuture<WorkflowState> showRefinementSelection(WorkflowState state) {
+            if (state == null) return CompletableFuture.completedFuture(null);
+
+            // Skip refinement dialog for manual alignment path
+            if (state.alignmentChoice != null && !state.alignmentChoice.useExistingAlignment()) {
+                logger.info("Manual alignment selected - skipping refinement selection");
+                return CompletableFuture.completedFuture(state);
+            }
+
+            // Also skip if we're using slide-specific alignment (already handled)
+            if (state.useExistingSlideAlignment && !state.slideAlignmentNeedsRefinement) {
+                logger.info("Using slide-specific alignment - skipping refinement selection");
+                return CompletableFuture.completedFuture(state);
+            }
+
+            // Build alignment info for the dialog
+            String source;
+            double confidence;
+
+            if (state.useExistingSlideAlignment) {
+                source = "Slide-specific";
+                // Get confidence from the slide alignment result
+                confidence = state.alignmentConfidence;
+            } else if (state.alignmentChoice != null && state.alignmentChoice.selectedTransform() != null) {
+                source = AlignmentHelper.getSourceDescription(state.alignmentChoice.selectedTransform());
+                confidence = state.alignmentChoice.confidence();
+            } else {
+                source = "Unknown";
+                confidence = 0.5;
+            }
+
+            String transformName = state.alignmentChoice != null && state.alignmentChoice.selectedTransform() != null
+                    ? state.alignmentChoice.selectedTransform().getName()
+                    : "Current alignment";
+
+            AlignmentInfo alignmentInfo = new AlignmentInfo(confidence, source, transformName);
+
+            logger.info("Showing refinement selection - confidence: {}, source: {}",
+                    String.format("%.2f", confidence), source);
+
+            return RefinementSelectionController.showDialog(gui, alignmentInfo)
+                    .thenApply(result -> {
+                        if (result == null) {
+                            // User pressed Back - this should go back to alignment selection
+                            // For now, treat as cancellation
+                            throw new CancellationException("Refinement selection cancelled");
+                        }
+
+                        state.refinementChoice = result.choice();
+                        logger.info("Refinement choice: {} (auto-selected: {})",
+                                result.choice(), result.wasAutoSelected());
+
+                        return state;
+                    });
+        }
+
+        /**
+         * Handles the user's refinement choice.
+         *
+         * @param state Current workflow state with refinement choice
+         * @return Updated workflow state after handling refinement
+         */
+        private CompletableFuture<WorkflowState> handleRefinementChoice(WorkflowState state) {
+            if (state == null) return CompletableFuture.completedFuture(null);
+
+            switch (state.refinementChoice) {
+                case NONE:
+                    logger.info("Proceeding without refinement");
+                    return CompletableFuture.completedFuture(state);
+
+                case SINGLE_TILE:
+                    logger.info("Performing single-tile refinement");
+                    return performSingleTileRefinement(state);
+
+                case FULL_MANUAL:
+                    logger.info("User requested full manual alignment - starting over");
+                    // Clear existing alignment and restart with manual path
+                    state.alignmentChoice = new AlignmentSelectionController.AlignmentChoice(
+                            false, null, 0.0, false);
+                    state.useExistingSlideAlignment = false;
+                    state.transform = null;
+                    return new ManualAlignmentPath(gui, state).execute();
+
+                default:
+                    logger.warn("Unknown refinement choice: {}", state.refinementChoice);
+                    return CompletableFuture.completedFuture(state);
+            }
+        }
+
+        /**
+         * Performs single-tile refinement on the current alignment.
+         */
+        private CompletableFuture<WorkflowState> performSingleTileRefinement(WorkflowState state) {
+            // Ensure we have tiles to work with
+            if (state.annotations == null || state.annotations.isEmpty()) {
+                logger.warn("No annotations available for refinement");
+                return CompletableFuture.completedFuture(state);
+            }
+
+            // Create tiles for refinement if not already done
+            if (state.projectInfo != null) {
+                TileHelper.createTilesForAnnotations(
+                        state.annotations,
+                        state.sample,
+                        state.projectInfo.getTempTileDirectory(),
+                        state.projectInfo.getImagingModeWithIndex(),
+                        state.pixelSize
+                );
+            }
+
+            return SingleTileRefinement.performRefinement(
+                    gui, state.annotations, state.transform
+            ).thenApply(result -> {
+                if (result.transform != null) {
+                    state.transform = result.transform;
+                    MicroscopeController.getInstance().setCurrentTransform(result.transform);
+                    logger.info("Updated transform with refined alignment");
+                }
+                // Store the selected refinement tile for acquisition prioritization
+                state.refinementTile = result.selectedTile;
+                if (result.selectedTile != null) {
+                    logger.info("Stored refinement tile '{}' for acquisition prioritization",
+                            result.selectedTile.getName());
+                }
+
+                // Save the refined alignment
+                saveRefinedAlignment(state);
+
+                return state;
+            });
+        }
+
+        /**
+         * Saves the refined alignment to the project.
+         */
+        private void saveRefinedAlignment(WorkflowState state) {
+            @SuppressWarnings("unchecked")
+            Project<BufferedImage> project = state.projectInfo != null
+                    ? (Project<BufferedImage>) state.projectInfo.getCurrentProject()
+                    : gui.getProject();
+
+            if (project == null) {
+                logger.warn("Cannot save refined alignment - no project available");
+                return;
+            }
+
+            // Get the image name (without extension) from the current image
+            String imageName = null;
+            if (gui.getImageData() != null) {
+                String fullImageName = gui.getImageData().getServer().getMetadata().getName();
+                imageName = qupath.lib.common.GeneralTools.stripExtension(fullImageName);
+            }
+
+            if (imageName != null && state.transform != null) {
+                AffineTransformManager.saveSlideAlignment(
+                        project,
+                        imageName,
+                        state.sample.modality(),
+                        state.transform,
+                        null  // No processed macro image for refinement
+                );
+                logger.info("Saved refined slide-specific alignment for image: {}", imageName);
+            }
+        }
+
+        /**
          * Performs the acquisition phase.
          */
         private CompletableFuture<WorkflowState> performAcquisition(WorkflowState state) {
@@ -473,5 +674,9 @@ public class ExistingImageWorkflow {
         public java.util.Map<String, Double> angleOverrides; // User-specified angle overrides for modality
         public PathObject refinementTile = null; // Tile used for alignment refinement (to prioritize in acquisition)
 
+        // Phase 2: Refinement selection
+        public RefinementChoice refinementChoice = RefinementChoice.NONE; // Default to no refinement
+        public double alignmentConfidence = 0.7; // Confidence score for current alignment
+        public String alignmentSource = "Unknown"; // Source description for alignment
     }
 }

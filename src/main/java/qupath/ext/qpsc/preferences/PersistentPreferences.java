@@ -441,6 +441,18 @@ public class PersistentPreferences {
         refineAlignmentSaved.setValue(String.valueOf(refine));
     }
 
+    // ================== REFINEMENT SELECTION ==================
+    private static final StringProperty lastRefinementChoiceSaved =
+            PathPrefs.createPersistentPreference("LastRefinementChoice", "");
+
+    public static String getLastRefinementChoice() {
+        return lastRefinementChoiceSaved.getValue();
+    }
+
+    public static void setLastRefinementChoice(final String choice) {
+        lastRefinementChoiceSaved.setValue(choice != null ? choice : "");
+    }
+
     // ================== SOCKET CONNECTION SETTINGS ==================
     private static final StringProperty socketConnectionTimeoutMsSaved =
             PathPrefs.createPersistentPreference("SocketConnectionTimeoutMs", "3000");
