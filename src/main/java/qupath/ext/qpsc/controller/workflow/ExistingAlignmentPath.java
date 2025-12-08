@@ -5,6 +5,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qupath.ext.qpsc.controller.ExistingImageWorkflow.WorkflowState;
 import qupath.ext.qpsc.controller.MicroscopeController;
+import qupath.ext.qpsc.ui.RefinementSelectionController.RefinementChoice;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.ui.GreenBoxPreviewController;
 import qupath.ext.qpsc.ui.UIFunctions;
@@ -274,14 +275,14 @@ public class ExistingAlignmentPath {
             MicroscopeController.getInstance().setCurrentTransform(fullResToStage);
 
             // Save if not requesting refinement
-            if (!state.alignmentChoice.refinementRequested()) {
+            if (state.refinementChoice == RefinementChoice.NONE) {
                 saveSlideAlignment(context);
             }
 
             return state;
         }).thenCompose(currentState -> {
             // Handle refinement if requested
-            if (state.alignmentChoice.refinementRequested()) {
+            if (state.refinementChoice != RefinementChoice.NONE) {
                 return performRefinement(context);
             } else {
                 return CompletableFuture.completedFuture(currentState);
