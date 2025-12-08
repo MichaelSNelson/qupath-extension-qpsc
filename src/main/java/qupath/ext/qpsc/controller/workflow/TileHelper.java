@@ -83,6 +83,55 @@ public class TileHelper {
     }
 
     /**
+     * Creates tiles for the given annotations with explicit flip parameters.
+     *
+     * <p>This overload is used when the flip status should come from image metadata
+     * rather than global preferences, such as when working with existing flipped images.</p>
+     *
+     * @param annotations List of annotations to tile
+     * @param sample Sample setup information
+     * @param tempTileDirectory Directory for tile configuration files
+     * @param modeWithIndex Imaging mode identifier
+     * @param macroPixelSize Macro image pixel size (no longer used)
+     * @param invertedX Whether to invert X axis (from image metadata)
+     * @param invertedY Whether to invert Y axis (from image metadata)
+     */
+    public static void createTilesForAnnotations(
+            List<PathObject> annotations,
+            SampleSetupController.SampleSetupResult sample,
+            String tempTileDirectory,
+            String modeWithIndex,
+            double macroPixelSize,
+            boolean invertedX,
+            boolean invertedY) {
+
+        logger.info("Creating tiles for {} annotations in modality {} (invertX={}, invertY={})",
+                annotations.size(), modeWithIndex, invertedX, invertedY);
+
+        try {
+            // Delegate to the unified method in TilingUtilities with explicit flip params
+            TilingUtilities.createTilesForAnnotations(
+                    annotations,
+                    sample,
+                    tempTileDirectory,
+                    modeWithIndex,
+                    invertedX,
+                    invertedY
+            );
+
+        } catch (IOException e) {
+            logger.error("Failed to get camera FOV from server", e);
+            throw new RuntimeException(
+                    "Failed to get camera FOV from server: " + e.getMessage() +
+                            "\nPlease check server connection.", e);
+        } catch (IllegalArgumentException e) {
+            logger.error("Invalid tile configuration", e);
+            throw new RuntimeException(
+                    "Invalid tile configuration: " + e.getMessage(), e);
+        }
+    }
+
+    /**
      * Validates that tile counts are reasonable.
      *
      * <p>Prevents creation of excessive tiles that could indicate:

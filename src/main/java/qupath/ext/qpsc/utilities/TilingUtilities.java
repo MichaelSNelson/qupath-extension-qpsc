@@ -437,6 +437,100 @@ public class TilingUtilities {
     }
 
     /**
+     * Creates tiles for the given annotations with explicit flip parameters.
+     *
+     * <p>This overload is used when the flip status should come from image metadata
+     * rather than global preferences, such as when working with existing flipped images.</p>
+     *
+     * @param annotations List of annotations to tile
+     * @param sampleSetup Sample setup information containing modality
+     * @param tempTileDirectory Directory for tile configuration files
+     * @param modeWithIndex Imaging mode identifier with index (e.g., "bf_10x_1")
+     * @param invertedX Whether to invert X axis (from image metadata)
+     * @param invertedY Whether to invert Y axis (from image metadata)
+     * @throws IOException if communication with server fails or tile creation fails
+     * @throws IllegalArgumentException if annotations are empty or invalid
+     * @since 0.3.0
+     */
+    public static void createTilesForAnnotations(
+            List<PathObject> annotations,
+            SampleSetupController.SampleSetupResult sampleSetup,
+            String tempTileDirectory,
+            String modeWithIndex,
+            boolean invertedX,
+            boolean invertedY) throws IOException {
+
+        if (annotations == null || annotations.isEmpty()) {
+            throw new IllegalArgumentException("No annotations provided for tiling");
+        }
+
+        logger.info("Creating tiles for {} annotations in modality {} (invertX={}, invertY={})",
+                annotations.size(), modeWithIndex, invertedX, invertedY);
+
+        QuPathGUI gui = QuPathGUI.getInstance();
+        if (gui.getImageData() == null) {
+            throw new IllegalStateException("No image is open in QuPath");
+        }
+
+        // Remove existing tiles for this modality
+        String modalityBase = sampleSetup.modality().replaceAll("(_\\d+)$", "");
+        removeExistingModalityTiles(gui, modalityBase);
+
+        // Get FOV using the explicit hardware configuration from sample setup
+        double[] fovMicrons = MicroscopeController.getInstance().getCameraFOVFromConfig(
+                sampleSetup.modality(),
+                sampleSetup.objective(),
+                sampleSetup.detector());
+        double frameWidthMicrons = fovMicrons[0];
+        double frameHeightMicrons = fovMicrons[1];
+
+        logger.info("Camera FOV from server: {} x {} microns",
+                frameWidthMicrons, frameHeightMicrons);
+
+        // Validate FOV is reasonable (between 0.1mm and 50mm)
+        if (frameWidthMicrons < 100 || frameWidthMicrons > 50000 ||
+                frameHeightMicrons < 100 || frameHeightMicrons > 50000) {
+            throw new IOException(String.format(
+                    "Camera FOV seems unreasonable: %.1f x %.1f um. Expected between 100-50000 um",
+                    frameWidthMicrons, frameHeightMicrons));
+        }
+
+        // Get the actual image pixel size from QuPath
+        double imagePixelSize = gui.getImageData().getServer()
+                .getPixelCalibration().getAveragedPixelSizeMicrons();
+
+        // Convert to image pixels for QuPath visualization and tile calculation
+        double frameWidthPixels = frameWidthMicrons / imagePixelSize;
+        double frameHeightPixels = frameHeightMicrons / imagePixelSize;
+
+        // Get overlap from preferences (flip params are explicit)
+        double overlapPercent = QPPreferenceDialog.getTileOverlapPercentProperty();
+
+        logger.info("Frame size in QuPath pixels: {} x {} ({}% overlap)",
+                frameWidthPixels, frameHeightPixels, overlapPercent);
+        logger.info("Pixel size: {} microns/pixel", imagePixelSize);
+
+        // Validate tile counts before creation
+        validateAnnotationTileCounts(annotations, frameWidthPixels, frameHeightPixels, overlapPercent);
+
+        // Create new tiles using explicit flip parameters
+        TilingRequest request = new TilingRequest.Builder()
+                .outputFolder(tempTileDirectory)
+                .modalityName(modeWithIndex)
+                .frameSize(frameWidthPixels, frameHeightPixels)
+                .overlapPercent(overlapPercent)
+                .annotations(annotations)
+                .invertAxes(invertedX, invertedY)  // Use explicit parameters
+                .createDetections(true)
+                .addBuffer(true)
+                .pixelSizeMicrons(imagePixelSize)
+                .build();
+
+        createTiles(request);
+        logger.info("Created tiles for {} annotations with explicit flip settings", annotations.size());
+    }
+
+    /**
      * Removes all detection tiles for a given modality.
      *
      * @param gui QuPath GUI instance

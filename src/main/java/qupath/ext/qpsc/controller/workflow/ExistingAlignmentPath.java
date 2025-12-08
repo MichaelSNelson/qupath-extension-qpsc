@@ -13,6 +13,7 @@ import qupath.ext.qpsc.utilities.*;
 import qupath.lib.gui.QuPathGUI;
 import qupath.lib.objects.PathObject;
 import qupath.lib.projects.Project;
+import qupath.lib.scripting.QP;
 import qupath.lib.roi.interfaces.ROI;
 
 import java.awt.*;
@@ -382,13 +383,28 @@ public class ExistingAlignmentPath {
      * @return CompletableFuture containing the refined workflow state
      */
     private CompletableFuture<WorkflowState> performRefinement(GreenBoxContext context) {
-        // Create tiles for refinement
+        // Get flip status from image metadata (not global preferences)
+        // For existing images, the flip was applied when the image was imported
+        var currentEntry = QP.getProjectEntry();
+        boolean isFlipped = currentEntry != null && ImageMetadataManager.isFlipped(currentEntry);
+
+        // For flipped images, we need to use the flip settings
+        // The image coordinates are already flipped, so tiles should match
+        boolean invertedX = isFlipped && QPPreferenceDialog.getFlipMacroXProperty();
+        boolean invertedY = isFlipped && QPPreferenceDialog.getFlipMacroYProperty();
+
+        logger.info("Creating tiles for refinement: isFlipped={}, invertedX={}, invertedY={}",
+                isFlipped, invertedX, invertedY);
+
+        // Create tiles for refinement with explicit flip parameters
         TileHelper.createTilesForAnnotations(
                 state.annotations,
                 state.sample,
                 state.projectInfo.getTempTileDirectory(),
                 state.projectInfo.getImagingModeWithIndex(),
-                state.pixelSize
+                state.pixelSize,
+                invertedX,
+                invertedY
         );
 
         return SingleTileRefinement.performRefinement(

@@ -9,10 +9,12 @@ import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.ui.AffineTransformationController;
 import qupath.ext.qpsc.utilities.AffineTransformManager;
 import qupath.ext.qpsc.utilities.ImageFlipHelper;
+import qupath.ext.qpsc.utilities.ImageMetadataManager;
 import qupath.ext.qpsc.utilities.MacroImageUtility;
 import qupath.ext.qpsc.utilities.MinorFunctions;
 import qupath.lib.gui.QuPathGUI;
 import qupath.lib.projects.Project;
+import qupath.lib.scripting.QP;
 
 import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
@@ -177,18 +179,28 @@ public class ManualAlignmentPath {
             throw new RuntimeException("No annotations available for manual alignment");
         }
 
-        // Create tiles for alignment
+        // Get flip status from image metadata (not global preferences)
+        // For existing images, the flip was applied when the image was imported
+        var currentEntry = QP.getProjectEntry();
+        boolean isFlipped = currentEntry != null && ImageMetadataManager.isFlipped(currentEntry);
+
+        // For flipped images, we need to use the flip settings
+        boolean invertedX = isFlipped && QPPreferenceDialog.getFlipMacroXProperty();
+        boolean invertedY = isFlipped && QPPreferenceDialog.getFlipMacroYProperty();
+
+        logger.info("Creating tiles for manual alignment: isFlipped={}, invertedX={}, invertedY={}",
+                isFlipped, invertedX, invertedY);
+
+        // Create tiles for alignment with explicit flip parameters
         TileHelper.createTilesForAnnotations(
                 state.annotations,
                 state.sample,
                 state.projectInfo.getTempTileDirectory(),
                 state.projectInfo.getImagingModeWithIndex(),
-                state.pixelSize
+                state.pixelSize,
+                invertedX,
+                invertedY
         );
-
-        // Get axis inversion settings
-        boolean invertedX = QPPreferenceDialog.getInvertedXProperty();
-        boolean invertedY = QPPreferenceDialog.getInvertedYProperty();
 
         // Show manual alignment UI
         return AffineTransformationController.setupAffineTransformationAndValidationGUI(
