@@ -135,6 +135,14 @@ public class BoundedAcquisitionWorkflow {
                     @SuppressWarnings("unchecked")
                     Project<BufferedImage> project = (Project<BufferedImage>) pd.get("currentQuPathProject");
 
+                    // Derive actual sample name and projectsFolder from tempTileDir path structure:
+                    // tempTileDir = <projectsFolder>/<sampleName>/<modeWithIndex>
+                    // Get parent (sampleName dir) then get its name
+                    java.nio.file.Path tempTilePath = java.nio.file.Paths.get(tempTileDir);
+                    String actualSampleName = tempTilePath.getParent().getFileName().toString();
+                    String actualProjectsFolder = tempTilePath.getParent().getParent().toString();
+                    logger.debug("Derived sample name '{}' and projectsFolder '{}' from tempTileDir path", actualSampleName, actualProjectsFolder);
+
                     // Get camera FOV using explicit hardware selections
                     String configFileLocation = QPPreferenceDialog.getMicroscopeConfigFileProperty();
                     MicroscopeConfigManager configManager = MicroscopeConfigManager.getInstance(configFileLocation);
@@ -382,7 +390,9 @@ public class BoundedAcquisitionWorkflow {
                                     qupathGUI,
                                     project,
                                     STITCH_EXECUTOR,
-                                    modalityHandler
+                                    modalityHandler,
+                                    actualSampleName,  // Use derived sample name for correct path
+                                    actualProjectsFolder  // Use derived projectsFolder for correct path
                             ).thenRun(() -> {
                                 Platform.runLater(() ->
                                         qupath.fx.dialogs.Dialogs.showInfoNotification(

@@ -136,6 +136,14 @@ public class BoundingBoxWorkflow {
                     @SuppressWarnings("unchecked")
                     Project<BufferedImage> project = (Project<BufferedImage>) pd.get("currentQuPathProject");
 
+                    // Derive actual sample name and projectsFolder from tempTileDir path structure:
+                    // tempTileDir = <projectsFolder>/<sampleName>/<modeWithIndex>
+                    // Get parent (sampleName dir) then get its name
+                    Path tempTilePath = Paths.get(tempTileDir);
+                    String actualSampleName = tempTilePath.getParent().getFileName().toString();
+                    String actualProjectsFolder = tempTilePath.getParent().getParent().toString();
+                    logger.debug("Derived sample name '{}' and projectsFolder '{}' from tempTileDir path", actualSampleName, actualProjectsFolder);
+
 // 5) Get camera FOV using explicit hardware selections
                     logger.info("Getting camera FOV for modality: {}, objective: {}, detector: {}", 
                             sample.modality(), sample.objective(), sample.detector());
@@ -432,7 +440,9 @@ public class BoundingBoxWorkflow {
                                                 qupathGUI,
                                                 project,
                                                 STITCH_EXECUTOR,
-                                                modalityHandler
+                                                modalityHandler,
+                                                actualSampleName,  // Use derived sample name for correct path
+                                                actualProjectsFolder  // Use derived projectsFolder for correct path
                                         ).thenRun(() -> {
                                             // Show completion notification when stitching is done
                                             Platform.runLater(() ->

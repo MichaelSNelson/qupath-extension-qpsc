@@ -156,24 +156,20 @@ public class AcquisitionManager {
         // Get preferences
         List<String> preselected = PersistentPreferences.getSelectedAnnotationClasses();
 
-        // Show selection dialog with modality for modality-specific UI
-        return AnnotationAcquisitionDialog.showDialog(existingClassNames, preselected, state.sample.modality())
+        // Show annotation selection dialog
+        // Note: Modality-specific options (like PPM angles) come from the main
+        // acquisition dialog's Advanced Options, not this annotation selection dialog
+        return AnnotationAcquisitionDialog.showDialog(existingClassNames, preselected)
                 .thenApply(result -> {
                     if (!result.proceed || result.selectedClasses.isEmpty()) {
                         logger.info("Acquisition cancelled or no classes selected");
                         return false;
                     }
 
-                    // Store selected classes and angle overrides in state
+                    // Store selected classes in state
                     state.selectedAnnotationClasses = result.selectedClasses;
                     logger.info("User selected {} classes for acquisition: {}",
                             result.selectedClasses.size(), result.selectedClasses);
-
-                    // Store angle overrides if provided
-                    if (result.angleOverrides != null && !result.angleOverrides.isEmpty()) {
-                        state.angleOverrides = result.angleOverrides;
-                        logger.info("User provided angle overrides: {}", result.angleOverrides);
-                    }
 
                     return true;
                 });
@@ -788,7 +784,13 @@ public class AcquisitionManager {
         logger.info("Annotation {} offset from slide corner: ({}, {}) µm",
                 annotation.getName(), offset[0], offset[1]);
 
-        // Create stitching future
+        // Derive projectsFolder from tempTileDirectory
+        // tempTileDirectory structure: projectsFolder/sampleName/modeWithIndex
+        String tempTileDir = state.projectInfo.getTempTileDirectory();
+        java.nio.file.Path projectsFolder = java.nio.file.Paths.get(tempTileDir).getParent().getParent();
+        logger.debug("Derived projectsFolder for stitching: {}", projectsFolder);
+
+        // Create stitching future - use projectInfo.getSampleName() for correct folder path
         CompletableFuture<Void> stitchFuture = StitchingHelper.performAnnotationStitching(
                 annotation,
                 state.sample,
@@ -798,7 +800,9 @@ public class AcquisitionManager {
                 gui,
                 project,
                 STITCH_EXECUTOR,
-                handler
+                handler,
+                state.projectInfo.getSampleName(),
+                projectsFolder.toString()
         );
 
         state.stitchingFutures.add(stitchFuture);

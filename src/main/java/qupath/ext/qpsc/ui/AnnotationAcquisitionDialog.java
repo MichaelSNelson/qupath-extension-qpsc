@@ -12,8 +12,6 @@ import javafx.scene.paint.Color;
 import javafx.stage.Modality;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import qupath.ext.qpsc.modality.ModalityHandler;
-import qupath.ext.qpsc.modality.ModalityRegistry;
 import qupath.ext.qpsc.preferences.PersistentPreferences;
 import qupath.lib.gui.QuPathGUI;
 import qupath.lib.objects.PathObject;
@@ -38,22 +36,21 @@ public class AnnotationAcquisitionDialog {
     /**
      * Shows the combined acquisition dialog.
      *
+     * <p>This dialog handles annotation selection only. Modality-specific options
+     * (like PPM angle overrides) are handled in the main acquisition dialog's
+     * Advanced Options section.</p>
+     *
      * @param availableClasses Initial set of annotation classes in the current image
      * @param preselectedClasses Classes selected from previous runs
-     * @param modality The imaging modality for modality-specific UI components
      * @return CompletableFuture with selected classes and whether to proceed
      */
     public static CompletableFuture<AcquisitionResult> showDialog(
             Set<String> availableClasses,
-            List<String> preselectedClasses,
-            String modality) {
+            List<String> preselectedClasses) {
 
         CompletableFuture<AcquisitionResult> future = new CompletableFuture<>();
 
         Platform.runLater(() -> {
-            // Get modality handler and optional UI component
-            ModalityHandler handler = ModalityRegistry.getHandler(modality);
-            Optional<ModalityHandler.BoundingBoxUI> modalityUI = handler.createBoundingBoxUI();
             Dialog<AcquisitionResult> dialog = new Dialog<>();
             dialog.initModality(Modality.NONE);
             dialog.setTitle("Annotation Acquisition");
@@ -92,7 +89,7 @@ public class AnnotationAcquisitionDialog {
 
             // Tab 1: Acquisition Summary (main tab)
             Tab summaryTab = new Tab("Acquire Regions");
-            VBox summaryContent = createSummaryContent(selectedClasses, modalityUI);
+            VBox summaryContent = createSummaryContent(selectedClasses);
             summaryTab.setContent(summaryContent);
 
             // Tab 2: Class Selection
@@ -168,15 +165,9 @@ public class AnnotationAcquisitionDialog {
                         PersistentPreferences.setSelectedAnnotationClasses(new ArrayList<>(selectedClasses));
                     }
 
-                    // Get angle overrides from modality UI if present
-                    Map<String, Double> angleOverrides = modalityUI
-                            .map(ModalityHandler.BoundingBoxUI::getAngleOverrides)
-                            .orElse(null);
-                    if (angleOverrides != null) {
-                        logger.info("User overrode angles: {}", angleOverrides);
-                    }
-
-                    return new AcquisitionResult(new ArrayList<>(selectedClasses), true, angleOverrides);
+                    // Note: Angle overrides are handled in the main acquisition dialog's
+                    // Advanced Options section, not here
+                    return new AcquisitionResult(new ArrayList<>(selectedClasses), true);
                 } else {
                     // Cancel was clicked
                     return new AcquisitionResult(Collections.emptyList(), false);
@@ -213,8 +204,7 @@ public class AnnotationAcquisitionDialog {
     /**
      * Creates the summary content showing what will be acquired.
      */
-    private static VBox createSummaryContent(ObservableList<String> selectedClasses,
-                                              Optional<ModalityHandler.BoundingBoxUI> modalityUI) {
+    private static VBox createSummaryContent(ObservableList<String> selectedClasses) {
         VBox content = new VBox(15);
         content.setPadding(new Insets(20));
 
@@ -259,10 +249,8 @@ public class AnnotationAcquisitionDialog {
 
         content.getChildren().addAll(annotationList, countLabel, buttonBox, new Separator(), infoLabel);
 
-        // Add modality-specific UI if present (e.g., PPM angle overrides)
-        modalityUI.ifPresent(ui -> {
-            content.getChildren().add(ui.getNode());
-        });
+        // Note: Modality-specific UI (e.g., PPM angle overrides) is now in the
+        // main acquisition dialog's Advanced Options section
 
         return content;
     }

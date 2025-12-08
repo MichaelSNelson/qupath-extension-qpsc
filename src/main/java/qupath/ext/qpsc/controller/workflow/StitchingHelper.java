@@ -129,6 +129,8 @@ public class StitchingHelper {
      * @param project QuPath project to update
      * @param executor Executor service for async execution
      * @param handler Modality handler for file naming
+     * @param sampleName The actual sample folder name (from ProjectInfo, may differ from sample.sampleName())
+     * @param projectsFolder The actual projects folder path (from ProjectInfo, may differ from sample.projectsFolder())
      * @return CompletableFuture that completes when all stitching is done
      */
     public static CompletableFuture<Void> performAnnotationStitching(
@@ -140,14 +142,16 @@ public class StitchingHelper {
             QuPathGUI gui,
             Project<BufferedImage> project,
             ExecutorService executor,
-            ModalityHandler handler) {
+            ModalityHandler handler,
+            String sampleName,
+            String projectsFolder) {
 
         // Get transform from current controller
         AffineTransform fullResToStage = MicroscopeController.getInstance().getCurrentTransform();
 
         return performAnnotationStitching(
                 annotation, sample, modeWithIndex, angleExposures,
-                pixelSize, gui, project, executor, handler, fullResToStage
+                pixelSize, gui, project, executor, handler, fullResToStage, sampleName, projectsFolder
         );
     }
 
@@ -165,6 +169,8 @@ public class StitchingHelper {
      * @param executor Executor service for async execution
      * @param handler Modality handler for file naming
      * @param fullResToStage Transform from full-res pixels to stage coordinates
+     * @param sampleName The actual sample folder name (from ProjectInfo, may differ from sample.sampleName())
+     * @param projectsFolder The actual projects folder path (from ProjectInfo, may differ from sample.projectsFolder())
      * @return CompletableFuture that completes when all stitching is done
      */
     public static CompletableFuture<Void> performAnnotationStitching(
@@ -177,15 +183,17 @@ public class StitchingHelper {
             Project<BufferedImage> project,
             ExecutorService executor,
             ModalityHandler handler,
-            AffineTransform fullResToStage) {
+            AffineTransform fullResToStage,
+            String sampleName,
+            String projectsFolder) {
 
-        // Calculate metadata for this annotation
+        // Calculate metadata for this annotation - use explicit sampleName parameter
         StitchingMetadata metadata = calculateMetadata(
-                annotation, sample, gui, project, fullResToStage
+                annotation, sampleName, gui, project, fullResToStage
         );
 
         // Create blocking dialog on JavaFX thread before starting stitching
-        final String operationId = sample.sampleName() + " - " + annotation.getName();
+        final String operationId = sampleName + " - " + annotation.getName();
         final StitchingBlockingDialog[] dialogRef = {null};
         final CountDownLatch dialogLatch = new CountDownLatch(1);
         try {
@@ -243,10 +251,10 @@ public class StitchingHelper {
 
                     // Process each angle individually using directory isolation to prevent cross-matching
                     logger.info("Processing {} angle directories using isolation approach", angleExposures.size());
-                    
+
                     List<String> stitchedImages = new ArrayList<>();
-                    Path tileBaseDir = Paths.get(sample.projectsFolder().getAbsolutePath(), 
-                                               sample.sampleName(), modeWithIndex, annotationName);
+                    Path tileBaseDir = Paths.get(projectsFolder,
+                                               sampleName, modeWithIndex, annotationName);
                     
                     logger.info("Starting multi-angle processing for {} angles in directory: {}", angleExposures.size(), tileBaseDir);
                     
@@ -279,7 +287,9 @@ public class StitchingHelper {
                             // Temporarily isolate this angle directory for processing
                             logger.info("Starting isolation processing for angle: {}", angleStr);
                             String outPath = processAngleWithIsolation(
-                                    tileBaseDir, angleStr, sample, modeWithIndex, annotationName,
+                                    tileBaseDir, angleStr,
+                                    projectsFolder, sampleName,
+                                    modeWithIndex, annotationName,
                                     compression, pixelSize, stitchingConfig.downsampleFactor(),
                                     gui, project, handler, stitchParams
                             );
@@ -360,7 +370,9 @@ public class StitchingHelper {
                         try {
                             logger.info("Starting birefringence isolation processing for angle string: {}", birefAngleStr);
                             String birefOutPath = processAngleWithIsolation(
-                                    tileBaseDir, birefAngleStr, sample, modeWithIndex, annotationName,
+                                    tileBaseDir, birefAngleStr,
+                                    projectsFolder, sampleName,
+                                    modeWithIndex, annotationName,
                                     compression, pixelSize, stitchingConfig.downsampleFactor(),
                                     gui, project, handler, stitchParams
                             );
@@ -442,7 +454,9 @@ public class StitchingHelper {
                         try {
                             logger.info("Starting sum isolation processing for angle string: {}", sumAngleStr);
                             String sumOutPath = processAngleWithIsolation(
-                                    tileBaseDir, sumAngleStr, sample, modeWithIndex, annotationName,
+                                    tileBaseDir, sumAngleStr,
+                                    projectsFolder, sampleName,
+                                    modeWithIndex, annotationName,
                                     compression, pixelSize, stitchingConfig.downsampleFactor(),
                                     gui, project, handler, stitchParams
                             );
@@ -524,8 +538,8 @@ public class StitchingHelper {
                     }
                     
                     String outPath = TileProcessingUtilities.stitchImagesAndUpdateProject(
-                            sample.projectsFolder().getAbsolutePath(),
-                            sample.sampleName(),
+                            projectsFolder,
+                            sampleName,
                             modeWithIndex,
                             annotationName,
                             matchingString,  // Use angle folder name as matching string for single-angle acquisitions
@@ -576,6 +590,8 @@ public class StitchingHelper {
      * @param project QuPath project to update
      * @param executor Executor service for async execution
      * @param handler Modality handler for file naming
+     * @param sampleName The actual sample folder name (from ProjectInfo, may differ from sample.sampleName())
+     * @param projectsFolder The actual projects folder path (from ProjectInfo, may differ from sample.projectsFolder())
      * @return CompletableFuture that completes when all stitching is done
      */
     public static CompletableFuture<Void> performRegionStitching(
@@ -587,15 +603,17 @@ public class StitchingHelper {
             QuPathGUI gui,
             Project<BufferedImage> project,
             ExecutorService executor,
-            ModalityHandler handler) {
+            ModalityHandler handler,
+            String sampleName,
+            String projectsFolder) {
 
-        // Calculate metadata for BoundingBox case (no actual annotation)
+        // Calculate metadata for BoundingBox case (no actual annotation) - use explicit sampleName
         StitchingMetadata metadata = calculateMetadataForRegion(
-                regionName, sample, gui, project
+                regionName, sampleName, gui, project
         );
 
         // Create blocking dialog on JavaFX thread before starting stitching
-        final String operationId = sample.sampleName() + " - " + regionName;
+        final String operationId = sampleName + " - " + regionName;
         final StitchingBlockingDialog[] dialogRef = {null};
         final CountDownLatch dialogLatch = new CountDownLatch(1);
         try {
@@ -650,10 +668,10 @@ public class StitchingHelper {
 
                     // Process each angle individually using directory isolation to prevent cross-matching
                     logger.info("Processing {} angle directories using isolation approach", angleExposures.size());
-                    
+
                     List<String> stitchedImages = new ArrayList<>();
-                    Path tileBaseDir = Paths.get(sample.projectsFolder().getAbsolutePath(), 
-                                               sample.sampleName(), modeWithIndex, regionName);
+                    Path tileBaseDir = Paths.get(projectsFolder,
+                                               sampleName, modeWithIndex, regionName);
                     
                     logger.info("Starting multi-angle processing for {} angles in directory: {}", angleExposures.size(), tileBaseDir);
                     
@@ -686,7 +704,9 @@ public class StitchingHelper {
                             // Temporarily isolate this angle directory for processing
                             logger.info("Starting isolation processing for angle: {}", angleStr);
                             String outPath = processAngleWithIsolation(
-                                    tileBaseDir, angleStr, sample, modeWithIndex, regionName,
+                                    tileBaseDir, angleStr,
+                                    projectsFolder, sampleName,
+                                    modeWithIndex, regionName,
                                     compression, pixelSize, stitchingConfig.downsampleFactor(),
                                     gui, project, handler, stitchParams
                             );
@@ -767,11 +787,13 @@ public class StitchingHelper {
                         try {
                             logger.info("Starting birefringence isolation processing for angle string: {}", birefAngleStr);
                             String birefOutPath = processAngleWithIsolation(
-                                    tileBaseDir, birefAngleStr, sample, modeWithIndex, regionName,
+                                    tileBaseDir, birefAngleStr,
+                                    projectsFolder, sampleName,
+                                    modeWithIndex, regionName,
                                     compression, pixelSize, stitchingConfig.downsampleFactor(),
                                     gui, project, handler, stitchParams
                             );
-                            
+
                             if (birefOutPath != null) {
                                 stitchedImages.add(birefOutPath);
                                 logger.info("Successfully processed birefringence image - output: {}", birefOutPath);
@@ -849,7 +871,9 @@ public class StitchingHelper {
                         try {
                             logger.info("Starting sum isolation processing for angle string: {}", sumAngleStr);
                             String sumOutPath = processAngleWithIsolation(
-                                    tileBaseDir, sumAngleStr, sample, modeWithIndex, regionName,
+                                    tileBaseDir, sumAngleStr,
+                                    projectsFolder, sampleName,
+                                    modeWithIndex, regionName,
                                     compression, pixelSize, stitchingConfig.downsampleFactor(),
                                     gui, project, handler, stitchParams
                             );
@@ -915,10 +939,10 @@ public class StitchingHelper {
 
                     // For single angle, use the region name as the matching pattern
                     String matchingPattern = regionName;
-                    
+
                     String outPath = TileProcessingUtilities.stitchImagesAndUpdateProject(
-                            sample.projectsFolder().getAbsolutePath(),
-                            sample.sampleName(),
+                            projectsFolder,
+                            sampleName,
                             modeWithIndex,
                             regionName,
                             matchingPattern,
@@ -950,13 +974,15 @@ public class StitchingHelper {
     /**
      * Calculates metadata for a region-based acquisition (BoundingBoxWorkflow).
      * Since there's no actual annotation, we create default metadata.
+     *
+     * @param sampleName The actual sample folder name (from ProjectInfo)
      */
     private static StitchingMetadata calculateMetadataForRegion(
             String regionName,
-            SampleSetupController.SampleSetupResult sample,
+            String sampleName,
             QuPathGUI gui,
             Project<BufferedImage> project) {
-        
+
         // Get parent entry (the current open image) - may be null in BoundingBox workflow
         ProjectImageEntry<BufferedImage> parentEntry = null;
         // In BoundingBox workflow, there's typically no current image open
@@ -969,12 +995,12 @@ public class StitchingHelper {
                 parentEntry = null;
             }
         }
-        
+
         // For BoundingBox workflow, we don't have actual annotation coordinates
         // The offset should be 0,0 since it's a full-slide acquisition
         double xOffset = 0.0;
         double yOffset = 0.0;
-        
+
         // Check flip status from parent or preferences
         boolean isFlipped = false;
         if (parentEntry != null) {
@@ -984,22 +1010,24 @@ public class StitchingHelper {
             isFlipped = QPPreferenceDialog.getFlipMacroXProperty() ||
                     QPPreferenceDialog.getFlipMacroYProperty();
         }
-        
+
         return new StitchingMetadata(
                 parentEntry,
                 xOffset,
                 yOffset,
                 isFlipped,
-                sample.sampleName()
+                sampleName
         );
     }
 
     /**
      * Calculates metadata for a stitched image based on its parent annotation.
+     *
+     * @param sampleName The actual sample folder name (from ProjectInfo)
      */
     private static StitchingMetadata calculateMetadata(
             PathObject annotation,
-            SampleSetupController.SampleSetupResult sample,
+            String sampleName,
             QuPathGUI gui,
             Project<BufferedImage> project,
             AffineTransform fullResToStage) {
@@ -1029,55 +1057,58 @@ public class StitchingHelper {
                 offset[0],
                 offset[1],
                 isFlipped,
-                sample.sampleName()
+                sampleName
         );
     }
 
     /**
      * Processes a single angle directory in isolation to prevent cross-matching issues
      * with the TileConfigurationTxtStrategy contains() logic.
+     *
+     * @param projectsFolder The root projects folder path
+     * @param sampleName The actual sample folder name (from ProjectInfo)
      */
     private static String processAngleWithIsolation(
-            Path tileBaseDir, String angleStr, 
-            SampleSetupController.SampleSetupResult sample,
+            Path tileBaseDir, String angleStr,
+            String projectsFolder, String sampleName,
             String modeWithIndex, String regionName,
             String compression, double pixelSize, int downsampleFactor,
-            QuPathGUI gui, Project<BufferedImage> project, 
+            QuPathGUI gui, Project<BufferedImage> project,
             ModalityHandler handler, Map<String, Object> stitchParams) throws IOException {
-        
+
         logger.info("Processing angle {} with directory isolation for region {}", angleStr, regionName);
         logger.info("Tile base directory: {}", tileBaseDir);
-        
+
         Path angleDir = tileBaseDir.resolve(angleStr);
         if (!Files.exists(angleDir)) {
             logger.warn("Angle directory does not exist: {}", angleDir);
             return null;
         }
-        
+
         // Create a temporary isolation directory
         String tempDirName = "_temp_" + angleStr.replace("-", "neg").replace(".", "_");
         Path tempIsolationDir = tileBaseDir.resolve(tempDirName);
         Path tempAngleDir = tempIsolationDir.resolve(angleStr);
-        
+
         logger.info("Temporary isolation directory: {}", tempIsolationDir);
         logger.info("Target angle directory: {}", angleDir);
-        
+
         try {
             // Create temporary structure and move angle directory
             Files.createDirectories(tempIsolationDir);
             logger.info("Created temporary isolation directory: {}", tempIsolationDir);
-            
+
             // Move the target angle directory to isolation
             Files.move(angleDir, tempAngleDir);
             logger.info("Moved {} to isolation: {}", angleDir, tempAngleDir);
-            
+
             // CRITICAL FIX: Pass the combined region path that includes both region and temp directory
             // The stitching method will look in: projects/sample/mode/[regionName/tempDirName]/
             // which now contains only the single angle directory we want to process
             String combinedRegion = regionName + File.separator + tempDirName;
             String outPath = TileProcessingUtilities.stitchImagesAndUpdateProject(
-                    sample.projectsFolder().getAbsolutePath(),
-                    sample.sampleName(),
+                    projectsFolder,
+                    sampleName,
                     modeWithIndex,
                     combinedRegion, // FIXED: Use combined region path so path resolves correctly
                     angleStr, // Now this will only match the single directory in isolation

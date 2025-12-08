@@ -92,21 +92,16 @@ public class ExistingImageWorkflowV2 {
                 List<String> preselected = PersistentPreferences.getSelectedAnnotationClasses();
                 String defaultSampleName = getDefaultSampleName();
 
-                // Get modality from preferences for the annotation dialog
-                String lastModality = PersistentPreferences.getLastModality();
-                if (lastModality == null || lastModality.isEmpty()) {
-                    lastModality = "ppm"; // Default
-                }
-
-                AnnotationAcquisitionDialog.showDialog(existingClasses, preselected, lastModality)
+                // Show annotation selection dialog (modality options are in the combined dialog's Advanced Options)
+                AnnotationAcquisitionDialog.showDialog(existingClasses, preselected)
                         .thenCompose(annotationResult -> {
                             if (!annotationResult.proceed || annotationResult.selectedClasses.isEmpty()) {
                                 throw new CancellationException("Annotation selection cancelled");
                             }
 
                             // Store selected classes in state for later use
+                            // Note: angle overrides will come from the combined dialog's Advanced Options
                             state.selectedAnnotationClasses = annotationResult.selectedClasses;
-                            state.angleOverrides = annotationResult.angleOverrides;
                             logger.info("User selected {} classes: {}",
                                     annotationResult.selectedClasses.size(), annotationResult.selectedClasses);
 
