@@ -190,6 +190,8 @@ public class ExistingImageAcquisitionController {
         private Spinner<Integer> edgeThicknessSpinner;
         private TitledPane greenBoxPane;
         private ModalityHandler.BoundingBoxUI modalityUI;
+        private TitledPane modalityPane;
+        private VBox modalityContent;
 
         // UI Components - Preview Section
         private Label previewAnnotationsLabel;
@@ -693,13 +695,13 @@ public class ExistingImageAcquisitionController {
             greenBoxPane.setVisible(useExistingRadio.isSelected());
             greenBoxPane.setManaged(useExistingRadio.isSelected());
 
-            // Modality-specific options placeholder
-            VBox modalityContent = new VBox(5);
+            // Modality-specific options (will be populated by updateModalityUI)
+            modalityContent = new VBox(5);
             Label modalityPlaceholder = new Label("Select a modality to see specific options.");
             modalityPlaceholder.setStyle("-fx-text-fill: gray; -fx-font-style: italic;");
             modalityContent.getChildren().add(modalityPlaceholder);
 
-            TitledPane modalityPane = new TitledPane("Modality Options", modalityContent);
+            modalityPane = new TitledPane("Modality Options", modalityContent);
             modalityPane.setExpanded(false);
 
             content.getChildren().addAll(greenBoxPane, modalityPane);
@@ -822,10 +824,22 @@ public class ExistingImageAcquisitionController {
             ModalityHandler handler = ModalityRegistry.getHandler(modality);
             Optional<ModalityHandler.BoundingBoxUI> uiOpt = handler.createBoundingBoxUI();
 
+            // Clear existing content
+            modalityContent.getChildren().clear();
+
             if (uiOpt.isPresent()) {
                 modalityUI = uiOpt.get();
+                // Add the modality-specific UI to the content pane
+                modalityContent.getChildren().add(modalityUI.getNode());
+                modalityPane.setExpanded(true);  // Auto-expand when there's content
+                logger.debug("Added modality UI for: {}", modality);
             } else {
                 modalityUI = null;
+                // Show placeholder when no modality-specific UI
+                Label placeholder = new Label("No specific options for " + modality);
+                placeholder.setStyle("-fx-text-fill: gray; -fx-font-style: italic;");
+                modalityContent.getChildren().add(placeholder);
+                modalityPane.setExpanded(false);
             }
         }
 

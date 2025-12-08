@@ -4,11 +4,13 @@ import javafx.application.Platform;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qupath.ext.qpsc.controller.workflow.*;
+import qupath.ext.qpsc.preferences.PersistentPreferences;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.ui.*;
 import qupath.ext.qpsc.ui.ExistingImageAcquisitionController.ExistingImageAcquisitionConfig;
 import qupath.ext.qpsc.ui.ExistingImageAcquisitionController.RefinementChoice;
 import qupath.ext.qpsc.utilities.*;
+import qupath.lib.objects.classes.PathClass;
 import qupath.fx.dialogs.Dialogs;
 import qupath.lib.gui.QuPathGUI;
 import qupath.lib.images.ImageData;
@@ -21,6 +23,7 @@ import java.awt.image.BufferedImage;
 import java.io.File;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.stream.Collectors;
 
 /**
  * ExistingImageWorkflowV2 - Consolidated dialog version of the Existing Image workflow.
@@ -79,25 +82,126 @@ public class ExistingImageWorkflowV2 {
                 return;
             }
 
-            // Step 2: Get annotation count for preview
-            int annotationCount = countAnnotations();
+            // Step 2: Check if annotations exist and show annotation dialog FIRST
+            Set<String> existingClasses = getExistingAnnotationClasses();
 
-            // Step 3: Get default sample name from current image
-            String defaultSampleName = getDefaultSampleName();
+            if (!existingClasses.isEmpty()) {
+                // Annotations exist - show annotation selection dialog first
+                logger.info("Found {} annotation classes in image, showing selection dialog first", existingClasses.size());
 
-            // Step 4: Show consolidated dialog and process results
-            ExistingImageAcquisitionController.showDialog(defaultSampleName, annotationCount)
-                    .thenCompose(this::initializeFromConfig)
-                    .thenCompose(this::checkExistingSlideAlignment)
-                    .thenCompose(this::routeSubWorkflow)
-                    .thenCompose(this::handleRefinement)
-                    .thenCompose(this::performAcquisition)
-                    .thenCompose(this::waitForCompletion)
-                    .thenAccept(result -> {
-                        cleanup();
-                        showSuccessNotification();
-                    })
-                    .exceptionally(this::handleError);
+                List<String> preselected = PersistentPreferences.getSelectedAnnotationClasses();
+                String defaultSampleName = getDefaultSampleName();
+
+                // Get modality from preferences for the annotation dialog
+                String lastModality = PersistentPreferences.getLastModality();
+                if (lastModality == null || lastModality.isEmpty()) {
+                    lastModality = "ppm"; // Default
+                }
+
+                AnnotationAcquisitionDialog.showDialog(existingClasses, preselected, lastModality)
+                        .thenCompose(annotationResult -> {
+                            if (!annotationResult.proceed || annotationResult.selectedClasses.isEmpty()) {
+                                throw new CancellationException("Annotation selection cancelled");
+                            }
+
+                            // Store selected classes in state for later use
+                            state.selectedAnnotationClasses = annotationResult.selectedClasses;
+                            state.angleOverrides = annotationResult.angleOverrides;
+                            logger.info("User selected {} classes: {}",
+                                    annotationResult.selectedClasses.size(), annotationResult.selectedClasses);
+
+                            // Now show consolidated dialog with updated annotation count
+                            int annotationCount = countAnnotationsForClasses(annotationResult.selectedClasses);
+                            return ExistingImageAcquisitionController.showDialog(defaultSampleName, annotationCount);
+                        })
+                        .thenCompose(this::initializeFromConfig)
+                        .thenCompose(this::checkExistingSlideAlignment)
+                        .thenCompose(this::routeSubWorkflow)
+                        .thenCompose(this::handleRefinement)
+                        .thenCompose(this::performAcquisition)
+                        .thenCompose(this::waitForCompletion)
+                        .thenAccept(result -> {
+                            cleanup();
+                            showSuccessNotification();
+                        })
+                        .exceptionally(this::handleError);
+            } else {
+                // No annotations - proceed with consolidated dialog which will handle annotation creation
+                logger.info("No annotations found in image, proceeding with consolidated dialog");
+
+                String defaultSampleName = getDefaultSampleName();
+                int annotationCount = 0;
+
+                ExistingImageAcquisitionController.showDialog(defaultSampleName, annotationCount)
+                        .thenCompose(this::initializeFromConfig)
+                        .thenCompose(this::checkExistingSlideAlignment)
+                        .thenCompose(this::routeSubWorkflow)
+                        .thenCompose(this::ensureAnnotationsExist)  // Call annotation helper if none exist
+                        .thenCompose(this::handleRefinement)
+                        .thenCompose(this::performAcquisition)
+                        .thenCompose(this::waitForCompletion)
+                        .thenAccept(result -> {
+                            cleanup();
+                            showSuccessNotification();
+                        })
+                        .exceptionally(this::handleError);
+            }
+        }
+
+        /**
+         * Gets all annotation class names from the current image.
+         */
+        private Set<String> getExistingAnnotationClasses() {
+            ImageData<?> imageData = gui.getImageData();
+            if (imageData == null || imageData.getHierarchy() == null) {
+                return Collections.emptySet();
+            }
+
+            return imageData.getHierarchy().getAnnotationObjects().stream()
+                    .filter(ann -> ann.getPathClass() != null)
+                    .map(ann -> ann.getPathClass().getName())
+                    .collect(Collectors.toSet());
+        }
+
+        /**
+         * Counts annotations matching the selected classes.
+         */
+        private int countAnnotationsForClasses(List<String> selectedClasses) {
+            ImageData<?> imageData = gui.getImageData();
+            if (imageData == null || imageData.getHierarchy() == null) {
+                return 0;
+            }
+
+            return (int) imageData.getHierarchy().getAnnotationObjects().stream()
+                    .filter(ann -> ann.getPathClass() != null &&
+                            selectedClasses.contains(ann.getPathClass().getName()))
+                    .count();
+        }
+
+        /**
+         * Ensures annotations exist for acquisition, prompting for creation if needed.
+         */
+        private CompletableFuture<WorkflowState> ensureAnnotationsExist(WorkflowState state) {
+            if (state == null) return CompletableFuture.completedFuture(null);
+
+            // If we already have annotations from the annotation dialog, skip
+            if (state.annotations != null && !state.annotations.isEmpty()) {
+                return CompletableFuture.completedFuture(state);
+            }
+
+            // Use AnnotationHelper to ensure annotations exist
+            List<String> validClasses = state.selectedAnnotationClasses != null && !state.selectedAnnotationClasses.isEmpty()
+                    ? state.selectedAnnotationClasses
+                    : PersistentPreferences.getSelectedAnnotationClasses();
+
+            state.annotations = AnnotationHelper.ensureAnnotationsExist(gui, state.pixelSize, validClasses);
+
+            if (state.annotations.isEmpty()) {
+                throw new RuntimeException("No valid annotations found. Please create annotations before acquisition.");
+            }
+
+            logger.info("Ensured {} annotations exist for acquisition", state.annotations.size());
+            return CompletableFuture.completedFuture(state);
         }
 
         /**
@@ -119,25 +223,6 @@ public class ExistingImageWorkflowV2 {
             }
 
             return true;
-        }
-
-        /**
-         * Counts annotations in the current image.
-         */
-        private int countAnnotations() {
-            ImageData<?> imageData = gui.getImageData();
-            if (imageData == null || imageData.getHierarchy() == null) {
-                return 0;
-            }
-
-            // Count annotations matching our target classes
-            List<String> targetClasses = Arrays.asList("Tissue", "Scanned Area", "Bounding Box");
-            return (int) imageData.getHierarchy().getAnnotationObjects().stream()
-                    .filter(ann -> {
-                        String className = ann.getPathClass() != null ? ann.getPathClass().getName() : "";
-                        return targetClasses.contains(className) || targetClasses.isEmpty();
-                    })
-                    .count();
         }
 
         /**
@@ -237,18 +322,20 @@ public class ExistingImageWorkflowV2 {
 
         /**
          * Routes to the appropriate sub-workflow based on selections.
+         * All paths delegate to the existing working implementations.
          */
         private CompletableFuture<WorkflowState> routeSubWorkflow(WorkflowState state) {
             if (state == null) return CompletableFuture.completedFuture(null);
 
-            // If we have slide-specific alignment, we may be able to skip to acquisition
+            // If we have slide-specific alignment with no refinement, use the fast path
+            // This still delegates to the working implementation
             if (state.useExistingSlideAlignment &&
                     state.refinementChoice == RefinementSelectionController.RefinementChoice.NONE) {
-                logger.info("Using slide-specific alignment directly - skipping sub-workflows");
-                return setupProjectAndAnnotations(state);
+                logger.info("Using slide-specific alignment - delegating to existing workflow logic");
+                return processSlideSpecificAlignment(state);
             }
 
-            // Route based on alignment choice
+            // Route based on alignment choice - both delegate to working implementations
             if (state.alignmentChoice != null && state.alignmentChoice.useExistingAlignment()) {
                 logger.info("Routing to existing alignment path");
                 return processExistingAlignmentPath(state);
@@ -259,97 +346,122 @@ public class ExistingImageWorkflowV2 {
         }
 
         /**
-         * Processes the existing alignment path (green box detection, etc.).
+         * Processes slide-specific alignment (fast path when alignment already exists).
+         * Reuses the working workflow logic for proper image validation and annotation handling.
          */
-        private CompletableFuture<WorkflowState> processExistingAlignmentPath(WorkflowState state) {
-            return setupProjectAndAnnotations(state)
-                    .thenCompose(s -> {
-                        if (s == null) return CompletableFuture.completedFuture(null);
-
-                        // Set up transform from selected preset
-                        if (s.alignmentChoice != null && s.alignmentChoice.selectedTransform() != null) {
-                            s.transform = s.alignmentChoice.selectedTransform().getTransform();
-                            MicroscopeController.getInstance().setCurrentTransform(s.transform);
-                            logger.info("Applied transform from preset: {}",
-                                    s.alignmentChoice.selectedTransform().getName());
-                        }
-
-                        return CompletableFuture.completedFuture(s);
-                    })
-                    .thenCompose(this::processGreenBoxDetection);
-        }
-
-        /**
-         * Processes green box detection for existing alignment path.
-         */
-        private CompletableFuture<WorkflowState> processGreenBoxDetection(WorkflowState state) {
+        private CompletableFuture<WorkflowState> processSlideSpecificAlignment(WorkflowState state) {
             if (state == null) return CompletableFuture.completedFuture(null);
 
-            // Use stored green box params if available
-            if (state.greenBoxParams != null) {
-                logger.info("Using green box params from consolidated dialog");
-                // Green box detection would happen here
-                // For now, we proceed - the actual detection runs during tile creation
-            }
+            logger.info("Processing slide-specific alignment with existing transform");
 
-            return CompletableFuture.completedFuture(state);
-        }
+            // Set the transform
+            MicroscopeController.getInstance().setCurrentTransform(state.transform);
 
-        /**
-         * Processes the manual alignment path.
-         */
-        private CompletableFuture<WorkflowState> processManualAlignmentPath(WorkflowState state) {
-            return setupProjectAndAnnotations(state)
-                    .thenCompose(s -> {
-                        if (s == null) return CompletableFuture.completedFuture(null);
+            // Delegate to ProjectHelper for proper project setup
+            return ProjectHelper.setupProject(gui, state.sample)
+                    .thenCompose(projectInfo -> {
+                        if (projectInfo == null) {
+                            throw new RuntimeException("Project setup failed");
+                        }
+                        state.projectInfo = projectInfo;
 
-                        // Manual alignment path uses ManualAlignmentPath class
-                        return new ManualAlignmentPath(gui, convertToLegacyState(s)).execute()
-                                .thenApply(legacyState -> {
-                                    // Copy back relevant state
-                                    s.transform = legacyState.transform;
-                                    s.annotations = legacyState.annotations;
-                                    return s;
-                                });
+                        // Validate and flip image if needed (important for correct coordinates)
+                        @SuppressWarnings("unchecked")
+                        Project<BufferedImage> project = (Project<BufferedImage>) projectInfo.getCurrentProject();
+                        return ImageFlipHelper.validateAndFlipIfNeeded(gui, project, state.sample);
+                    })
+                    .thenApply(validated -> {
+                        if (!validated) {
+                            throw new RuntimeException("Image validation failed");
+                        }
+
+                        // Get pixel size from preferences (macro pixel size for annotation creation)
+                        state.pixelSize = getPixelSizeFromPreferences();
+
+                        // Use selected classes or preferences
+                        List<String> validClasses = (state.selectedAnnotationClasses != null && !state.selectedAnnotationClasses.isEmpty())
+                                ? state.selectedAnnotationClasses
+                                : PersistentPreferences.getSelectedAnnotationClasses();
+
+                        // Ensure annotations exist using the working implementation
+                        state.annotations = AnnotationHelper.ensureAnnotationsExist(gui, state.pixelSize, validClasses);
+
+                        if (state.annotations.isEmpty()) {
+                            throw new RuntimeException("No valid annotations found");
+                        }
+
+                        logger.info("Slide-specific alignment ready with {} annotations", state.annotations.size());
+                        return state;
                     });
         }
 
         /**
-         * Sets up project and loads annotations.
+         * Gets pixel size from preferences (macro image pixel size).
+         * Reuses the same logic as the working workflow.
          */
-        private CompletableFuture<WorkflowState> setupProjectAndAnnotations(WorkflowState state) {
+        private double getPixelSizeFromPreferences() {
+            String pixelSizeStr = PersistentPreferences.getMacroImagePixelSizeInMicrons();
+
+            if (pixelSizeStr == null || pixelSizeStr.trim().isEmpty()) {
+                logger.error("Macro image pixel size is not configured in preferences");
+                throw new IllegalStateException(
+                        "Macro image pixel size is not configured.\n" +
+                                "This value must be set before running the workflow."
+                );
+            }
+
+            try {
+                double pixelSize = Double.parseDouble(pixelSizeStr.trim());
+                if (pixelSize <= 0) {
+                    throw new IllegalStateException("Invalid macro image pixel size: " + pixelSize);
+                }
+                logger.debug("Using macro pixel size from preferences: {} um", pixelSize);
+                return pixelSize;
+            } catch (NumberFormatException e) {
+                throw new IllegalStateException("Invalid macro image pixel size format: '" + pixelSizeStr + "'");
+            }
+        }
+
+        /**
+         * Processes the existing alignment path (green box detection, transform creation, etc.).
+         * Delegates to the existing working ExistingAlignmentPath class.
+         */
+        private CompletableFuture<WorkflowState> processExistingAlignmentPath(WorkflowState state) {
             if (state == null) return CompletableFuture.completedFuture(null);
 
-            return CompletableFuture.supplyAsync(() -> {
-                try {
-                    // Setup project (join since we're already in async context)
-                    ProjectHelper.ProjectInfo projectInfo = ProjectHelper.setupProject(gui, state.sample).join();
-                    state.projectInfo = projectInfo;
+            logger.info("Delegating to ExistingAlignmentPath for transform pipeline");
 
-                    // Get pixel size
-                    ImageData<?> imageData = gui.getImageData();
-                    state.pixelSize = imageData.getServer().getPixelCalibration().getAveragedPixelSizeMicrons();
+            // Delegate to the existing working implementation
+            return new ExistingAlignmentPath(gui, convertToLegacyState(state)).execute()
+                    .thenApply(legacyState -> {
+                        // Copy back relevant state from the working implementation
+                        state.transform = legacyState.transform;
+                        state.annotations = legacyState.annotations;
+                        state.projectInfo = legacyState.projectInfo;
+                        state.pixelSize = legacyState.pixelSize;
+                        return state;
+                    });
+        }
 
-                    // Load annotations
-                    List<String> targetClasses = Arrays.asList("Tissue", "Scanned Area", "Bounding Box");
-                    state.annotations = new ArrayList<>(
-                            imageData.getHierarchy().getAnnotationObjects().stream()
-                                    .filter(ann -> {
-                                        String className = ann.getPathClass() != null ?
-                                                ann.getPathClass().getName() : "";
-                                        return targetClasses.contains(className);
-                                    })
-                                    .toList()
-                    );
+        /**
+         * Processes the manual alignment path.
+         * Delegates to the existing working ManualAlignmentPath class.
+         */
+        private CompletableFuture<WorkflowState> processManualAlignmentPath(WorkflowState state) {
+            if (state == null) return CompletableFuture.completedFuture(null);
 
-                    logger.info("Loaded {} annotations for acquisition", state.annotations.size());
+            logger.info("Delegating to ManualAlignmentPath for alignment");
 
-                    return state;
-                } catch (Exception e) {
-                    logger.error("Failed to setup project and annotations", e);
-                    throw new CompletionException(e);
-                }
-            });
+            // Delegate to the existing working implementation
+            return new ManualAlignmentPath(gui, convertToLegacyState(state)).execute()
+                    .thenApply(legacyState -> {
+                        // Copy back relevant state
+                        state.transform = legacyState.transform;
+                        state.annotations = legacyState.annotations;
+                        state.projectInfo = legacyState.projectInfo;
+                        state.pixelSize = legacyState.pixelSize;
+                        return state;
+                    });
         }
 
         /**
@@ -481,6 +593,10 @@ public class ExistingImageWorkflowV2 {
             legacyState.annotations = v2State.annotations;
             legacyState.pixelSize = v2State.pixelSize;
             legacyState.angleOverrides = v2State.angleOverrides;
+            // Pass selected annotation classes to legacy state
+            if (v2State.selectedAnnotationClasses != null && !v2State.selectedAnnotationClasses.isEmpty()) {
+                legacyState.selectedAnnotationClasses = v2State.selectedAnnotationClasses;
+            }
             return legacyState;
         }
 
@@ -544,5 +660,6 @@ public class ExistingImageWorkflowV2 {
         public RefinementSelectionController.RefinementChoice refinementChoice =
                 RefinementSelectionController.RefinementChoice.NONE;
         public GreenBoxDetector.DetectionParams greenBoxParams;
+        public List<String> selectedAnnotationClasses = new ArrayList<>();
     }
 }
