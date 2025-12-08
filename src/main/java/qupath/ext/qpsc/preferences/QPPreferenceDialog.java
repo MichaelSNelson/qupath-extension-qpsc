@@ -50,9 +50,6 @@ public class QPPreferenceDialog {
     private static final IntegerProperty microscopeServerPortProperty =
             PathPrefs.createPersistentPreference("microscope.server.port", 5000);
 
-    private static final BooleanProperty useSocketConnectionProperty =
-            PathPrefs.createPersistentPreference("microscope.useSocketConnection", true);
-
     private static final BooleanProperty autoConnectToServerProperty =
             PathPrefs.createPersistentPreference("microscope.autoConnectToServer", true);
     private static final StringProperty microscopeConfigFileProperty =
@@ -195,11 +192,6 @@ public class QPPreferenceDialog {
                              "OME-ZARR: Cloud-native directory format with better compression and parallel writing,\n" +
                              "but less commonly used. ZARR provides 2-3x faster writing and 20-30% smaller files.")
                 .build());
-        items.add(new PropertyItemBuilder<>(useSocketConnectionProperty, Boolean.class)
-                .name("Use Socket Connection")
-                .category(CATEGORY)
-                .description("Use direct socket connection instead of CLI commands (faster but requires server)")
-                .build());
 
         items.add(new PropertyItemBuilder<>(microscopeServerHostProperty, String.class)
                 .name("Microscope Server Host")
@@ -284,14 +276,6 @@ public class QPPreferenceDialog {
 
     public static void setMicroscopeServerPort(int port) {
         microscopeServerPortProperty.set(port);
-    }
-
-    public static boolean getUseSocketConnection() {
-        return useSocketConnectionProperty.get();
-    }
-
-    public static void setUseSocketConnection(boolean useSocket) {
-        useSocketConnectionProperty.set(useSocket);
     }
 
     public static boolean getAutoConnectToServer() {
