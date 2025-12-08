@@ -19,7 +19,6 @@ import qupath.ext.qpsc.modality.ModalityRegistry;
 import qupath.ext.qpsc.preferences.PersistentPreferences;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.utilities.AffineTransformManager;
-import qupath.ext.qpsc.utilities.GreenBoxDetector;
 import qupath.ext.qpsc.utilities.MicroscopeConfigManager;
 import qupath.ext.qpsc.utilities.SampleNameValidator;
 import qupath.lib.gui.QuPathGUI;
@@ -104,8 +103,7 @@ public class ExistingImageAcquisitionController {
             // Refinement
             RefinementChoice refinementChoice,
 
-            // Advanced
-            GreenBoxDetector.DetectionParams greenBoxParams,
+            // Advanced (green box params handled by ExistingAlignmentPath)
             Map<String, Double> angleOverrides
     ) {}
 
@@ -113,18 +111,18 @@ public class ExistingImageAcquisitionController {
      * Shows the consolidated acquisition dialog.
      *
      * @param defaultSampleName Default sample name (typically from current image)
-     * @param annotationCount Number of annotations to acquire
+     * @param annotations List of annotations to acquire (used for tile calculation)
      * @return CompletableFuture containing the result, or cancelled if user cancels
      */
     public static CompletableFuture<ExistingImageAcquisitionConfig> showDialog(
-            String defaultSampleName, int annotationCount) {
+            String defaultSampleName, List<PathObject> annotations) {
 
         CompletableFuture<ExistingImageAcquisitionConfig> future = new CompletableFuture<>();
 
         Platform.runLater(() -> {
             try {
                 ConsolidatedDialogBuilder builder = new ConsolidatedDialogBuilder(
-                        defaultSampleName, annotationCount);
+                        defaultSampleName, annotations);
                 Optional<ExistingImageAcquisitionConfig> result = builder.buildAndShow();
 
                 if (result.isPresent()) {
@@ -150,6 +148,7 @@ public class ExistingImageAcquisitionController {
         private final String existingProjectName;
         private final File existingProjectFolder;
         private final String defaultSampleName;
+        private final List<PathObject> annotations;
         private final int annotationCount;
 
         // Transform data
@@ -185,10 +184,6 @@ public class ExistingImageAcquisitionController {
         private VBox refinementBox;
 
         // UI Components - Advanced Section
-        private Spinner<Double> greenThresholdSpinner;
-        private Spinner<Double> saturationMinSpinner;
-        private Spinner<Integer> edgeThicknessSpinner;
-        private TitledPane greenBoxPane;
         private ModalityHandler.BoundingBoxUI modalityUI;
         private TitledPane modalityPane;
         private VBox modalityContent;
@@ -218,9 +213,10 @@ public class ExistingImageAcquisitionController {
         private Dialog<ExistingImageAcquisitionConfig> dialog;
         private Button startButton;
 
-        ConsolidatedDialogBuilder(String defaultSampleName, int annotationCount) {
+        ConsolidatedDialogBuilder(String defaultSampleName, List<PathObject> annotations) {
             this.defaultSampleName = defaultSampleName;
-            this.annotationCount = annotationCount;
+            this.annotations = annotations != null ? annotations : new ArrayList<>();
+            this.annotationCount = this.annotations.size();
             this.configManager = MicroscopeConfigManager.getInstance(
                     QPPreferenceDialog.getMicroscopeConfigFileProperty());
 
@@ -580,8 +576,6 @@ public class ExistingImageAcquisitionController {
                 transformSelectionBox.setManaged(selected);
                 refinementBox.setVisible(selected);
                 refinementBox.setManaged(selected);
-                greenBoxPane.setVisible(selected);
-                greenBoxPane.setManaged(selected);
                 PersistentPreferences.setUseExistingAlignment(selected);
                 triggerPreviewUpdate();
             });
@@ -661,39 +655,8 @@ public class ExistingImageAcquisitionController {
             VBox content = new VBox(10);
             content.setPadding(new Insets(10));
 
-            // Green box parameters (collapsed by default)
-            GridPane greenBoxGrid = new GridPane();
-            greenBoxGrid.setHgap(10);
-            greenBoxGrid.setVgap(8);
-
-            greenThresholdSpinner = new Spinner<>(0.1, 1.0, PersistentPreferences.getGreenThreshold(), 0.05);
-            greenThresholdSpinner.setEditable(true);
-            greenThresholdSpinner.setPrefWidth(100);
-
-            saturationMinSpinner = new Spinner<>(0.0, 1.0, PersistentPreferences.getGreenSaturationMin(), 0.05);
-            saturationMinSpinner.setEditable(true);
-            saturationMinSpinner.setPrefWidth(100);
-
-            edgeThicknessSpinner = new Spinner<>(1, 20, PersistentPreferences.getGreenEdgeThickness());
-            edgeThicknessSpinner.setEditable(true);
-            edgeThicknessSpinner.setPrefWidth(100);
-
-            int row = 0;
-            greenBoxGrid.add(new Label("Green Threshold:"), 0, row);
-            greenBoxGrid.add(greenThresholdSpinner, 1, row);
-            row++;
-
-            greenBoxGrid.add(new Label("Min Saturation:"), 0, row);
-            greenBoxGrid.add(saturationMinSpinner, 1, row);
-            row++;
-
-            greenBoxGrid.add(new Label("Edge Thickness:"), 0, row);
-            greenBoxGrid.add(edgeThicknessSpinner, 1, row);
-
-            greenBoxPane = new TitledPane("Green Box Detection", greenBoxGrid);
-            greenBoxPane.setExpanded(false);
-            greenBoxPane.setVisible(useExistingRadio.isSelected());
-            greenBoxPane.setManaged(useExistingRadio.isSelected());
+            // Note: Green box detection parameters are handled by ExistingAlignmentPath
+            // which shows its own dialog during the alignment process
 
             // Modality-specific options (will be populated by updateModalityUI)
             modalityContent = new VBox(5);
@@ -704,7 +667,7 @@ public class ExistingImageAcquisitionController {
             modalityPane = new TitledPane("Modality Options", modalityContent);
             modalityPane.setExpanded(false);
 
-            content.getChildren().addAll(greenBoxPane, modalityPane);
+            content.getChildren().add(modalityPane);
 
             advancedPane = new TitledPane("ADVANCED OPTIONS", content);
             advancedPane.setExpanded(false);
@@ -712,8 +675,12 @@ public class ExistingImageAcquisitionController {
         }
 
         private void createPreviewPanel() {
-            previewAnnotationsLabel = new Label("Annotations: " + annotationCount + " regions selected");
-            previewTilesLabel = new Label("Estimated Tiles: --");
+            if (annotationCount > 0) {
+                previewAnnotationsLabel = new Label("Annotations: " + annotationCount + " regions selected");
+            } else {
+                previewAnnotationsLabel = new Label("Annotations: None (will be created after alignment)");
+            }
+            previewTilesLabel = new Label("Tiles: --");
             previewTimeLabel = new Label("Estimated Time: --");
             previewStorageLabel = new Label("Estimated Storage: --");
         }
@@ -892,34 +859,54 @@ public class ExistingImageAcquisitionController {
                 String detector = extractIdFromDisplayString(detectorBox.getValue());
 
                 if (modality == null || objective == null || detector == null) {
-                    previewTilesLabel.setText("Estimated Tiles: --");
+                    previewTilesLabel.setText("Tiles: --");
                     previewTimeLabel.setText("Estimated Time: --");
                     previewStorageLabel.setText("Estimated Storage: --");
                     return;
                 }
 
-                // Get FOV
+                // Get FOV in microns
                 double[] fov = configManager.getModalityFOV(modality, objective, detector);
                 if (fov == null) {
+                    previewTilesLabel.setText("Tiles: -- (FOV not available)");
                     return;
                 }
+                double fovWidthMicrons = fov[0];
+                double fovHeightMicrons = fov[1];
 
-                // Rough estimates based on annotation count and typical sizes
-                int estimatedTilesPerAnnotation = 50; // Rough estimate
-                int totalTiles = annotationCount * estimatedTilesPerAnnotation;
+                // Get image pixel size to convert annotation bounds from pixels to microns
+                double imagePixelSize = 1.0; // Default if no image
+                QuPathGUI gui = QuPathGUI.getInstance();
+                if (gui != null && gui.getImageData() != null) {
+                    imagePixelSize = gui.getImageData().getServer()
+                            .getPixelCalibration().getAveragedPixelSizeMicrons();
+                }
 
-                int angleCount = "ppm".equalsIgnoreCase(modality) ? 4 : 1;
+                // Calculate actual tile count from annotation bounds
+                double overlapPercent = QPPreferenceDialog.getTileOverlapPercentProperty();
+                int totalTiles = calculateTileCount(fovWidthMicrons, fovHeightMicrons,
+                        overlapPercent, imagePixelSize);
+
+                // Get angle count from modality handler
+                int angleCount = getAngleCountForModality(modality);
                 int totalImages = totalTiles * angleCount;
 
+                // Update labels with actual counts
+                if (angleCount > 1) {
+                    previewTilesLabel.setText(String.format("Images: %,d tiles x %d angles = %,d images",
+                            totalTiles, angleCount, totalImages));
+                } else {
+                    previewTilesLabel.setText(String.format("Tiles: %,d", totalTiles));
+                }
+
+                // Time estimate: ~2 seconds per image
                 double estimatedSeconds = totalImages * 2.0;
                 String timeEstimate = formatTime(estimatedSeconds);
+                previewTimeLabel.setText("Estimated Time: " + timeEstimate);
 
+                // Storage estimate: ~4 MB per image
                 double estimatedMB = totalImages * 4.0;
                 String storageEstimate = formatStorage(estimatedMB);
-
-                previewTilesLabel.setText(String.format("Estimated Tiles: %,d - %,d",
-                        totalTiles / 2, totalTiles * 2));
-                previewTimeLabel.setText("Estimated Time: " + timeEstimate);
                 previewStorageLabel.setText("Estimated Storage: " + storageEstimate);
 
             } catch (Exception e) {
@@ -927,21 +914,85 @@ public class ExistingImageAcquisitionController {
             }
         }
 
+        /**
+         * Calculates the total tile count for all annotations.
+         *
+         * @param fovWidthMicrons FOV width in microns
+         * @param fovHeightMicrons FOV height in microns
+         * @param overlapPercent Overlap percentage
+         * @param imagePixelSize Image pixel size in microns
+         * @return Total number of tiles
+         */
+        private int calculateTileCount(double fovWidthMicrons, double fovHeightMicrons,
+                                        double overlapPercent, double imagePixelSize) {
+            if (annotations.isEmpty()) {
+                return 0;
+            }
+
+            // Effective FOV size considering overlap
+            double effectiveFovWidth = fovWidthMicrons * (1 - overlapPercent / 100.0);
+            double effectiveFovHeight = fovHeightMicrons * (1 - overlapPercent / 100.0);
+
+            int totalTiles = 0;
+            for (PathObject ann : annotations) {
+                if (ann.getROI() != null) {
+                    // Get annotation bounds in pixels, convert to microns
+                    double annWidthMicrons = ann.getROI().getBoundsWidth() * imagePixelSize;
+                    double annHeightMicrons = ann.getROI().getBoundsHeight() * imagePixelSize;
+
+                    // Add buffer (half FOV on each side) like TilingUtilities does
+                    annWidthMicrons += fovWidthMicrons;
+                    annHeightMicrons += fovHeightMicrons;
+
+                    // Calculate tiles for this annotation
+                    int tilesX = (int) Math.ceil(annWidthMicrons / effectiveFovWidth);
+                    int tilesY = (int) Math.ceil(annHeightMicrons / effectiveFovHeight);
+                    totalTiles += tilesX * tilesY;
+                }
+            }
+
+            return totalTiles;
+        }
+
+        /**
+         * Gets the number of angles for a modality.
+         */
+        private int getAngleCountForModality(String modality) {
+            if (modality == null) return 1;
+
+            ModalityHandler handler = ModalityRegistry.getHandler(modality);
+            if (handler != null) {
+                // Use angle overrides if available from modalityUI
+                if (modalityUI != null) {
+                    Map<String, Double> overrides = modalityUI.getAngleOverrides();
+                    if (overrides != null && !overrides.isEmpty()) {
+                        return overrides.size();
+                    }
+                }
+                // Fall back to default angles from handler
+                List<Double> angles = handler.getRotationAngles(modality);
+                if (angles != null && !angles.isEmpty()) {
+                    return angles.size();
+                }
+            }
+            return 1;
+        }
+
         private String formatTime(double seconds) {
             if (seconds < 60) {
-                return String.format("%.0f seconds", seconds);
+                return String.format("~%.0f seconds", seconds);
             } else if (seconds < 3600) {
-                return String.format("%.0f - %.0f minutes", seconds / 60.0 / 2, seconds / 60.0 * 2);
+                return String.format("~%.0f minutes", seconds / 60.0);
             } else {
-                return String.format("%.1f - %.1f hours", seconds / 3600.0 / 2, seconds / 3600.0 * 2);
+                return String.format("~%.1f hours", seconds / 3600.0);
             }
         }
 
         private String formatStorage(double megabytes) {
             if (megabytes < 1024) {
-                return String.format("%.0f - %.0f MB", megabytes / 2, megabytes * 2);
+                return String.format("~%.0f MB", megabytes);
             } else {
-                return String.format("%.1f - %.1f GB", megabytes / 1024.0 / 2, megabytes / 1024.0 * 2);
+                return String.format("~%.1f GB", megabytes / 1024.0);
             }
         }
 
@@ -1019,23 +1070,7 @@ public class ExistingImageAcquisitionController {
                     refinement = RefinementChoice.FULL_MANUAL;
                 }
 
-                // Green box params
-                GreenBoxDetector.DetectionParams greenBoxParams = null;
-                if (useExisting) {
-                    greenBoxParams = new GreenBoxDetector.DetectionParams(
-                            greenThresholdSpinner.getValue(),
-                            saturationMinSpinner.getValue(),
-                            PersistentPreferences.getGreenBrightnessMin(),
-                            PersistentPreferences.getGreenBrightnessMax(),
-                            PersistentPreferences.getGreenHueMin(),
-                            PersistentPreferences.getGreenHueMax(),
-                            edgeThicknessSpinner.getValue(),
-                            PersistentPreferences.getGreenMinBoxWidth(),
-                            PersistentPreferences.getGreenMinBoxHeight()
-                    );
-                }
-
-                // Angle overrides
+                // Angle overrides from modality UI (green box params handled by ExistingAlignmentPath)
                 Map<String, Double> angleOverrides = null;
                 if (modalityUI != null) {
                     angleOverrides = modalityUI.getAngleOverrides();
@@ -1055,7 +1090,7 @@ public class ExistingImageAcquisitionController {
                         modality, objective, detector,
                         useExisting, transform, confidence,
                         refinement,
-                        greenBoxParams, angleOverrides
+                        angleOverrides
                 );
 
             } catch (Exception e) {

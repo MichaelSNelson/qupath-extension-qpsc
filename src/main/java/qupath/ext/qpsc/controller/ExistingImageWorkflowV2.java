@@ -110,9 +110,9 @@ public class ExistingImageWorkflowV2 {
                             logger.info("User selected {} classes: {}",
                                     annotationResult.selectedClasses.size(), annotationResult.selectedClasses);
 
-                            // Now show consolidated dialog with updated annotation count
-                            int annotationCount = countAnnotationsForClasses(annotationResult.selectedClasses);
-                            return ExistingImageAcquisitionController.showDialog(defaultSampleName, annotationCount);
+                            // Get actual annotations for the selected classes
+                            List<PathObject> selectedAnnotations = getAnnotationsForClasses(annotationResult.selectedClasses);
+                            return ExistingImageAcquisitionController.showDialog(defaultSampleName, selectedAnnotations);
                         })
                         .thenCompose(this::initializeFromConfig)
                         .thenCompose(this::checkExistingSlideAlignment)
@@ -130,9 +130,9 @@ public class ExistingImageWorkflowV2 {
                 logger.info("No annotations found in image, proceeding with consolidated dialog");
 
                 String defaultSampleName = getDefaultSampleName();
-                int annotationCount = 0;
+                List<PathObject> emptyAnnotations = new ArrayList<>();
 
-                ExistingImageAcquisitionController.showDialog(defaultSampleName, annotationCount)
+                ExistingImageAcquisitionController.showDialog(defaultSampleName, emptyAnnotations)
                         .thenCompose(this::initializeFromConfig)
                         .thenCompose(this::checkExistingSlideAlignment)
                         .thenCompose(this::routeSubWorkflow)
@@ -167,15 +167,22 @@ public class ExistingImageWorkflowV2 {
          * Counts annotations matching the selected classes.
          */
         private int countAnnotationsForClasses(List<String> selectedClasses) {
+            return getAnnotationsForClasses(selectedClasses).size();
+        }
+
+        /**
+         * Gets annotations matching the selected classes.
+         */
+        private List<PathObject> getAnnotationsForClasses(List<String> selectedClasses) {
             ImageData<?> imageData = gui.getImageData();
             if (imageData == null || imageData.getHierarchy() == null) {
-                return 0;
+                return new ArrayList<>();
             }
 
-            return (int) imageData.getHierarchy().getAnnotationObjects().stream()
+            return imageData.getHierarchy().getAnnotationObjects().stream()
                     .filter(ann -> ann.getPathClass() != null &&
                             selectedClasses.contains(ann.getPathClass().getName()))
-                    .count();
+                    .collect(Collectors.toList());
         }
 
         /**
@@ -271,8 +278,7 @@ public class ExistingImageWorkflowV2 {
             // Store refinement choice
             state.refinementChoice = convertRefinementChoice(config.refinementChoice());
 
-            // Store green box params if using existing alignment
-            state.greenBoxParams = config.greenBoxParams();
+            // Note: Green box params are handled by ExistingAlignmentPath, not stored here
 
             // Store angle overrides
             state.angleOverrides = config.angleOverrides();
