@@ -240,9 +240,25 @@ public class GreenBoxPreviewController {
                     logger.debug("Applied High Precision preset");
                 });
 
+                Button resetDefaults = new Button("Reset to Defaults");
+                resetDefaults.setStyle("-fx-font-size: 10px;");
+                resetDefaults.setOnAction(e -> {
+                    // Reset all parameters to their defaults
+                    greenThreshold.getValueFactory().setValue(0.4);
+                    saturationMin.getValueFactory().setValue(0.3);
+                    edgeThickness.getValueFactory().setValue(3);
+                    hueMin.getValueFactory().setValue(0.25);
+                    hueMax.getValueFactory().setValue(0.42);
+                    minBoxWidth.getValueFactory().setValue(20);
+                    minBoxHeight.getValueFactory().setValue(20);
+                    brightnessMin.getValueFactory().setValue(0.3);
+                    brightnessMax.getValueFactory().setValue(0.9);
+                    logger.debug("Reset all parameters to defaults");
+                });
+
                 HBox presetBox = new HBox(10);
                 presetBox.setAlignment(Pos.CENTER_LEFT);
-                presetBox.getChildren().addAll(new Label("Presets:"), presetHighSensitivity, presetBalanced, presetHighPrecision);
+                presetBox.getChildren().addAll(new Label("Presets:"), presetHighSensitivity, presetBalanced, presetHighPrecision, resetDefaults);
 
                 // === PARAMETERS CONTAINER (collapsible based on confidence) ===
                 TitledPane paramsPane = new TitledPane();
@@ -277,9 +293,10 @@ public class GreenBoxPreviewController {
                 actionButtonBox.getChildren().addAll(detectButton, resetButton);
 
                 // === MAIN LAYOUT ===
-                VBox content = new VBox(10);
-                content.setPadding(new Insets(10));
-                content.getChildren().addAll(
+                // Use ScrollPane to handle expanded advanced parameters
+                VBox scrollContent = new VBox(10);
+                scrollContent.setPadding(new Insets(10));
+                scrollContent.getChildren().addAll(
                         previewView,
                         statusRow,
                         skipButton,
@@ -288,8 +305,20 @@ public class GreenBoxPreviewController {
                         actionButtonBox
                 );
 
+                ScrollPane scrollPane = new ScrollPane(scrollContent);
+                scrollPane.setFitToWidth(true);
+                scrollPane.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
+                scrollPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+                // Set preferred and max heights to ensure dialog doesn't grow too large
+                scrollPane.setPrefViewportHeight(550);
+                scrollPane.setMaxHeight(600);
+
+                VBox content = new VBox(scrollPane);
+                content.setPadding(new Insets(5));
+
                 dialog.getDialogPane().setContent(content);
                 dialog.getDialogPane().setPrefWidth(700);
+                dialog.getDialogPane().setMaxHeight(700);
 
                 ButtonType confirmType = new ButtonType("Use This Detection", ButtonBar.ButtonData.OK_DONE);
                 ButtonType cancelType = new ButtonType("Cancel", ButtonBar.ButtonData.CANCEL_CLOSE);
