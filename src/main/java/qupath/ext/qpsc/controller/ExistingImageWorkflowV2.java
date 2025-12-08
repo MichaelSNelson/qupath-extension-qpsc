@@ -322,9 +322,8 @@ public class ExistingImageWorkflowV2 {
 
             return CompletableFuture.supplyAsync(() -> {
                 try {
-                    // Setup project
-                    ProjectHelper.ProjectInfo projectInfo = ProjectHelper.setupProject(
-                            gui, state.sample.sampleName(), state.sample.projectsFolder());
+                    // Setup project (join since we're already in async context)
+                    ProjectHelper.ProjectInfo projectInfo = ProjectHelper.setupProject(gui, state.sample).join();
                     state.projectInfo = projectInfo;
 
                     // Get pixel size
