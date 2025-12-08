@@ -62,14 +62,17 @@ public class GreenBoxDetector {
          */
         public DetectionParams(double greenThreshold, double saturationMin,
                                double brightnessMin, double brightnessMax,
-                               int minBoxWidth, int minBoxHeight, int edgeThickness) {
+                               double hueMin, double hueMax,
+                               int edgeThickness, int minBoxWidth, int minBoxHeight) {
             this.greenThreshold = greenThreshold;
             this.saturationMin = saturationMin;
             this.brightnessMin = brightnessMin;
             this.brightnessMax = brightnessMax;
+            this.hueMin = hueMin;
+            this.hueMax = hueMax;
+            this.edgeThickness = edgeThickness;
             this.minBoxWidth = minBoxWidth;
             this.minBoxHeight = minBoxHeight;
-            this.edgeThickness = edgeThickness;
         }
 
         /**
