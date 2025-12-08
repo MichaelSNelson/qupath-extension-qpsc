@@ -291,14 +291,16 @@ public class BoundingBoxWorkflow {
                                         // Use the existing configManager and configFileLocation from above
 
                                         // Build acquisition configuration using shared builder
-                                        AcquisitionConfigurationBuilder.AcquisitionConfiguration config = 
+                                        // For new projects, sample name from dialog is correct
+                                        AcquisitionConfigurationBuilder.AcquisitionConfiguration config =
                                             AcquisitionConfigurationBuilder.buildConfiguration(
-                                                sample, 
-                                                configFileLocation, 
-                                                modeWithIndex, 
-                                                boundsMode, 
-                                                angleExposures, 
-                                                projectsFolder, 
+                                                sample,
+                                                configFileLocation,
+                                                modeWithIndex,
+                                                boundsMode,
+                                                angleExposures,
+                                                projectsFolder,
+                                                sample.sampleName(),  // For new projects, dialog name is correct
                                                 finalWSI_pixelSize_um
                                             );
 

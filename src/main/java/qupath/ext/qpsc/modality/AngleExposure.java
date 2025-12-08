@@ -11,7 +11,7 @@ package qupath.ext.qpsc.modality;
  * 
  * <p><strong>Usage in Acquisition Workflows:</strong></p>
  * <ul>
- *   <li>Returned by {@link ModalityHandler#getRotationAngles(String)} to define acquisition sequences</li>
+ *   <li>Returned by {@link ModalityHandler#getRotationAngles(String, String, String)} to define acquisition sequences</li>
  *   <li>Used by {@link qupath.ext.qpsc.service.AcquisitionCommandBuilder} to generate Pycro-Manager commands</li>
  *   <li>Processed by modality-specific handlers like {@link qupath.ext.qpsc.modality.ppm.PPMModalityHandler}</li>
  *   <li>Modified through {@link ModalityHandler#applyAngleOverrides(java.util.List, java.util.Map)} for runtime customization</li>
@@ -75,7 +75,7 @@ package qupath.ext.qpsc.modality;
  * 
  * @author Mike Nelson
  * @since 1.0
- * @see ModalityHandler#getRotationAngles(String)
+ * @see ModalityHandler#getRotationAngles(String, String, String)
  * @see qupath.ext.qpsc.service.AcquisitionCommandBuilder#angleExposures(java.util.List)
  * @see qupath.ext.qpsc.modality.ppm.PPMModalityHandler
  * @see qupath.ext.qpsc.modality.ModalityRegistry

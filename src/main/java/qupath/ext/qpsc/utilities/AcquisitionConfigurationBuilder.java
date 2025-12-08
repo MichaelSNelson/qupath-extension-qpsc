@@ -39,7 +39,17 @@ public class AcquisitionConfigurationBuilder {
     ) {}
     
     /**
-     * Builds a complete acquisition configuration from the provided parameters
+     * Builds a complete acquisition configuration from the provided parameters.
+     *
+     * @param sample Sample setup result containing hardware configuration
+     * @param configFileLocation Path to microscope configuration file
+     * @param modalityWithIndex Imaging mode with index (e.g., "ppm_20x_1")
+     * @param regionName Name of the annotation/region being acquired
+     * @param angleExposures List of rotation angles and exposures
+     * @param projectsFolder Base folder for projects (e.g., "D:/2025QPSC/data")
+     * @param sampleName The actual sample name to use for paths (from ProjectInfo, not sample dialog)
+     * @param explicitPixelSize Pixel size in micrometers
+     * @return Complete acquisition configuration
      */
     public static AcquisitionConfiguration buildConfiguration(
             SampleSetupController.SampleSetupResult sample,
@@ -48,10 +58,11 @@ public class AcquisitionConfigurationBuilder {
             String regionName,
             List<AngleExposure> angleExposures,
             String projectsFolder,
+            String sampleName,
             double explicitPixelSize) {
-        
+
         MicroscopeConfigManager configManager = MicroscopeConfigManager.getInstance(configFileLocation);
-        
+
         // Use explicit hardware selections from sample setup
         String objective = sample.objective();
         String detector = sample.detector();
@@ -116,10 +127,11 @@ public class AcquisitionConfigurationBuilder {
         // TODO: This is lower priority since we're currently not actively white balancing in the workflow
         
         // Build enhanced acquisition command
+        // Use the sampleName parameter (from ProjectInfo) - NOT sample.sampleName() which may differ
         AcquisitionCommandBuilder acquisitionBuilder = AcquisitionCommandBuilder.builder()
                 .yamlPath(configFileLocation)
                 .projectsFolder(projectsFolder)
-                .sampleLabel(sample.sampleName())
+                .sampleLabel(sampleName)
                 .scanType(modalityWithIndex)
                 .regionName(regionName)
                 .angleExposures(angleExposures)

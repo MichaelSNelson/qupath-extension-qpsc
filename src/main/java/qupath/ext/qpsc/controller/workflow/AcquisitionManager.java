@@ -485,21 +485,26 @@ public class AcquisitionManager {
                             baseModality + "/" + state.sample.objective() + "/" + state.sample.detector() + " - " + e.getMessage());
                 }
 
+                // Use the actual sample name from projectInfo (derived from project folder)
+                // This ensures the path matches where tiles were written
+                String actualSampleName = state.projectInfo.getSampleName();
+
                 // Build acquisition configuration using shared builder
-                AcquisitionConfigurationBuilder.AcquisitionConfiguration config = 
+                AcquisitionConfigurationBuilder.AcquisitionConfiguration config =
                     AcquisitionConfigurationBuilder.buildConfiguration(
-                        state.sample, 
-                        configFileLocation, 
-                        modalityWithIndex, 
-                        annotation.getName(), 
-                        angleExposures, 
-                        state.sample.projectsFolder().getAbsolutePath(), 
+                        state.sample,
+                        configFileLocation,
+                        modalityWithIndex,
+                        annotation.getName(),
+                        angleExposures,
+                        state.sample.projectsFolder().getAbsolutePath(),
+                        actualSampleName,  // Use actual sample name from project folder
                         WSI_pixelSize_um
                     );
 
                 logger.info("Acquisition parameters for {}:", annotation.getName());
                 logger.info("  Config: {}", configFileLocation);
-                logger.info("  Sample: {}", state.sample.sampleName());
+                logger.info("  Sample: {}", actualSampleName);
                 logger.info("  Hardware: {} / {} @ {} µm/px", config.objective(), config.detector(), config.WSI_pixelSize_um());
                 logger.info("  Autofocus: {} tiles, {} steps, {} µm range", config.afTiles(), config.afSteps(), config.afRange());
                 logger.info("  Processing: {}", config.processingSteps());
@@ -513,7 +518,7 @@ public class AcquisitionManager {
                 MinorFunctions.saveAcquisitionCommand(
                         commandString,
                         state.sample.projectsFolder().getAbsolutePath(),
-                        state.sample.sampleName(),
+                        actualSampleName,  // Use actual sample name from project folder
                         modalityWithIndex,
                         annotation.getName()
                 );
@@ -553,10 +558,9 @@ public class AcquisitionManager {
         MicroscopeSocketClient socketClient = MicroscopeController.getInstance().getSocketClient();
 
         // Calculate expected files with retry logic to handle timing issues
+        // Use tempTileDirectory from projectInfo which has the correct path (including actual sample name)
         String tileDirPath = Paths.get(
-                state.sample.projectsFolder().getAbsolutePath(),
-                state.sample.sampleName(),
-                state.projectInfo.getImagingModeWithIndex(),
+                state.projectInfo.getTempTileDirectory(),
                 annotation.getName()
         ).toString();
 

@@ -45,14 +45,30 @@ public class ProjectHelper {
      */
     public static class ProjectInfo {
         private final Map<String, Object> details;
+        private final String sampleName;
 
         /**
          * Creates a new project info container.
          *
          * @param details Map containing project details
+         * @param sampleName The actual sample name (derived from project folder for existing projects)
          */
-        public ProjectInfo(Map<String, Object> details) {
+        public ProjectInfo(Map<String, Object> details, String sampleName) {
             this.details = details;
+            this.sampleName = sampleName;
+        }
+
+        /**
+         * Gets the actual sample name.
+         *
+         * <p>For existing projects, this is derived from the project folder name,
+         * which may differ from the user-entered sample name in the dialog.
+         * This ensures tile paths match what was written during project setup.
+         *
+         * @return The actual sample name to use for file paths
+         */
+        public String getSampleName() {
+            return sampleName;
         }
 
         /**
@@ -122,19 +138,25 @@ public class ProjectHelper {
 
                 logger.debug("Flip settings - X: {}, Y: {}", flippedX, flippedY);
 
+                // Track the actual sample name (may differ from user-entered name for existing projects)
+                String actualSampleName;
+
                 if (gui.getProject() == null) {
                     logger.info("Creating new project");
-                    
+
+                    // For new projects, use the user-entered sample name
+                    actualSampleName = sample.sampleName();
+
                     // Use enhanced modality name for consistent folder structure
                     String enhancedModality = ObjectiveUtils.createEnhancedFolderName(
                             sample.modality(), sample.objective());
-                    logger.info("Using enhanced modality for project: {} -> {}", 
+                    logger.info("Using enhanced modality for project: {} -> {}",
                             sample.modality(), enhancedModality);
-                    
+
                     projectDetails = QPProjectFunctions.createAndOpenQuPathProject(
                             gui,
                             sample.projectsFolder().getAbsolutePath(),
-                            sample.sampleName(),
+                            actualSampleName,
                             enhancedModality,
                             flippedX,
                             flippedY
@@ -154,7 +176,7 @@ public class ProjectHelper {
                     // the existing project structure, not in a separate location
                     Path projectFilePath = gui.getProject().getPath();
                     Path projectDir = projectFilePath.getParent();
-                    String actualSampleName = projectDir.getFileName().toString();
+                    actualSampleName = projectDir.getFileName().toString();
                     Path projectsFolder = projectDir.getParent();
 
                     logger.info("Actual project location: {}", projectDir);
@@ -176,11 +198,13 @@ public class ProjectHelper {
                     handleExistingProjectImageImport(gui, flippedX, flippedY);
                 }
 
-                logger.info("Project setup complete");
+                logger.info("Project setup complete with sample name: {}", actualSampleName);
 
                 // Give GUI time to update before proceeding
+                // Pass actualSampleName so acquisition uses the correct path
+                final String finalSampleName = actualSampleName;
                 PauseTransition pause = new PauseTransition(Duration.millis(500));
-                pause.setOnFinished(e -> future.complete(new ProjectInfo(projectDetails)));
+                pause.setOnFinished(e -> future.complete(new ProjectInfo(projectDetails, finalSampleName)));
                 pause.play();
 
             } catch (Exception e) {

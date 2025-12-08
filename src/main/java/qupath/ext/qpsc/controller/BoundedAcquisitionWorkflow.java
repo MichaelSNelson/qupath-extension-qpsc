@@ -276,6 +276,7 @@ public class BoundedAcquisitionWorkflow {
                                         result.detector()
                                 );
 
+                                // For new projects, sample name from dialog is correct
                                 AcquisitionConfigurationBuilder.AcquisitionConfiguration config =
                                         AcquisitionConfigurationBuilder.buildConfiguration(
                                                 sampleResult,
@@ -284,6 +285,7 @@ public class BoundedAcquisitionWorkflow {
                                                 boundsMode,
                                                 angleExposures,
                                                 projectsFolder,
+                                                result.sampleName(),  // For new projects, dialog name is correct
                                                 finalWSI_pixelSize_um
                                         );
 

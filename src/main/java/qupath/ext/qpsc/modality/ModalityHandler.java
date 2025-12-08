@@ -140,7 +140,7 @@ public interface ModalityHandler {
      * <p>The default implementation returns the original angles unmodified, which is appropriate 
      * for modalities that do not support parameter customization.</p>
      * 
-     * @param angles the original list of {@link AngleExposure} pairs from {@link #getRotationAngles(String)}.
+     * @param angles the original list of {@link AngleExposure} pairs from {@link #getRotationAngles(String, String, String)}.
      *               May be empty but never null. Implementations should not modify this list directly
      * @param overrides a map of parameter overrides from the UI component. Keys are implementation-specific 
      *                  parameter identifiers (e.g., "plus", "minus", "angle1"). Values are the user-provided 

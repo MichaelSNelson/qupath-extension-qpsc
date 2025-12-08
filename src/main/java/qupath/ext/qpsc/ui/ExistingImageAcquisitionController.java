@@ -955,24 +955,31 @@ public class ExistingImageAcquisitionController {
         }
 
         /**
-         * Gets the number of angles for a modality.
+         * Gets the estimated number of angles for a modality (for preview purposes).
+         *
+         * <p>This method provides a synchronous estimate for the preview panel.
+         * It uses angle overrides if available from the modality UI, otherwise
+         * returns a reasonable default based on the modality type.
+         *
+         * @param modality The modality name
+         * @return Estimated number of angles (minimum 1)
          */
         private int getAngleCountForModality(String modality) {
             if (modality == null) return 1;
 
             ModalityHandler handler = ModalityRegistry.getHandler(modality);
             if (handler != null) {
-                // Use angle overrides if available from modalityUI
+                // Use angle overrides if available from modalityUI (most accurate)
                 if (modalityUI != null) {
                     Map<String, Double> overrides = modalityUI.getAngleOverrides();
                     if (overrides != null && !overrides.isEmpty()) {
                         return overrides.size();
                     }
                 }
-                // Fall back to default angles from handler
-                List<Double> angles = handler.getRotationAngles(modality);
-                if (angles != null && !angles.isEmpty()) {
-                    return angles.size();
+                // For PPM modalities, use default of 4 angles (typical configuration)
+                // This avoids blocking the UI thread with async calls for a preview estimate
+                if (modality.toLowerCase().startsWith("ppm")) {
+                    return 4; // Typical PPM: 0, +7, -7, 90 degrees
                 }
             }
             return 1;
