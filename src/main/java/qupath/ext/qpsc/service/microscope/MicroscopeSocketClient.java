@@ -39,6 +39,10 @@ import java.util.concurrent.atomic.AtomicLong;
 public class MicroscopeSocketClient implements AutoCloseable {
     private static final Logger logger = LoggerFactory.getLogger(MicroscopeSocketClient.class);
 
+    // Protocol constants
+    /** End marker expected by Python server to indicate message completion */
+    private static final String END_MARKER = "ENDOFSTR";
+
     // Connection parameters
     private final String host;
     private final int port;
@@ -440,7 +444,7 @@ public class MicroscopeSocketClient implements AutoCloseable {
      * @throws IOException if communication fails
      */
     public void startAcquisition(AcquisitionCommandBuilder builder) throws IOException {
-        String message = builder.buildSocketMessage() + " END_MARKER";
+        String message = builder.buildSocketMessage() + " " + END_MARKER;
         byte[] messageBytes = message.getBytes(StandardCharsets.UTF_8);
 
         logger.info("Sending acquisition command:");
