@@ -444,14 +444,14 @@ public class ExistingImageWorkflowV2 {
 
             logger.info("Starting acquisition phase");
 
-            return AcquisitionHelper.executeAcquisition(
-                    gui, state.annotations, state.transform,
-                    state.sample, state.projectInfo,
-                    state.pixelSize, state.angleOverrides
-            ).thenApply(futures -> {
-                state.stitchingFutures.addAll(futures);
-                return state;
-            });
+            return new AcquisitionManager(gui, convertToLegacyState(state)).execute()
+                    .thenApply(legacyState -> {
+                        if (legacyState != null) {
+                            // Copy stitching futures back from legacy state to V2 state
+                            state.stitchingFutures.addAll(legacyState.stitchingFutures);
+                        }
+                        return state;
+                    });
         }
 
         /**
