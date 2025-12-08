@@ -136,10 +136,12 @@ public class AlignmentHelper {
         double confidence = BASE_CONFIDENCE_GENERAL;
 
         // Apply age penalty
-        String createdDate = preset.getCreatedDate();
-        if (createdDate != null && !createdDate.isEmpty()) {
+        java.util.Date createdDate = preset.getCreatedDate();
+        if (createdDate != null) {
             try {
-                java.time.LocalDate created = java.time.LocalDate.parse(createdDate.substring(0, 10));
+                java.time.LocalDate created = createdDate.toInstant()
+                        .atZone(java.time.ZoneId.systemDefault())
+                        .toLocalDate();
                 long daysOld = java.time.temporal.ChronoUnit.DAYS.between(created, java.time.LocalDate.now());
                 double agePenalty = Math.min(daysOld * CONFIDENCE_AGE_PENALTY_PER_DAY, MAX_AGE_PENALTY);
                 confidence -= agePenalty;
