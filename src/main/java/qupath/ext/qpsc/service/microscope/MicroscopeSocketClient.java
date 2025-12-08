@@ -467,6 +467,17 @@ public class MicroscopeSocketClient implements AutoCloseable {
                 // Ensure all data is sent
                 output.flush();
 
+                // Wait for acknowledgment from server (16 bytes like STATUS response)
+                byte[] ackResponse = new byte[16];
+                input.readFully(ackResponse);
+                String ackStr = new String(ackResponse, StandardCharsets.UTF_8).trim();
+
+                if (!ackStr.startsWith("STARTED")) {
+                    throw new IOException("Unexpected acquisition acknowledgment: " + ackStr);
+                }
+
+                logger.info("Acquisition acknowledged by server: {}", ackStr);
+
                 lastActivityTime.set(System.currentTimeMillis());
                 logger.info("Acquisition command sent successfully");
 
