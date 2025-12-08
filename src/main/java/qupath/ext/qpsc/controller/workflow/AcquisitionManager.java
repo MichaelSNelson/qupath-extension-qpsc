@@ -130,12 +130,19 @@ public class AcquisitionManager {
      * Validates annotations with user confirmation dialog.
      *
      * <p>Shows a dialog listing all valid annotations and allows the user to confirm
-     * before proceeding with acquisition.
+     * before proceeding with acquisition. If annotation classes were already selected
+     * earlier in the workflow (e.g., by ExistingImageWorkflowV2), this method skips
+     * the dialog and uses the pre-selected classes.
      *
      * @return CompletableFuture with true if user confirms, false if cancelled
      */
     private CompletableFuture<Boolean> validateAnnotations() {
-        CompletableFuture<Boolean> future = new CompletableFuture<>();
+        // If classes were already selected earlier in the workflow, skip the dialog
+        if (state.selectedAnnotationClasses != null && !state.selectedAnnotationClasses.isEmpty()) {
+            logger.info("Using {} pre-selected annotation classes: {}",
+                    state.selectedAnnotationClasses.size(), state.selectedAnnotationClasses);
+            return CompletableFuture.completedFuture(true);
+        }
 
         // Get all unique annotation classes in current image
         Set<PathClass> existingClasses = MinorFunctions.getExistingClassifications(QP.getCurrentImageData());
