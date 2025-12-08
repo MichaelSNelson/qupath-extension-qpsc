@@ -165,7 +165,9 @@ public class ExistingImageWorkflowV2 {
             state.sample = new SampleSetupController.SampleSetupResult(
                     config.sampleName(),
                     config.projectsFolder(),
-                    config.modality() + "_" + config.objective()
+                    config.modality(),
+                    config.objective(),
+                    config.detector()
             );
 
             // Store alignment choice
