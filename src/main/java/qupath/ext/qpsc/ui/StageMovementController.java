@@ -10,7 +10,11 @@ import org.slf4j.LoggerFactory;
 import qupath.ext.qpsc.controller.MicroscopeController;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.utilities.MicroscopeConfigManager;
+import qupath.ext.qpsc.utilities.TransformationFunctions;
+import qupath.lib.gui.QuPathGUI;
+import qupath.lib.objects.PathObject;
 
+import java.awt.geom.AffineTransform;
 import java.util.ResourceBundle;
 
 /**
@@ -254,6 +258,112 @@ public class StageMovementController {
             grid.add(rField, 1, 5);
             grid.add(moveRBtn, 2, 5);
             grid.add(rStatus, 1, 6, 2, 1);
+
+            // --- Go to object centroid button ---
+            logger.debug("Adding 'Go to object centroid' button");
+            Separator separator = new Separator();
+            separator.setPadding(new Insets(10, 0, 10, 0));
+            grid.add(separator, 0, 7, 3, 1);
+
+            Button goToCentroidBtn = new Button("Go to Object Centroid");
+            Label centroidStatus = new Label();
+
+            // Check conditions for enabling the button
+            QuPathGUI gui = QuPathGUI.getInstance();
+            AffineTransform currentTransform = MicroscopeController.getInstance().getCurrentTransform();
+
+            // Initial state - check if we have an alignment
+            boolean hasAlignment = currentTransform != null;
+            if (!hasAlignment) {
+                goToCentroidBtn.setDisable(true);
+                centroidStatus.setText("No alignment available");
+                logger.debug("Go to centroid button disabled - no alignment");
+            }
+
+            goToCentroidBtn.setOnAction(e -> {
+                logger.debug("Go to object centroid button clicked");
+                try {
+                    // Re-check transform in case it was set after dialog opened
+                    AffineTransform transform = MicroscopeController.getInstance().getCurrentTransform();
+                    if (transform == null) {
+                        centroidStatus.setText("No alignment available");
+                        UIFunctions.notifyUserOfError(
+                                "No alignment is available. Please perform alignment first.",
+                                "Go to Centroid");
+                        return;
+                    }
+
+                    // Get selected object
+                    if (gui == null || gui.getImageData() == null) {
+                        centroidStatus.setText("No image open");
+                        UIFunctions.notifyUserOfError(
+                                "No image is currently open.",
+                                "Go to Centroid");
+                        return;
+                    }
+
+                    PathObject selectedObject = gui.getImageData().getHierarchy()
+                            .getSelectionModel().getSelectedObject();
+
+                    if (selectedObject == null) {
+                        centroidStatus.setText("No object selected");
+                        UIFunctions.notifyUserOfError(
+                                "Please select an object in QuPath first.",
+                                "Go to Centroid");
+                        return;
+                    }
+
+                    if (selectedObject.getROI() == null) {
+                        centroidStatus.setText("Selected object has no ROI");
+                        UIFunctions.notifyUserOfError(
+                                "The selected object has no region of interest.",
+                                "Go to Centroid");
+                        return;
+                    }
+
+                    // Get centroid coordinates from QuPath
+                    double centroidX = selectedObject.getROI().getCentroidX();
+                    double centroidY = selectedObject.getROI().getCentroidY();
+                    logger.info("Object centroid in QuPath coordinates: ({}, {})", centroidX, centroidY);
+
+                    // Transform to stage coordinates
+                    double[] qpCoords = {centroidX, centroidY};
+                    double[] stageCoords = TransformationFunctions.transformQuPathFullResToStage(
+                            qpCoords, transform);
+                    logger.info("Transformed to stage coordinates: ({}, {})", stageCoords[0], stageCoords[1]);
+
+                    // Validate stage bounds
+                    if (!mgr.isWithinStageBounds(stageCoords[0], stageCoords[1])) {
+                        logger.warn("Centroid position out of stage bounds: ({}, {})", stageCoords[0], stageCoords[1]);
+                        UIFunctions.notifyUserOfError(
+                                "The object centroid position is outside the stage bounds.",
+                                "Go to Centroid");
+                        centroidStatus.setText("Position out of bounds");
+                        return;
+                    }
+
+                    // Move stage to centroid position (XY only, no Z change)
+                    logger.info("Moving stage to object centroid: ({}, {})", stageCoords[0], stageCoords[1]);
+                    MicroscopeController.getInstance().moveStageXY(stageCoords[0], stageCoords[1]);
+
+                    // Update status and XY fields to reflect new position
+                    centroidStatus.setText(String.format("Moved to (%.2f, %.2f)", stageCoords[0], stageCoords[1]));
+                    xField.setText(String.format("%.2f", stageCoords[0]));
+                    yField.setText(String.format("%.2f", stageCoords[1]));
+                    xyStatus.setText(String.format("Moved to object centroid (%.2f, %.2f)", stageCoords[0], stageCoords[1]));
+                    logger.info("Successfully moved to object centroid");
+
+                } catch (Exception ex) {
+                    logger.error("Failed to move to object centroid: {}", ex.getMessage(), ex);
+                    centroidStatus.setText("Error: " + ex.getMessage());
+                    UIFunctions.notifyUserOfError(
+                            "Failed to move to centroid: " + ex.getMessage(),
+                            "Go to Centroid");
+                }
+            });
+
+            grid.add(goToCentroidBtn, 0, 8, 2, 1);
+            grid.add(centroidStatus, 0, 9, 3, 1);
 
             logger.debug("Finalizing dialog configuration and displaying");
             dlg.getDialogPane().setContent(grid);
