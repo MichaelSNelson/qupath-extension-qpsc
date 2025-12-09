@@ -680,11 +680,20 @@ public class QPProjectFunctions {
                 imageHeight
         );
 
+        // Ensure original entry has base_image set before we inherit from it
+        // This ensures both original and flipped entries share the same base_image
+        Map<String, String> originalMetadata = originalEntry.getMetadata();
+        if (originalMetadata.get(ImageMetadataManager.BASE_IMAGE) == null) {
+            String baseImage = qupath.lib.common.GeneralTools.stripExtension(originalEntry.getImageName());
+            originalMetadata.put(ImageMetadataManager.BASE_IMAGE, baseImage);
+            logger.info("Set base_image='{}' on original entry: {}", baseImage, originalEntry.getImageName());
+        }
+
         // Apply metadata - get offsets from original
         double[] offsets = ImageMetadataManager.getXYOffset(originalEntry);
         ImageMetadataManager.applyImageMetadata(
                 flippedEntry,
-                originalEntry, // Use original as parent to inherit collection
+                originalEntry, // Use original as parent to inherit collection and base_image
                 offsets[0], offsets[1],
                 true, // Mark as flipped
                 sampleName

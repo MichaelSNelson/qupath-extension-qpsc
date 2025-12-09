@@ -7,12 +7,15 @@ import qupath.ext.qpsc.ui.SampleSetupController;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.ui.UIFunctions;
 import qupath.fx.dialogs.Dialogs;
+import qupath.lib.common.GeneralTools;
 import qupath.lib.gui.QuPathGUI;
 import qupath.lib.images.ImageData;
 import qupath.lib.projects.Project;
 import qupath.lib.projects.ProjectImageEntry;
 
 import java.awt.image.BufferedImage;
+import java.io.IOException;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -62,12 +65,6 @@ public class ImageFlipHelper {
             boolean requiresFlipX = QPPreferenceDialog.getFlipMacroXProperty();
             boolean requiresFlipY = QPPreferenceDialog.getFlipMacroYProperty();
 
-            // If no flipping required, we're good
-            if (!requiresFlipX && !requiresFlipY) {
-                logger.info("No image flipping required by preferences");
-                return true;
-            }
-
             // Check if we're in a project
             if (project == null) {
                 logger.warn("No project available to check flip status");
@@ -81,9 +78,18 @@ public class ImageFlipHelper {
                 return true;
             }
 
+            // Always ensure base_image is set on the current entry
+            ensureBaseImageSet(currentEntry, project);
+
+            // If no flipping required, we're done (base_image is now set)
+            if (!requiresFlipX && !requiresFlipY) {
+                logger.info("No image flipping required by preferences");
+                return true;
+            }
+
             boolean isFlipped = ImageMetadataManager.isFlipped(currentEntry);
 
-            if (isFlipped || (!requiresFlipX && !requiresFlipY)) {
+            if (isFlipped) {
                 logger.info("Current image flip status matches requirements");
                 return true;
             }
@@ -249,5 +255,37 @@ public class ImageFlipHelper {
 
         String sampleName = sample != null ? sample.sampleName() : null;
         return validateAndFlipIfNeeded(gui, project, sampleName);
+    }
+
+    /**
+     * Ensures the base_image metadata is set on the given entry.
+     *
+     * <p>If base_image is not already set, it will be set to the image's own name
+     * (without extension). This ensures all images have a base_image value for
+     * consistent tracking and sorting.
+     *
+     * @param entry The project image entry to check/update
+     * @param project The project (for syncing changes)
+     */
+    private static void ensureBaseImageSet(ProjectImageEntry<BufferedImage> entry, Project<BufferedImage> project) {
+        if (entry == null) {
+            return;
+        }
+
+        Map<String, String> metadata = entry.getMetadata();
+        if (metadata.get(ImageMetadataManager.BASE_IMAGE) == null) {
+            String baseImage = GeneralTools.stripExtension(entry.getImageName());
+            metadata.put(ImageMetadataManager.BASE_IMAGE, baseImage);
+            logger.info("Set base_image='{}' on entry: {}", baseImage, entry.getImageName());
+
+            // Sync project to persist the change
+            if (project != null) {
+                try {
+                    project.syncChanges();
+                } catch (IOException e) {
+                    logger.error("Failed to sync project after setting base_image", e);
+                }
+            }
+        }
     }
 }
