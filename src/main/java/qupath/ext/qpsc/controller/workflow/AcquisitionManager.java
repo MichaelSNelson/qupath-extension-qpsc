@@ -811,6 +811,7 @@ public class AcquisitionManager {
         logger.debug("Derived projectsFolder for stitching: {}", projectsFolder);
 
         // Create stitching future - use projectInfo.getSampleName() for correct folder path
+        // Pass the dualProgressDialog so stitching status is shown in the unified progress window
         CompletableFuture<Void> stitchFuture = StitchingHelper.performAnnotationStitching(
                 annotation,
                 state.sample,
@@ -821,8 +822,10 @@ public class AcquisitionManager {
                 project,
                 STITCH_EXECUTOR,
                 handler,
+                MicroscopeController.getInstance().getCurrentTransform(),
                 state.projectInfo.getSampleName(),
-                projectsFolder.toString()
+                projectsFolder.toString(),
+                dualProgressDialog
         );
 
         state.stitchingFutures.add(stitchFuture);
@@ -999,6 +1002,17 @@ public class AcquisitionManager {
                         "Acquisition Cancelled"
                 )
         );
+    }
+
+    /**
+     * Returns the dual progress dialog for this acquisition manager.
+     * This allows other components (like StitchingHelper) to update the dialog
+     * with stitching status information.
+     *
+     * @return The DualProgressDialog, or null if not yet created
+     */
+    public DualProgressDialog getDualProgressDialog() {
+        return dualProgressDialog;
     }
 
 }

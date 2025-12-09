@@ -79,7 +79,9 @@ public class StitchingBlockingDialog {
         // Configure dialog properties
         dialog.setTitle("Stitching in Progress");
         dialog.setHeaderText("Processing stitching operations...");
-        dialog.initModality(Modality.APPLICATION_MODAL);
+        // Use WINDOW_MODAL instead of APPLICATION_MODAL to only block the QuPath main window
+        // This allows other progress dialogs (like DualProgressDialog) to remain accessible
+        dialog.initModality(Modality.WINDOW_MODAL);
         dialog.setResizable(false);
 
         // Set owner to QuPath main window for proper modality

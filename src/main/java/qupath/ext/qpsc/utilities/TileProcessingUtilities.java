@@ -333,6 +333,22 @@ public class TileProcessingUtilities {
                 outPath = outPath + ".tif";
             }
 
+            // Extract metadata early so we can use it for filename generation
+            // metadata.sampleName contains the source image name (for file naming)
+            // sampleLabel is the project folder name (for path construction)
+            StitchingHelper.StitchingMetadata metadata = null;
+            if (stitchParams != null && stitchParams.containsKey("metadata")) {
+                metadata = (StitchingHelper.StitchingMetadata) stitchParams.get("metadata");
+            }
+
+            // Use metadata.sampleName for file naming if available (source image name)
+            // Fall back to sampleLabel (project folder name) if not available
+            String displayName = (metadata != null && metadata.sampleName != null && !metadata.sampleName.isEmpty())
+                    ? metadata.sampleName
+                    : sampleLabel;
+            logger.debug("Using display name for file naming: {} (metadata.sampleName={}, sampleLabel={})",
+                    displayName, metadata != null ? metadata.sampleName : "null", sampleLabel);
+
             // Determine appropriate filename based on context
             File orig = new File(outPath);
             String baseName;
@@ -399,8 +415,9 @@ public class TileProcessingUtilities {
             }
 
             // Generate filename using preferences-based system
+            // Use displayName (source image name from metadata) instead of sampleLabel (project folder name)
             baseName = ImageNameGenerator.generateImageName(
-                    sampleLabel,
+                    displayName,
                     imageIndex,
                     modality,
                     objective,
@@ -409,8 +426,8 @@ public class TileProcessingUtilities {
                     extension
             );
 
-            logger.info("Generated filename: {} (modality={}, objective={}, annotation={}, angle={}, index={})",
-                    baseName, modality, objective, sanitizedAnnotationName, angleSuffix, imageIndex);
+            logger.info("Generated filename: {} (displayName={}, modality={}, objective={}, annotation={}, angle={}, index={})",
+                    baseName, displayName, modality, objective, sanitizedAnnotationName, angleSuffix, imageIndex);
 
             File renamed = new File(orig.getParent(), baseName);
             logger.info("Renaming {} → {}", orig.getName(), baseName);

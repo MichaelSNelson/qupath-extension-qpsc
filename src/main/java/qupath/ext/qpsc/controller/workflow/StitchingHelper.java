@@ -8,6 +8,7 @@ import qupath.ext.qpsc.modality.AngleExposure;
 import qupath.ext.qpsc.modality.ModalityHandler;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.utilities.StitchingConfiguration;
+import qupath.ext.qpsc.ui.DualProgressDialog;
 import qupath.ext.qpsc.ui.SampleSetupController;
 import qupath.ext.qpsc.ui.StitchingBlockingDialog;
 import qupath.ext.qpsc.ui.UIFunctions;
@@ -151,7 +152,7 @@ public class StitchingHelper {
 
         return performAnnotationStitching(
                 annotation, sample, modeWithIndex, angleExposures,
-                pixelSize, gui, project, executor, handler, fullResToStage, sampleName, projectsFolder
+                pixelSize, gui, project, executor, handler, fullResToStage, sampleName, projectsFolder, null
         );
     }
 
@@ -171,6 +172,7 @@ public class StitchingHelper {
      * @param fullResToStage Transform from full-res pixels to stage coordinates
      * @param sampleName The actual sample folder name (from ProjectInfo, may differ from sample.sampleName())
      * @param projectsFolder The actual projects folder path (from ProjectInfo, may differ from sample.projectsFolder())
+     * @param dualProgressDialog Optional progress dialog for showing stitching status alongside acquisition progress (can be null)
      * @return CompletableFuture that completes when all stitching is done
      */
     public static CompletableFuture<Void> performAnnotationStitching(
@@ -185,11 +187,16 @@ public class StitchingHelper {
             ModalityHandler handler,
             AffineTransform fullResToStage,
             String sampleName,
-            String projectsFolder) {
+            String projectsFolder,
+            DualProgressDialog dualProgressDialog) {
 
-        // Calculate metadata for this annotation - use explicit sampleName parameter
+        // Calculate metadata for this annotation
+        // Use sample.sampleName() for file naming (source image name), not sampleName (project folder name)
+        // The sampleName parameter is the project folder name, used for path construction
+        // sample.sampleName() is the user-entered name (defaulted to source image file name)
+        String displayName = sample.sampleName();
         StitchingMetadata metadata = calculateMetadata(
-                annotation, sampleName, gui, project, fullResToStage
+                annotation, displayName, gui, project, fullResToStage
         );
 
         // Create blocking dialog on JavaFX thread before starting stitching
@@ -200,6 +207,10 @@ public class StitchingHelper {
             Platform.runLater(() -> {
                 try {
                     dialogRef[0] = StitchingBlockingDialog.show(operationId, operationId);
+                    // Also register with DualProgressDialog if provided
+                    if (dualProgressDialog != null) {
+                        dualProgressDialog.registerStitchingOperation(operationId, operationId);
+                    }
                 } finally {
                     dialogLatch.countDown();
                 }
@@ -485,6 +496,10 @@ public class StitchingHelper {
                         logger.info("Completing stitching dialog operation after all images processed");
                         blockingDialog.completeOperation(operationId);
                     }
+                    // Also complete in DualProgressDialog if provided
+                    if (dualProgressDialog != null) {
+                        dualProgressDialog.completeStitchingOperation(operationId);
+                    }
 
                 } catch (Exception e) {
                     logger.error("Stitching failed for {}", annotation.getName(), e);
@@ -492,7 +507,12 @@ public class StitchingHelper {
                     // Mark operation as failed
                     if (blockingDialog != null) {
                         blockingDialog.failOperation(operationId, e.getMessage());
-                    } else {
+                    }
+                    // Also mark failed in DualProgressDialog if provided
+                    if (dualProgressDialog != null) {
+                        dualProgressDialog.failStitchingOperation(operationId, e.getMessage());
+                    }
+                    if (blockingDialog == null) {
                         Platform.runLater(() ->
                                 UIFunctions.notifyUserOfError(
                                         String.format("Stitching failed for %s: %s",
@@ -556,6 +576,10 @@ public class StitchingHelper {
                             annotationName, outPath);
 
                     // Note: Dialog completion is handled in TileProcessingUtilities after project import
+                    // But we complete the DualProgressDialog here since TileProcessingUtilities doesn't have access to it
+                    if (dualProgressDialog != null) {
+                        dualProgressDialog.completeStitchingOperation(operationId);
+                    }
 
                 } catch (Exception e) {
                     logger.error("Stitching failed for {}", annotation.getName(), e);
@@ -563,7 +587,12 @@ public class StitchingHelper {
                     // Mark operation as failed
                     if (blockingDialog != null) {
                         blockingDialog.failOperation(operationId, e.getMessage());
-                    } else {
+                    }
+                    // Also mark failed in DualProgressDialog if provided
+                    if (dualProgressDialog != null) {
+                        dualProgressDialog.failStitchingOperation(operationId, e.getMessage());
+                    }
+                    if (blockingDialog == null) {
                         Platform.runLater(() ->
                                 UIFunctions.notifyUserOfError(
                                         String.format("Stitching failed for %s: %s",
