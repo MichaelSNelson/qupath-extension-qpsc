@@ -383,31 +383,18 @@ public class ExistingAlignmentPath {
      * @return CompletableFuture containing the refined workflow state
      */
     private CompletableFuture<WorkflowState> performRefinement(GreenBoxContext context) {
-        // For EXISTING images (already flipped or not), annotations are already in the
-        // correct coordinate space. We should NOT apply any axis inversion when creating
-        // tiles for display in QuPath - tiles should match the annotation positions directly.
-        //
-        // The invertX/invertY flags affect WHERE tiles are placed within annotation bounds
-        // (e.g., starting from top-left vs bottom-left). For existing images, we want
-        // tiles to appear exactly at the annotation coordinates, so no inversion needed.
-        boolean invertedX = false;
-        boolean invertedY = false;
+        // Use the same tile creation as acquisition - delegates to TilingUtilities
+        // which reads invertedX/Y from global preferences for consistent tile positioning
+        logger.info("Creating tiles for refinement using global inversion preferences");
 
-        var currentEntry = QP.getProjectEntry();
-        boolean isFlipped = currentEntry != null && ImageMetadataManager.isFlipped(currentEntry);
-
-        logger.info("Creating tiles for refinement: isFlipped={}, invertedX={}, invertedY={} (no inversion for existing images)",
-                isFlipped, invertedX, invertedY);
-
-        // Create tiles for refinement - no axis inversion for existing images
+        // Use the 5-parameter version which reads inversion from preferences
+        // This ensures refinement tiles match acquisition tiles
         TileHelper.createTilesForAnnotations(
                 state.annotations,
                 state.sample,
                 state.projectInfo.getTempTileDirectory(),
                 state.projectInfo.getImagingModeWithIndex(),
-                state.pixelSize,
-                invertedX,
-                invertedY
+                state.pixelSize
         );
 
         return SingleTileRefinement.performRefinement(

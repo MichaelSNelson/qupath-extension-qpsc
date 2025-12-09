@@ -274,17 +274,13 @@ public class ExistingImageWorkflow {
          * Creates tiles and prompts user to select one for refinement.
          */
         private CompletableFuture<WorkflowState> performSlideAlignmentRefinement() {
-            // For EXISTING images, annotations are already in the correct coordinate space.
-            // We should NOT apply any axis inversion when creating tiles for display.
-            // Tiles should match the annotation positions directly.
+            // Use the same tile creation as acquisition - reads inversion from global preferences
             TileHelper.createTilesForAnnotations(
                     state.annotations,
                     state.sample,
                     state.projectInfo.getTempTileDirectory(),
                     state.projectInfo.getImagingModeWithIndex(),
-                    state.pixelSize,
-                    false,  // No X inversion for existing images
-                    false   // No Y inversion for existing images
+                    state.pixelSize
             );
 
             return SingleTileRefinement.performRefinement(
@@ -478,17 +474,14 @@ public class ExistingImageWorkflow {
             }
 
             // Create tiles for refinement if not already done
-            // For EXISTING images, annotations are already in the correct coordinate space.
-            // We should NOT apply any axis inversion when creating tiles for display.
+            // Uses same inversion settings as acquisition (from global preferences)
             if (state.projectInfo != null) {
                 TileHelper.createTilesForAnnotations(
                         state.annotations,
                         state.sample,
                         state.projectInfo.getTempTileDirectory(),
                         state.projectInfo.getImagingModeWithIndex(),
-                        state.pixelSize,
-                        false,  // No X inversion for existing images
-                        false   // No Y inversion for existing images
+                        state.pixelSize
                 );
             }
 
