@@ -3,6 +3,7 @@ package qupath.ext.qpsc.utilities;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
+import qupath.lib.common.GeneralTools;
 import qupath.lib.images.ImageData;
 import qupath.lib.images.servers.ImageServer;
 import qupath.lib.objects.hierarchy.PathObjectHierarchy;
@@ -49,6 +50,7 @@ public class ImageMetadataManager {
     public static final String ANGLE = "angle";
     public static final String ANNOTATION_NAME = "annotation_name";
     public static final String IMAGE_INDEX = "image_index";
+    public static final String BASE_IMAGE = "base_image";
 
     /**
      * Gets the next available image collection number for a project.
@@ -127,11 +129,38 @@ public class ImageMetadataManager {
             logger.info("Assigning new image_collection: {}", collectionNumber);
         }
 
+        // Determine base_image - inherit from parent chain or set from own name
+        String baseImage = null;
+        if (parentEntry != null) {
+            // First try to inherit from parent's base_image (follows the chain)
+            baseImage = parentEntry.getMetadata().get(BASE_IMAGE);
+            if (baseImage != null && !baseImage.isEmpty()) {
+                logger.info("Inheriting base_image '{}' from parent: {}",
+                        baseImage, parentEntry.getImageName());
+            } else {
+                // Parent doesn't have base_image - use parent's image name as base
+                baseImage = GeneralTools.stripExtension(parentEntry.getImageName());
+                logger.info("Setting base_image to parent's name: {}", baseImage);
+            }
+        } else {
+            // No parent - check if entry already has base_image set
+            baseImage = metadata.get(BASE_IMAGE);
+            if (baseImage == null || baseImage.isEmpty()) {
+                // Set to this image's own name (stripped of extension)
+                baseImage = GeneralTools.stripExtension(entry.getImageName());
+                logger.info("Setting base_image to own name: {}", baseImage);
+            }
+        }
+
         // Apply all metadata
         metadata.put(IMAGE_COLLECTION, collectionNumber);
         metadata.put(XY_OFFSET_X, String.valueOf(xOffset));
         metadata.put(XY_OFFSET_Y, String.valueOf(yOffset));
         metadata.put(IS_FLIPPED, String.valueOf(isFlipped));
+
+        if (baseImage != null && !baseImage.isEmpty()) {
+            metadata.put(BASE_IMAGE, baseImage);
+        }
 
         if (sampleName != null && !sampleName.isEmpty()) {
             metadata.put(SAMPLE_NAME, sampleName);
@@ -162,8 +191,8 @@ public class ImageMetadataManager {
             metadata.put(ORIGINAL_IMAGE_ID, parentEntry.getID());
         }
 
-        logger.debug("Applied metadata to {}: collection={}, offset=({},{}), flipped={}, sample={}, modality={}, objective={}, angle={}, annotation={}, index={}",
-                entry.getImageName(), collectionNumber, xOffset, yOffset, isFlipped, sampleName,
+        logger.debug("Applied metadata to {}: collection={}, base_image={}, offset=({},{}), flipped={}, sample={}, modality={}, objective={}, angle={}, annotation={}, index={}",
+                entry.getImageName(), collectionNumber, baseImage, xOffset, yOffset, isFlipped, sampleName,
                 modality, objective, angle, annotationName, imageIndex);
     }
 
@@ -226,7 +255,7 @@ public class ImageMetadataManager {
 
     /**
      * Initializes metadata for all images in a project that don't have it.
-     * Ensures all images have proper collection and sample metadata.
+     * Ensures all images have proper collection, base_image, and sample metadata.
      *
      * @param project The project to initialize
      */
@@ -248,6 +277,14 @@ public class ImageMetadataManager {
                 metadata.put(IMAGE_COLLECTION, "1");
                 anyChanges = true;
                 logger.debug("Initialized image_collection=1 for: {}", entry.getImageName());
+            }
+
+            // Initialize base_image if missing - set to image's own name (without extension)
+            if (metadata.get(BASE_IMAGE) == null) {
+                String baseImage = GeneralTools.stripExtension(entry.getImageName());
+                metadata.put(BASE_IMAGE, baseImage);
+                anyChanges = true;
+                logger.debug("Initialized base_image='{}' for: {}", baseImage, entry.getImageName());
             }
 
             // Initialize other fields with defaults if missing
@@ -363,6 +400,25 @@ public class ImageMetadataManager {
         }
 
         return entry.getMetadata().get(ORIGINAL_IMAGE_ID);
+    }
+
+    /**
+     * Gets the base image name from an image entry.
+     *
+     * <p>The base image is the original source image from which this image
+     * (and any intermediate images) was derived. This value is inherited
+     * through the parent chain and remains consistent across all derived
+     * images (flipped duplicates, stitched acquisitions, sub-acquisitions).
+     *
+     * @param entry The image entry
+     * @return The base image name, or null if not set
+     */
+    public static String getBaseImage(ProjectImageEntry<?> entry) {
+        if (entry == null) {
+            return null;
+        }
+
+        return entry.getMetadata().get(BASE_IMAGE);
     }
 
     /**
