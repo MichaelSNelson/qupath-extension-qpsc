@@ -16,6 +16,9 @@ import javafx.util.Duration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -64,9 +67,28 @@ public class DualProgressDialog {
     private final AtomicLong lastTileCompletionTime = new AtomicLong(0);
     private final AtomicInteger totalTilesCompleted = new AtomicInteger(0);
 
+    // Enhanced timing tracking for accurate autofocus-aware estimation
+    // Separates tile-only time from autofocus time using statistical detection
+    private final AtomicInteger afNTiles = new AtomicInteger(5); // Number of AF positions per annotation
+    private final AtomicInteger totalTilesPerAnnotation = new AtomicInteger(0); // Total tiles in current annotation
+    private volatile long detectedFullAfTime = 0; // Time for full autofocus (detected from first spike)
+    private final java.util.concurrent.ConcurrentLinkedDeque<Long> allTileTimes = new java.util.concurrent.ConcurrentLinkedDeque<>();
+    private final AtomicBoolean firstTileProcessed = new AtomicBoolean(false);
+
+    // Per-annotation tracking for tile counts in future annotations
+    private final List<Integer> futureTileCounts = Collections.synchronizedList(new ArrayList<>());
+
     // Control
     private final AtomicBoolean cancelled = new AtomicBoolean(false);
     private Consumer<Void> cancelCallback;
+
+    // Stitching status tracking - shows concurrent stitching operations in this dialog
+    // This allows users to see stitching progress alongside acquisition progress
+    private final Map<String, String> activeStitchingOperations = new ConcurrentHashMap<>();
+    private final VBox stitchingSection;
+    private final Label stitchingHeader;
+    private final ListView<String> stitchingListView;
+    private final Label stitchingCountLabel;
 
     /**
      * Creates a new dual progress dialog with default timing window size.
@@ -110,7 +132,19 @@ public class DualProgressDialog {
         timeLabel = new Label("Estimating total time...");
         timeLabel.setWrapText(true);
         statusLabel = new Label("Initializing workflow...");
-        
+
+        // Stitching status section - hidden until stitching starts
+        stitchingHeader = new Label("Stitching Operations");
+        stitchingHeader.setStyle("-fx-font-weight: bold; -fx-font-size: 11px;");
+        stitchingListView = new ListView<>();
+        stitchingListView.setPrefHeight(80);
+        stitchingListView.setStyle("-fx-font-size: 10px;");
+        stitchingCountLabel = new Label("0 operations in progress");
+        stitchingCountLabel.setStyle("-fx-font-size: 10px; -fx-text-fill: gray;");
+        stitchingSection = new VBox(5, stitchingHeader, stitchingListView, stitchingCountLabel);
+        stitchingSection.setVisible(false);
+        stitchingSection.setManaged(false); // Don't take space when hidden
+
         // Layout
         VBox vbox = new VBox(8);
         vbox.setStyle("-fx-padding: 15;");
@@ -128,10 +162,11 @@ public class DualProgressDialog {
             totalProgressBar,
             totalProgressLabel,
             new Separator(),
-            currentHeader, 
+            currentHeader,
             currentProgressBar,
             currentProgressLabel,
             new Separator(),
+            stitchingSection,  // Stitching status - hidden until active
             timeLabel,
             statusLabel
         );
@@ -184,7 +219,7 @@ public class DualProgressDialog {
     
     /**
      * Starts tracking a new annotation acquisition.
-     * 
+     *
      * @param annotationName Name of the annotation being acquired
      * @param expectedFiles Number of files expected for this annotation
      */
@@ -196,13 +231,16 @@ public class DualProgressDialog {
         this.currentAnnotationStartTime.set(now);
         this.lastTileCompletionTime.set(now); // Initialize for tile timing tracking
 
+        // Reset first tile flag for this annotation to detect full autofocus time
+        this.firstTileProcessed.set(false);
+
         logger.info("Started tracking annotation '{}' with {} expected files",
                    annotationName, expectedFiles);
     }
     
     /**
      * Updates the current annotation's progress.
-     * 
+     *
      * @param filesCompleted Number of files completed for current annotation
      */
     public void updateCurrentAnnotationProgress(int filesCompleted) {
@@ -223,6 +261,23 @@ public class DualProgressDialog {
                 int windowSize = timingWindowSize.get();
                 while (recentTileTimes.size() > windowSize) {
                     recentTileTimes.removeFirst();
+                }
+
+                // Also track in allTileTimes for statistical analysis
+                allTileTimes.addLast(tileTime);
+                // Keep a larger window for statistical detection (3x timing window)
+                int maxAllTimes = windowSize * 3;
+                while (allTileTimes.size() > maxAllTimes) {
+                    allTileTimes.removeFirst();
+                }
+
+                // Detect full autofocus time from first tile spike
+                // The first tile with tissue will have a much longer time due to full AF
+                if (!firstTileProcessed.get() && filesCompleted == 1) {
+                    // First tile - likely includes full autofocus
+                    detectedFullAfTime = tileTime;
+                    firstTileProcessed.set(true);
+                    logger.info("First tile time (likely includes full AF): {} ms", tileTime);
                 }
             }
             lastTileCompletionTime.set(now);
@@ -265,6 +320,51 @@ public class DualProgressDialog {
             }
         } else {
             logger.warn("Attempted to set invalid timing window size: {}", newSize);
+        }
+    }
+
+    /**
+     * Sets the number of autofocus positions per annotation from acquisition metadata.
+     * This is used to calculate expected remaining autofocus operations.
+     *
+     * @param afTiles Number of autofocus tile positions per annotation
+     */
+    public void setAfNTiles(int afTiles) {
+        if (afTiles > 0) {
+            int oldVal = afNTiles.getAndSet(afTiles);
+            if (oldVal != afTiles) {
+                logger.info("Updated AF positions per annotation from {} to {}", oldVal, afTiles);
+            }
+        }
+    }
+
+    /**
+     * Sets the total number of tiles for the current annotation.
+     * This helps calculate remaining autofocus operations accurately.
+     *
+     * @param totalTiles Total tile positions in current annotation
+     */
+    public void setTotalTilesForAnnotation(int totalTiles) {
+        if (totalTiles > 0) {
+            int oldVal = totalTilesPerAnnotation.getAndSet(totalTiles);
+            if (oldVal != totalTiles) {
+                logger.info("Updated total tiles for annotation from {} to {}", oldVal, totalTiles);
+            }
+        }
+    }
+
+    /**
+     * Sets the expected tile counts for future annotations.
+     * This enables accurate time estimation for the complete workflow.
+     *
+     * @param tileCounts List of tile counts for remaining annotations (excluding current)
+     */
+    public void setFutureTileCounts(List<Integer> tileCounts) {
+        futureTileCounts.clear();
+        if (tileCounts != null) {
+            futureTileCounts.addAll(tileCounts);
+            logger.info("Set future tile counts for {} annotations: {}",
+                    tileCounts.size(), tileCounts);
         }
     }
 
@@ -312,6 +412,7 @@ public class DualProgressDialog {
     
     /**
      * Updates time estimation display for the complete workflow.
+     * Uses component-based estimation that separates tile time from autofocus time.
      */
     private void updateTimeEstimate(long now, int completed) {
         // Enable time estimation once we have any progress (even during first annotation)
@@ -319,7 +420,7 @@ public class DualProgressDialog {
             timeLabel.setText("Estimating total time...");
             return;
         }
-        
+
         if (completed >= totalAnnotations) {
             // Workflow complete - show total time
             long totalTime = now - workflowStartTime.get();
@@ -328,53 +429,169 @@ public class DualProgressDialog {
             return;
         }
 
-        // Calculate remaining time using rolling average of recent tile times
-        // This adapts to actual timing patterns (autofocus vs no autofocus) without hardcoded values
+        int windowSize = timingWindowSize.get();
+        int tilesCollected = allTileTimes.size();
 
-        // First, calculate total tiles remaining across all annotations
+        // Need minimum tiles to perform statistical analysis
+        int minTilesForEstimate = Math.min(windowSize, 5);
+        if (tilesCollected < minTilesForEstimate) {
+            int tilesNeeded = minTilesForEstimate - tilesCollected;
+            timeLabel.setText(String.format("Collecting timing data... %d tiles remaining", tilesNeeded));
+            return;
+        }
+
+        // Calculate time components using statistical separation
+        TimingComponents timing = calculateTimingComponents();
+
+        // Calculate remaining work
         int currentProgress = currentAnnotationProgress.get();
         int tilesRemainingCurrentAnnotation = Math.max(0, currentAnnotationExpectedFiles - currentProgress);
 
-        // For simplicity, assume remaining annotations have similar tile counts
-        // (In practice, this could be improved by tracking per-annotation tile counts)
-        int avgTilesPerAnnotation = currentAnnotationExpectedFiles > 0 ? currentAnnotationExpectedFiles : 100;
-        int tilesRemainingFutureAnnotations = (totalAnnotations - completed - 1) * avgTilesPerAnnotation;
+        // Calculate tiles in future annotations
+        int tilesRemainingFutureAnnotations;
+        if (!futureTileCounts.isEmpty()) {
+            // Use actual tile counts if available
+            tilesRemainingFutureAnnotations = futureTileCounts.stream().mapToInt(Integer::intValue).sum();
+        } else {
+            // Estimate based on current annotation
+            int avgTilesPerAnnotation = totalTilesPerAnnotation.get() > 0
+                    ? totalTilesPerAnnotation.get()
+                    : (currentAnnotationExpectedFiles > 0 ? currentAnnotationExpectedFiles : 100);
+            int remainingAnnotations = totalAnnotations - completed - 1;
+            tilesRemainingFutureAnnotations = remainingAnnotations * avgTilesPerAnnotation;
+        }
+
         int totalTilesRemaining = tilesRemainingCurrentAnnotation + tilesRemainingFutureAnnotations;
 
-        int windowSize = timingWindowSize.get();
-        int tilesCollected = recentTileTimes.size();
+        // Calculate remaining autofocus operations
+        int afPositionsPerAnnotation = afNTiles.get();
 
-        // Check if we have collected enough tiles for accurate estimation
-        if (tilesCollected < windowSize && tilesCollected > 0) {
-            // Still collecting data for estimation
-            int tilesNeeded = windowSize - tilesCollected;
-            timeLabel.setText(String.format("Collecting data to estimate time... %d tiles remaining", tilesNeeded));
-        } else if (!recentTileTimes.isEmpty() && totalTilesRemaining > 0) {
-            // Use rolling average of recent tile times for prediction
-            long sum = recentTileTimes.stream().mapToLong(Long::longValue).sum();
-            long avgTileTime = sum / recentTileTimes.size();
+        // Remaining adaptive AF in current annotation (proportional to remaining tiles)
+        int totalTilesCurrentAnnotation = totalTilesPerAnnotation.get() > 0
+                ? totalTilesPerAnnotation.get()
+                : currentAnnotationExpectedFiles;
+        int remainingAdaptiveAfCurrent = 0;
+        if (totalTilesCurrentAnnotation > 0 && afPositionsPerAnnotation > 0) {
+            // Calculate how many AF positions remain based on progress
+            double progressFraction = currentProgress / (double) totalTilesCurrentAnnotation;
+            int completedAfPositions = (int) (progressFraction * afPositionsPerAnnotation);
+            remainingAdaptiveAfCurrent = Math.max(0, afPositionsPerAnnotation - completedAfPositions - 1);
+            // Subtract 1 because first AF is full autofocus, handled separately
+        }
 
-            long estimatedRemainingMs = avgTileTime * totalTilesRemaining;
-            long remainingSeconds = estimatedRemainingMs / 1000;
+        // Remaining adaptive AF in future annotations
+        int remainingAnnotations = totalAnnotations - completed - 1;
+        // Each future annotation has (afPositionsPerAnnotation - 1) adaptive AF positions
+        // because the first is a full autofocus
+        int remainingAdaptiveAfFuture = remainingAnnotations * Math.max(0, afPositionsPerAnnotation - 1);
 
-            timeLabel.setText(String.format("Complete workflow time remaining: %s (based on last %d tiles)",
-                    formatTime(remainingSeconds), tilesCollected));
-        } else if (totalTilesCompleted.get() > 0) {
-            // Fallback to simple linear extrapolation if we don't have enough tile timing data yet
-            long elapsed = now - workflowStartTime.get();
-            double effectiveCompleted = completed;
-            if (currentAnnotationExpectedFiles > 0) {
-                double currentAnnotationProgress = currentProgress / (double) currentAnnotationExpectedFiles;
-                effectiveCompleted += currentAnnotationProgress;
+        int totalRemainingAdaptiveAf = remainingAdaptiveAfCurrent + remainingAdaptiveAfFuture;
+
+        // Remaining full autofocus operations (one per remaining annotation)
+        int remainingFullAf = remainingAnnotations;
+
+        // Calculate estimated remaining time
+        // Time = (remaining tiles * base tile time) + (remaining adaptive AF * adaptive AF added time)
+        //      + (remaining full AF * full AF added time)
+        long tileTimeMs = timing.baseTileTimeMs * totalTilesRemaining;
+        long adaptiveAfTimeMs = timing.adaptiveAfAddedTimeMs * totalRemainingAdaptiveAf;
+        long fullAfTimeMs = timing.fullAfAddedTimeMs * remainingFullAf;
+
+        long totalRemainingMs = tileTimeMs + adaptiveAfTimeMs + fullAfTimeMs;
+        long remainingSeconds = totalRemainingMs / 1000;
+
+        // Build informative display
+        String estimate = formatTime(remainingSeconds);
+        if (logger.isDebugEnabled()) {
+            logger.debug("Time estimate breakdown: {} tiles @ {}ms = {}ms, {} adaptive AF @ {}ms = {}ms, " +
+                            "{} full AF @ {}ms = {}ms, total = {}s",
+                    totalTilesRemaining, timing.baseTileTimeMs, tileTimeMs,
+                    totalRemainingAdaptiveAf, timing.adaptiveAfAddedTimeMs, adaptiveAfTimeMs,
+                    remainingFullAf, timing.fullAfAddedTimeMs, fullAfTimeMs,
+                    remainingSeconds);
+        }
+
+        timeLabel.setText(String.format("Time remaining: %s (%d tiles, %d AF ops)",
+                estimate, totalTilesRemaining, totalRemainingAdaptiveAf + remainingFullAf));
+    }
+
+    /**
+     * Calculates timing components by statistically separating tile-only times from autofocus times.
+     *
+     * The approach:
+     * 1. Use the lower quartile (25th percentile) of tile times as base tile time
+     *    (most tiles don't have autofocus, so lower quartile captures typical tile-only time)
+     * 2. Identify tiles with autofocus as those significantly above the median
+     * 3. Calculate adaptive AF added time from the difference between AF tiles and base time
+     * 4. Use detected first tile time for full AF estimate
+     */
+    private TimingComponents calculateTimingComponents() {
+        // Copy times to a list for sorting
+        List<Long> sortedTimes = new ArrayList<>(allTileTimes);
+        Collections.sort(sortedTimes);
+
+        int n = sortedTimes.size();
+
+        // Base tile time: use 25th percentile (lower quartile)
+        // This captures tiles without autofocus
+        int q1Index = Math.max(0, n / 4);
+        long baseTileTime = sortedTimes.get(q1Index);
+
+        // Median for threshold detection
+        long median = sortedTimes.get(n / 2);
+
+        // Threshold for detecting autofocus tiles: 2x the base time or median + 50%, whichever is larger
+        long afThreshold = Math.max(baseTileTime * 2, median + median / 2);
+
+        // Calculate adaptive AF added time from tiles above threshold (excluding the max which may be full AF)
+        long adaptiveAfAddedTime = 0;
+        int adaptiveAfCount = 0;
+
+        for (int i = 0; i < n - 1; i++) { // Exclude max (likely full AF)
+            long time = sortedTimes.get(i);
+            if (time > afThreshold) {
+                adaptiveAfAddedTime += (time - baseTileTime);
+                adaptiveAfCount++;
             }
+        }
 
-            if (effectiveCompleted > 0) {
-                long remainingMs = (long) ((elapsed / effectiveCompleted) * (totalAnnotations - effectiveCompleted));
-                long remainingSeconds = remainingMs / 1000;
-                timeLabel.setText("Complete workflow time remaining: " + formatTime(remainingSeconds));
-            }
+        if (adaptiveAfCount > 0) {
+            adaptiveAfAddedTime /= adaptiveAfCount; // Average
         } else {
-            timeLabel.setText("Estimating total time...");
+            // No adaptive AF detected yet - estimate based on difference between median and base
+            adaptiveAfAddedTime = Math.max(0, median - baseTileTime) * 2;
+        }
+
+        // Full AF time: use detected first tile time or max observed time
+        long fullAfAddedTime;
+        if (detectedFullAfTime > 0) {
+            fullAfAddedTime = Math.max(0, detectedFullAfTime - baseTileTime);
+        } else {
+            // Fallback: use max time minus base
+            long maxTime = sortedTimes.get(n - 1);
+            fullAfAddedTime = Math.max(0, maxTime - baseTileTime);
+        }
+
+        // Ensure reasonable minimums
+        baseTileTime = Math.max(baseTileTime, 500); // At least 0.5s per tile
+        adaptiveAfAddedTime = Math.max(adaptiveAfAddedTime, 1000); // At least 1s added for adaptive AF
+        fullAfAddedTime = Math.max(fullAfAddedTime, adaptiveAfAddedTime * 2); // Full AF at least 2x adaptive
+
+        return new TimingComponents(baseTileTime, adaptiveAfAddedTime, fullAfAddedTime);
+    }
+
+    /**
+     * Holds the separated timing components for estimation.
+     */
+    private static class TimingComponents {
+        final long baseTileTimeMs;        // Time for tile acquisition only (no autofocus)
+        final long adaptiveAfAddedTimeMs; // Additional time when adaptive autofocus runs
+        final long fullAfAddedTimeMs;     // Additional time for full autofocus (first tile per annotation)
+
+        TimingComponents(long baseTileTimeMs, long adaptiveAfAddedTimeMs, long fullAfAddedTimeMs) {
+            this.baseTileTimeMs = baseTileTimeMs;
+            this.adaptiveAfAddedTimeMs = adaptiveAfAddedTimeMs;
+            this.fullAfAddedTimeMs = fullAfAddedTimeMs;
         }
     }
     
@@ -468,15 +685,138 @@ public class DualProgressDialog {
         Platform.runLater(() -> {
             statusLabel.setText("Error: " + message);
             statusLabel.setTextFill(Color.RED);
-            
+
             if (cancelButton != null) {
                 cancelButton.setText("Close");
                 cancelButton.setDisable(false);
                 cancelButton.setOnAction(e -> close());
             }
-            
+
             // Allow window to be closed
             stage.setOnCloseRequest(e -> close());
+        });
+    }
+
+    // ==================== Stitching Status Methods ====================
+
+    /**
+     * Returns the underlying Stage for this dialog.
+     * This can be used for window ownership and z-order management.
+     *
+     * @return The JavaFX Stage
+     */
+    public Stage getStage() {
+        return stage;
+    }
+
+    /**
+     * Registers a new stitching operation and shows it in the stitching section.
+     * This method is thread-safe and can be called from any thread.
+     *
+     * @param operationId Unique identifier for this stitching operation
+     * @param displayName Display name for this operation (e.g., "Sample - Tissue_1")
+     */
+    public void registerStitchingOperation(String operationId, String displayName) {
+        activeStitchingOperations.put(operationId, displayName + ": Initializing...");
+        updateStitchingDisplay();
+        logger.info("Registered stitching operation in progress dialog: {}", operationId);
+    }
+
+    /**
+     * Updates the status message for a specific stitching operation.
+     * This method is thread-safe and can be called from any thread.
+     *
+     * @param operationId The ID of the operation to update
+     * @param status The new status message (e.g., "Processing angle 45...")
+     */
+    public void updateStitchingStatus(String operationId, String status) {
+        if (activeStitchingOperations.containsKey(operationId)) {
+            // Extract display name (part before the colon) and append new status
+            String existing = activeStitchingOperations.get(operationId);
+            String displayName = existing.contains(":") ? existing.substring(0, existing.indexOf(":")) : operationId;
+            activeStitchingOperations.put(operationId, displayName + ": " + status);
+            updateStitchingDisplay();
+        }
+    }
+
+    /**
+     * Marks a stitching operation as complete and removes it from the display.
+     * This method is thread-safe and can be called from any thread.
+     *
+     * @param operationId The ID of the completed operation
+     */
+    public void completeStitchingOperation(String operationId) {
+        if (activeStitchingOperations.remove(operationId) != null) {
+            updateStitchingDisplay();
+            logger.info("Completed stitching operation in progress dialog: {}", operationId);
+        }
+    }
+
+    /**
+     * Marks a stitching operation as failed.
+     * This method is thread-safe and can be called from any thread.
+     *
+     * @param operationId The ID of the failed operation
+     * @param errorMessage Brief error description
+     */
+    public void failStitchingOperation(String operationId, String errorMessage) {
+        if (activeStitchingOperations.containsKey(operationId)) {
+            String existing = activeStitchingOperations.get(operationId);
+            String displayName = existing.contains(":") ? existing.substring(0, existing.indexOf(":")) : operationId;
+            activeStitchingOperations.put(operationId, displayName + ": FAILED - " + errorMessage);
+            updateStitchingDisplay();
+            logger.error("Stitching operation failed: {} - {}", operationId, errorMessage);
+
+            // Remove after 5 seconds so the error is visible but doesn't persist forever
+            Platform.runLater(() -> {
+                PauseTransition pause = new PauseTransition(Duration.seconds(5));
+                pause.setOnFinished(e -> {
+                    activeStitchingOperations.remove(operationId);
+                    updateStitchingDisplay();
+                });
+                pause.play();
+            });
+        }
+    }
+
+    /**
+     * Returns true if there are any active stitching operations.
+     *
+     * @return true if stitching is in progress
+     */
+    public boolean hasActiveStitchingOperations() {
+        return !activeStitchingOperations.isEmpty();
+    }
+
+    /**
+     * Updates the stitching section display with current operations.
+     * Called internally when operations change.
+     */
+    private void updateStitchingDisplay() {
+        Platform.runLater(() -> {
+            int count = activeStitchingOperations.size();
+            boolean hasOps = count > 0;
+
+            // Show/hide section based on whether there are active operations
+            stitchingSection.setVisible(hasOps);
+            stitchingSection.setManaged(hasOps);
+
+            if (hasOps) {
+                // Update list view
+                stitchingListView.getItems().clear();
+                activeStitchingOperations.values().forEach(status ->
+                    stitchingListView.getItems().add("* " + status));
+
+                // Update count label
+                if (count == 1) {
+                    stitchingCountLabel.setText("1 operation in progress");
+                } else {
+                    stitchingCountLabel.setText(count + " operations in progress");
+                }
+
+                // Resize window to accommodate stitching section
+                stage.sizeToScene();
+            }
         });
     }
 }

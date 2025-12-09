@@ -679,14 +679,34 @@ public class AcquisitionManager {
                                         metadataRead.set(true);
                                         try {
                                             java.util.List<String> lines = java.nio.file.Files.readAllLines(metadataPath);
+                                            int timingWindowSize = 10;
+                                            int afNTiles = 5;
+                                            int totalTiles = 0;
+
                                             for (String line : lines) {
                                                 if (line.startsWith("timing_window_size=")) {
-                                                    int timingWindowSize = Integer.parseInt(line.substring("timing_window_size=".length()));
-                                                    logger.info("Read timing window size from acquisition metadata: {} tiles", timingWindowSize);
-                                                    Platform.runLater(() -> progressDialog.setTimingWindowSize(timingWindowSize));
-                                                    break;
+                                                    timingWindowSize = Integer.parseInt(line.substring("timing_window_size=".length()));
+                                                } else if (line.startsWith("af_n_tiles=")) {
+                                                    afNTiles = Integer.parseInt(line.substring("af_n_tiles=".length()));
+                                                } else if (line.startsWith("total_tiles=")) {
+                                                    totalTiles = Integer.parseInt(line.substring("total_tiles=".length()));
                                                 }
                                             }
+
+                                            logger.info("Read acquisition metadata: window={}, af_positions={}, total_tiles={}",
+                                                    timingWindowSize, afNTiles, totalTiles);
+
+                                            // Update dialog with all timing parameters
+                                            final int finalTimingWindow = timingWindowSize;
+                                            final int finalAfNTiles = afNTiles;
+                                            final int finalTotalTiles = totalTiles;
+                                            Platform.runLater(() -> {
+                                                progressDialog.setTimingWindowSize(finalTimingWindow);
+                                                progressDialog.setAfNTiles(finalAfNTiles);
+                                                if (finalTotalTiles > 0) {
+                                                    progressDialog.setTotalTilesForAnnotation(finalTotalTiles);
+                                                }
+                                            });
                                         } catch (Exception e) {
                                             logger.warn("Failed to read acquisition metadata: {}", e.getMessage());
                                         }
