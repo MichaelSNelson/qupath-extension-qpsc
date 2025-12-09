@@ -185,6 +185,22 @@ public class TileProcessingUtilities {
         if (matchingString.equals(".")) {
             logger.info("Processing batch stitching results...");
 
+            // Extract metadata early so we can use it for filename generation
+            // metadata.sampleName contains the source image name (for file naming)
+            // sampleLabel is the project folder name (for path construction)
+            StitchingHelper.StitchingMetadata batchMetadata = null;
+            if (stitchParams != null && stitchParams.containsKey("metadata")) {
+                batchMetadata = (StitchingHelper.StitchingMetadata) stitchParams.get("metadata");
+            }
+
+            // Use metadata.sampleName for file naming if available (source image name)
+            // Fall back to sampleLabel (project folder name) if not available
+            String batchDisplayName = (batchMetadata != null && batchMetadata.sampleName != null && !batchMetadata.sampleName.isEmpty())
+                    ? batchMetadata.sampleName
+                    : sampleLabel;
+            logger.debug("Using display name for batch file naming: {} (metadata.sampleName={}, sampleLabel={})",
+                    batchDisplayName, batchMetadata != null ? batchMetadata.sampleName : "null", sampleLabel);
+
             // Look for both OME-TIFF files and OME-ZARR directories
             File[] allOmeFiles = outputDir.listFiles((dir, name) ->
                     (name.endsWith(".ome.tif") || name.endsWith(".ome.zarr")) && !existingFiles.contains(name));
@@ -223,11 +239,12 @@ public class TileProcessingUtilities {
                 }
 
                 // Create the full name with sample, mode, annotation, and angle
+                // Use batchDisplayName (source image name from metadata) instead of sampleLabel (project folder name)
                 // Sanitize annotation name to replace path separators with underscores for valid filenames
                 String sanitizedAnnotationName = annotationName.replace(File.separator, "_")
                                                                .replace("/", "_")
                                                                .replace("\\", "_");
-                String baseName = sampleLabel + "_" + imagingModeWithIndex + "_" +
+                String baseName = batchDisplayName + "_" + imagingModeWithIndex + "_" +
                         sanitizedAnnotationName + "_" + angleSuffix + extension;
                 File renamed = new File(stitchedFile.getParent(), baseName);
 
@@ -236,15 +253,11 @@ public class TileProcessingUtilities {
                     lastPath = renamed.getAbsolutePath();
                     logger.info("Successfully renamed to: {}", baseName);
 
-                    // Extract metadata if provided
-                    StitchingHelper.StitchingMetadata metadata = null;
-                    if (stitchParams != null && stitchParams.containsKey("metadata")) {
-                        metadata = (StitchingHelper.StitchingMetadata) stitchParams.get("metadata");
-                    }
+                    // Note: metadata was already extracted earlier (batchMetadata) for filename generation
 
                     // Import this file to the project
                     final String pathToImport = lastPath;
-                    final StitchingHelper.StitchingMetadata finalMetadata = metadata;
+                    final StitchingHelper.StitchingMetadata finalMetadata = batchMetadata;
 
                     Platform.runLater(() -> {
                         try {
@@ -440,12 +453,7 @@ public class TileProcessingUtilities {
                 // Continue with original path if rename fails
             }
 
-            // Extract metadata if provided, or create new with extracted components
-            StitchingHelper.StitchingMetadata metadata = null;
-            if (stitchParams != null && stitchParams.containsKey("metadata")) {
-                metadata = (StitchingHelper.StitchingMetadata) stitchParams.get("metadata");
-            }
-
+            // Note: metadata was already extracted earlier for filename generation
             // If metadata doesn't have the identification fields, use the extracted values
             final String finalModality = (metadata != null && metadata.modality != null) ? metadata.modality : modality;
             final String finalObjective = (metadata != null && metadata.objective != null) ? metadata.objective : objective;
