@@ -610,15 +610,19 @@ public class MicroscopeAlignmentWorkflow {
             boolean invertedY) {
 
         try {
-            // Simply delegate to the unified method in TilingUtilities
+            // Delegate to TilingUtilities with explicit inversion parameters
+            // These control tile positioning in the grid to match stage coordinate system
             TilingUtilities.createTilesForAnnotations(
                     annotations,
                     sampleSetup,
                     tempTileDirectory,
-                    modeWithIndex
+                    modeWithIndex,
+                    invertedX,
+                    invertedY
             );
 
-            logger.info("Created detection tiles for alignment");
+            logger.info("Created detection tiles for alignment (invertX={}, invertY={})",
+                    invertedX, invertedY);
 
         } catch (IOException e) {
             logger.error("Failed to create tiles", e);
