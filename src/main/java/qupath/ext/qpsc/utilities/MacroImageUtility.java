@@ -407,9 +407,8 @@ public class MacroImageUtility {
         BufferedImage macroImage = retrieveMacroImage(gui);
 
         if (macroImage == null && gui.getProject() != null && gui.getImageData() != null) {
-            // Get the image name (without extension) from the current image
-            String fullImageName = gui.getImageData().getServer().getMetadata().getName();
-            String imageName = qupath.lib.common.GeneralTools.stripExtension(fullImageName);
+            // Get the actual image file name (not metadata name which may be project name)
+            String imageName = QPProjectFunctions.getActualImageFileName(gui.getImageData());
 
             // Try to load saved macro image using IMAGE name (not sample name)
             logger.info("No macro image in slide, checking for saved version...");

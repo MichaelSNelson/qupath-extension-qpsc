@@ -435,12 +435,8 @@ public class ExistingAlignmentPath {
         @SuppressWarnings("unchecked")
         Project<BufferedImage> project = (Project<BufferedImage>) state.projectInfo.getCurrentProject();
 
-        // Get the image name (without extension) from the current image
-        String imageName = null;
-        if (gui.getImageData() != null) {
-            String fullImageName = gui.getImageData().getServer().getMetadata().getName();
-            imageName = qupath.lib.common.GeneralTools.stripExtension(fullImageName);
-        }
+        // Get the actual image file name (not metadata name which may be project name)
+        String imageName = QPProjectFunctions.getActualImageFileName(gui.getImageData());
 
         if (imageName == null) {
             logger.error("Cannot save slide alignment - no image name available");

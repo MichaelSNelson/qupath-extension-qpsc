@@ -9,6 +9,7 @@ import qupath.ext.qpsc.preferences.PersistentPreferences;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.ui.*;
 import qupath.ext.qpsc.utilities.*;
+import qupath.ext.qpsc.utilities.QPProjectFunctions;
 import qupath.fx.dialogs.Dialogs;
 import qupath.lib.gui.QuPathGUI;
 import qupath.lib.images.ImageData;
@@ -158,10 +159,11 @@ public class ExistingImageWorkflow {
         private CompletableFuture<WorkflowState> setupSample() {
             logger.info("Showing sample setup dialog");
 
-            // Get current image name without extension for default sample name
-            String currentImageName = gui.getImageData().getServer().getMetadata().getName();
-            String defaultSampleName = qupath.lib.common.GeneralTools.stripExtension(currentImageName);
-            logger.debug("Default sample name from image: {}", defaultSampleName);
+            // Get the actual image file name for default sample name
+            // Uses QPProjectFunctions.getActualImageFileName() to get the real file name
+            // rather than metadata name which may be different (e.g., project name)
+            String defaultSampleName = QPProjectFunctions.getActualImageFileName(gui.getImageData());
+            logger.debug("Default sample name from image file: {}", defaultSampleName);
 
             return SampleSetupController.showDialog(defaultSampleName)
                     .thenApply(sample -> {
@@ -300,12 +302,8 @@ public class ExistingImageWorkflow {
                 @SuppressWarnings("unchecked")
                 Project<BufferedImage> project = (Project<BufferedImage>) state.projectInfo.getCurrentProject();
 
-                // Get the image name (without extension) from the current image
-                String imageName = null;
-                if (gui.getImageData() != null) {
-                    String fullImageName = gui.getImageData().getServer().getMetadata().getName();
-                    imageName = qupath.lib.common.GeneralTools.stripExtension(fullImageName);
-                }
+                // Get the actual image file name (not metadata name which may be project name)
+                String imageName = QPProjectFunctions.getActualImageFileName(gui.getImageData());
 
                 if (imageName != null) {
                     AffineTransformManager.saveSlideAlignment(
@@ -522,12 +520,8 @@ public class ExistingImageWorkflow {
                 return;
             }
 
-            // Get the image name (without extension) from the current image
-            String imageName = null;
-            if (gui.getImageData() != null) {
-                String fullImageName = gui.getImageData().getServer().getMetadata().getName();
-                imageName = qupath.lib.common.GeneralTools.stripExtension(fullImageName);
-            }
+            // Get the actual image file name (not metadata name which may be project name)
+            String imageName = QPProjectFunctions.getActualImageFileName(gui.getImageData());
 
             if (imageName != null && state.transform != null) {
                 AffineTransformManager.saveSlideAlignment(

@@ -8,6 +8,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qupath.ext.qpsc.ui.SampleSetupController;
 import qupath.ext.qpsc.utilities.AffineTransformManager;
+import qupath.ext.qpsc.utilities.QPProjectFunctions;
 import qupath.lib.gui.QuPathGUI;
 import qupath.lib.projects.Project;
 
@@ -183,12 +184,8 @@ public class AlignmentHelper {
 
         CompletableFuture<SlideAlignmentResult> future = new CompletableFuture<>();
 
-        // Get the image name (without extension) from the current image
-        String imageName = null;
-        if (gui.getImageData() != null) {
-            String fullImageName = gui.getImageData().getServer().getMetadata().getName();
-            imageName = qupath.lib.common.GeneralTools.stripExtension(fullImageName);
-        }
+        // Get the actual image file name (not metadata name which may be project name)
+        String imageName = QPProjectFunctions.getActualImageFileName(gui.getImageData());
 
         if (imageName == null) {
             logger.warn("No image is currently open, cannot check for slide alignment");

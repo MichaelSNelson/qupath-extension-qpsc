@@ -229,11 +229,12 @@ public class ExistingImageWorkflowV2 {
 
         /**
          * Gets the default sample name from the current image.
+         * Uses the actual image file name, not metadata which may be project name.
          */
         private String getDefaultSampleName() {
-            if (gui.getImageData() != null) {
-                String fullName = gui.getImageData().getServer().getMetadata().getName();
-                return qupath.lib.common.GeneralTools.stripExtension(fullName);
+            String imageName = QPProjectFunctions.getActualImageFileName(gui.getImageData());
+            if (imageName != null) {
+                return imageName;
             }
             return "Sample_" + System.currentTimeMillis();
         }
@@ -536,11 +537,8 @@ public class ExistingImageWorkflowV2 {
                 return;
             }
 
-            String imageName = null;
-            if (gui.getImageData() != null) {
-                String fullName = gui.getImageData().getServer().getMetadata().getName();
-                imageName = qupath.lib.common.GeneralTools.stripExtension(fullName);
-            }
+            // Get the actual image file name (not metadata name which may be project name)
+            String imageName = QPProjectFunctions.getActualImageFileName(gui.getImageData());
 
             if (imageName != null) {
                 AffineTransformManager.saveSlideAlignment(

@@ -289,6 +289,78 @@ public class QPProjectFunctions {
         return null;
     }
 
+    /**
+     * Gets the actual image file name (without extension) from an ImageData.
+     *
+     * <p>This method extracts the real file name from the image server's URIs,
+     * rather than using the metadata name which may be different (e.g., renamed
+     * in a project or set to the project name).</p>
+     *
+     * <p>The extraction order is:
+     * <ol>
+     *   <li>Server URIs (most reliable for actual file name)</li>
+     *   <li>Server path extraction</li>
+     *   <li>Metadata name as fallback</li>
+     * </ol>
+     *
+     * @param imageData The ImageData to extract the file name from
+     * @return The file name without extension, or null if unavailable
+     */
+    public static String getActualImageFileName(ImageData<BufferedImage> imageData) {
+        if (imageData == null) {
+            return null;
+        }
+
+        ImageServer<BufferedImage> server = imageData.getServer();
+        if (server == null) {
+            return null;
+        }
+
+        String fileName = null;
+
+        // 1. Try to get from server URIs (most reliable for actual file name)
+        try {
+            if (server.getURIs() != null && !server.getURIs().isEmpty()) {
+                URI firstUri = server.getURIs().iterator().next();
+                String path = firstUri.getPath();
+                if (path != null && !path.isEmpty()) {
+                    // Get just the file name from the path
+                    int lastSlash = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+                    fileName = lastSlash >= 0 ? path.substring(lastSlash + 1) : path;
+                    logger.debug("Extracted file name from URI: {}", fileName);
+                }
+            }
+        } catch (Exception e) {
+            logger.debug("Could not extract file name from URIs: {}", e.getMessage());
+        }
+
+        // 2. Try server path if URI didn't work
+        if (fileName == null || fileName.isEmpty()) {
+            String serverPath = imageData.getServerPath();
+            if (serverPath != null) {
+                String extractedPath = extractImagePath(imageData);
+                if (extractedPath != null) {
+                    File file = new File(extractedPath);
+                    fileName = file.getName();
+                    logger.debug("Extracted file name from server path: {}", fileName);
+                }
+            }
+        }
+
+        // 3. Fall back to metadata name (may be different from actual file name)
+        if (fileName == null || fileName.isEmpty()) {
+            fileName = server.getMetadata().getName();
+            logger.debug("Using metadata name as fallback: {}", fileName);
+        }
+
+        // Strip extension if we got a name
+        if (fileName != null && !fileName.isEmpty()) {
+            return qupath.lib.common.GeneralTools.stripExtension(fileName);
+        }
+
+        return null;
+    }
+
 //    /**
 //     * Import an image file to the project and open it in the GUI.
 //     */
