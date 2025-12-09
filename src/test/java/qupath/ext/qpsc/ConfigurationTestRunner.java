@@ -80,25 +80,39 @@ public class ConfigurationTestRunner {
     }
     
     @Test
-    public void testAcquisitionProfiles() {
-        // Test profile lookup
-        Map<String, Object> profile = configManager.getAcquisitionProfile(
-            "test_brightfield", 
-            "LOCI_OBJECTIVE_TEST_10X_001", 
+    public void testHardwareConfiguration() {
+        // Test hardware objectives
+        List<Map<String, Object>> objectives = configManager.getHardwareObjectives();
+        assertFalse(objectives.isEmpty());
+        assertEquals(2, objectives.size());
+
+        // Test hardware detectors
+        Set<String> detectors = configManager.getHardwareDetectors();
+        assertFalse(detectors.isEmpty());
+        assertEquals(2, detectors.size());
+        assertTrue(detectors.contains("LOCI_DETECTOR_TEST_001"));
+
+        // Test hardware combination validation
+        assertTrue(configManager.isValidHardwareCombination(
+            "test_brightfield",
+            "LOCI_OBJECTIVE_TEST_10X_001",
             "LOCI_DETECTOR_TEST_001"
-        );
-        assertNotNull(profile);
-        assertEquals("test_brightfield", profile.get("modality"));
-        
-        // Test pixel size
+        ));
+        assertFalse(configManager.isValidHardwareCombination(
+            "fake_modality",
+            "LOCI_OBJECTIVE_TEST_10X_001",
+            "LOCI_DETECTOR_TEST_001"
+        ));
+
+        // Test pixel size from hardware section
         double pixelSize = configManager.getModalityPixelSize(
             "test_brightfield",
             "LOCI_OBJECTIVE_TEST_10X_001",
             "LOCI_DETECTOR_TEST_001"
         );
         assertEquals(1.0, pixelSize, 0.001);
-        
-        // Test exposures
+
+        // Test exposures (from imageprocessing file)
         Map<String, Object> exposures = configManager.getModalityExposures(
             "test_brightfield",
             "LOCI_OBJECTIVE_TEST_10X_001",
@@ -106,8 +120,8 @@ public class ConfigurationTestRunner {
         );
         assertNotNull(exposures);
         assertEquals(100, ((Number) exposures.get("single")).intValue());
-        
-        // Test gains
+
+        // Test gains (from imageprocessing file)
         Object gains = configManager.getModalityGains(
             "test_brightfield",
             "LOCI_OBJECTIVE_TEST_10X_001",
@@ -212,18 +226,14 @@ public class ConfigurationTestRunner {
     
     @Test
     public void testErrorHandling() {
-        // Test non-existent profile
-        Map<String, Object> nullProfile = configManager.getAcquisitionProfile(
-            "fake", "fake", "fake"
-        );
-        assertNull(nullProfile);
-        
-        // Test default pixel size for non-existent profile
-        double defaultPixelSize = configManager.getModalityPixelSize(
-            "fake", "fake", "fake"
-        );
-        assertEquals(1.0, defaultPixelSize, 0.001);
-        
+        // Test invalid hardware combination
+        assertFalse(configManager.isValidHardwareCombination("fake", "fake", "fake"));
+
+        // Test pixel size for non-existent combination throws exception
+        assertThrows(IllegalArgumentException.class, () -> {
+            configManager.getModalityPixelSize("fake", "fake", "fake");
+        });
+
         // Test invalid stage axis
         double invalidLimit = configManager.getStageLimit("invalid", "low");
         assertEquals(-20000.0, invalidLimit, 0.001); // Should return default
@@ -276,43 +286,23 @@ modalities:
       method: 'divide'
       base_folder: "/test/backgrounds"
 
-# ========== ACQUISITION PROFILES ==========
-acq_profiles:
-  defaults:
-    - objective: 'LOCI_OBJECTIVE_TEST_10X_001'
-      settings:
-        autofocus:
-          n_steps: 5
-          search_range_um: 20
-          n_tiles: 3
-        pixel_size_xy_um:
-          LOCI_DETECTOR_TEST_001: 1.0
-          LOCI_DETECTOR_TEST_002: 0.5
-          
-    - objective: 'LOCI_OBJECTIVE_TEST_20X_001'
-      settings:
-        autofocus:
-          n_steps: 7
-          search_range_um: 10
-          n_tiles: 5
-        pixel_size_xy_um:
-          LOCI_DETECTOR_TEST_001: 0.5
-          LOCI_DETECTOR_TEST_002: 0.25
+# ========== AVAILABLE HARDWARE ==========
+# Lists of available hardware components on this test microscope.
+# All combinations of modality/objective/detector are valid.
+hardware:
+  objectives:
+    - id: 'LOCI_OBJECTIVE_TEST_10X_001'
+      pixel_size_xy_um:
+        LOCI_DETECTOR_TEST_001: 1.0
+        LOCI_DETECTOR_TEST_002: 0.5
+    - id: 'LOCI_OBJECTIVE_TEST_20X_001'
+      pixel_size_xy_um:
+        LOCI_DETECTOR_TEST_001: 0.5
+        LOCI_DETECTOR_TEST_002: 0.25
 
-  profiles:
-    # Brightfield profiles
-    - modality: 'test_brightfield'
-      objective: 'LOCI_OBJECTIVE_TEST_10X_001'
-      detector: 'LOCI_DETECTOR_TEST_001'
-
-    - modality: 'test_brightfield'
-      objective: 'LOCI_OBJECTIVE_TEST_20X_001'
-      detector: 'LOCI_DETECTOR_TEST_001'
-
-    # PPM profiles
-    - modality: 'test_ppm'
-      objective: 'LOCI_OBJECTIVE_TEST_10X_001'
-      detector: 'LOCI_DETECTOR_TEST_002'
+  detectors:
+    - 'LOCI_DETECTOR_TEST_001'
+    - 'LOCI_DETECTOR_TEST_002'
 
 # ========== STAGE CONFIGURATION ==========
 stage:

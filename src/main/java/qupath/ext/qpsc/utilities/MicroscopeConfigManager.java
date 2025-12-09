@@ -501,38 +501,67 @@ public class MicroscopeConfigManager {
      * @param modality The modality name (e.g., "ppm", "brightfield")
      * @param objective The objective ID (e.g., "LOCI_OBJECTIVE_OLYMPUS_10X_001")
      * @param detector The detector ID (e.g., "LOCI_DETECTOR_JAI_001")
-     * @return Map containing the profile, or null if not found
+     * @return Map containing the profile keys, or null if combination is invalid
+     * @deprecated With simplified hardware config, all modality/objective/detector combinations
+     *             are valid. Use {@link #isValidHardwareCombination(String, String, String)} instead.
      */
+    @Deprecated
     @SuppressWarnings("unchecked")
     public Map<String, Object> getAcquisitionProfile(String modality, String objective, String detector) {
-        List<Object> profiles = getList("acq_profiles", "profiles");
-        if (profiles == null) {
-            logger.warn("No acquisition profiles found in configuration");
+        // With new hardware config, validate the combination exists
+        if (!isValidHardwareCombination(modality, objective, detector)) {
+            logger.warn("Invalid hardware combination: modality={}, objective={}, detector={}",
+                    modality, objective, detector);
             return null;
         }
 
-        for (Object profile : profiles) {
-            if (profile instanceof Map<?, ?>) {
-                Map<String, Object> p = (Map<String, Object>) profile;
-                if (modality.equals(p.get("modality")) &&
-                        objective.equals(p.get("objective")) &&
-                        detector.equals(p.get("detector"))) {
-                    logger.debug("Found profile for {}/{}/{}", modality, objective, detector);
-                    return p;
-                }
-            }
-        }
-
-        logger.warn("No profile found for modality: {}, objective: {}, detector: {}",
-                modality, objective, detector);
-        return null;
+        // Return a synthetic profile map for backwards compatibility
+        Map<String, Object> profile = new HashMap<>();
+        profile.put("modality", modality);
+        profile.put("objective", objective);
+        profile.put("detector", detector);
+        logger.debug("Created synthetic profile for {}/{}/{}", modality, objective, detector);
+        return profile;
     }
 
     /**
-     * Get a setting from imaging profile or acquisition profile with defaults fallback.
-     * Priority order:
-     * 1. External imageprocessing_{microscope}.yml -> imaging_profiles -> modality -> objective -> detector -> settingPath
-     * 2. Main config -> acq_profiles -> defaults -> objective -> settings -> settingPath
+     * Check if a modality/objective/detector combination is valid based on hardware configuration.
+     * With simplified config, all combinations are valid if the objective and detector exist.
+     *
+     * @param modality The modality name (checked against available modalities)
+     * @param objective The objective ID (checked against hardware.objectives)
+     * @param detector The detector ID (checked against hardware.detectors)
+     * @return true if all components exist in configuration
+     */
+    public boolean isValidHardwareCombination(String modality, String objective, String detector) {
+        // Check modality exists
+        Set<String> availableModalities = getAvailableModalities();
+        if (!availableModalities.contains(modality)) {
+            logger.debug("Modality {} not found in available modalities: {}", modality, availableModalities);
+            return false;
+        }
+
+        // Check objective exists in hardware
+        Set<String> availableObjectives = getAvailableObjectivesForModality(modality);
+        if (!availableObjectives.contains(objective)) {
+            logger.debug("Objective {} not found in hardware objectives: {}", objective, availableObjectives);
+            return false;
+        }
+
+        // Check detector exists in hardware
+        Set<String> availableDetectors = getHardwareDetectors();
+        if (!availableDetectors.contains(detector)) {
+            logger.debug("Detector {} not found in hardware detectors: {}", detector, availableDetectors);
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Get a setting from the external imageprocessing configuration file.
+     * Settings like exposures, gains, and white balance are stored in imageprocessing_{microscope}.yml.
+     * Pixel sizes are now in the hardware section of the main config.
      *
      * @param modality The modality name
      * @param objective The objective ID
@@ -542,7 +571,7 @@ public class MicroscopeConfigManager {
      */
     @SuppressWarnings("unchecked")
     public Object getProfileSetting(String modality, String objective, String detector, String... settingPath) {
-        // First check external imageprocessing config
+        // Check external imageprocessing config
         if (imageprocessingData != null && imageprocessingData.containsKey("imaging_profiles")) {
             Map<String, Object> imagingProfiles = (Map<String, Object>) imageprocessingData.get("imaging_profiles");
             if (imagingProfiles != null && imagingProfiles.containsKey(modality)) {
@@ -558,24 +587,6 @@ public class MicroscopeConfigManager {
                                         Arrays.toString(settingPath), modality, objective, detector);
                                 return value;
                             }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Fall back to defaults in main config (for settings not in imageprocessing like pixel_size_xy_um)
-        List<Object> defaults = getList("acq_profiles", "defaults");
-        if (defaults != null) {
-            for (Object def : defaults) {
-                if (def instanceof Map<?, ?>) {
-                    Map<String, Object> d = (Map<String, Object>) def;
-                    if (objective.equals(d.get("objective")) && d.containsKey("settings")) {
-                        Object value = getNestedValue((Map<String, Object>) d.get("settings"), settingPath);
-                        if (value != null) {
-                            logger.debug("Found setting in acq_profiles defaults: {} for objective {}",
-                                    Arrays.toString(settingPath), objective);
-                            return value;
                         }
                     }
                 }
@@ -636,45 +647,39 @@ public class MicroscopeConfigManager {
 
     /**
      * Get pixel size for a specific modality/objective/detector combination.
+     * Pixel sizes are stored in the hardware.objectives section of the main config.
      *
-     * @param modality The modality name
+     * @param modality The modality name (unused, kept for API compatibility)
      * @param objective The objective ID
      * @param detector The detector ID
      * @return Pixel size in microns
      * @throws IllegalArgumentException if pixel size cannot be determined
      */
     public double getModalityPixelSize(String modality, String objective, String detector) {
-        Object pixelSize = getProfileSetting(modality, objective, detector, "pixel_size_xy_um", detector);
+        Double pixelSize = getHardwarePixelSize(objective, detector);
 
-        if (pixelSize instanceof Number) {
-            double size = ((Number) pixelSize).doubleValue();
-            if (size > 0) {
-                logger.debug("Pixel size for {}/{}/{}: {} µm", modality, objective, detector, size);
-                return size;
-            }
+        if (pixelSize != null && pixelSize > 0) {
+            logger.debug("Pixel size for {}/{}/{}: {} um", modality, objective, detector, pixelSize);
+            return pixelSize;
         }
 
         logger.error("No valid pixel size found for {}/{}/{}", modality, objective, detector);
         throw new IllegalArgumentException(
                 String.format("Cannot determine pixel size for modality '%s', objective '%s', detector '%s'. " +
-                        "Please check acquisition profile configuration.", modality, objective, detector));
+                        "Please check hardware configuration.", modality, objective, detector));
     }
 
     /**
-     * Get pixel size for a modality by searching through acquisition profiles.
+     * Get pixel size for a modality by searching through hardware objectives.
      * This is a convenience method for when you only have the modality name.
+     * Returns the pixel size for the first available objective/detector combination.
      *
      * @param modalityName The modality name (e.g., "bf_10x", "ppm_20x", "bf_10x_1")
      * @return Pixel size in microns
-     * @throws IllegalArgumentException if no matching profile found or pixel size cannot be determined
+     * @throws IllegalArgumentException if no pixel size can be determined
      */
     public double getPixelSizeForModality(String modalityName) {
         logger.debug("Finding pixel size for modality: {}", modalityName);
-
-        List<Object> profiles = getList("acq_profiles", "profiles");
-        if (profiles == null || profiles.isEmpty()) {
-            throw new IllegalArgumentException("No acquisition profiles defined in configuration");
-        }
 
         // Handle indexed modality names (e.g., "bf_10x_1" -> "bf_10x")
         String baseModality = modalityName;
@@ -682,41 +687,46 @@ public class MicroscopeConfigManager {
             baseModality = baseModality.substring(0, baseModality.lastIndexOf('_'));
         }
 
-        // Search for exact match first
-        for (Object profileObj : profiles) {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> profile = (Map<String, Object>) profileObj;
+        // Get available hardware and try to find a valid pixel size
+        List<Map<String, Object>> objectives = getHardwareObjectives();
+        Set<String> detectors = getHardwareDetectors();
 
-            String profileModality = (String) profile.get("modality");
-            String objective = (String) profile.get("objective");
-            String detector = (String) profile.get("detector");
+        if (objectives.isEmpty()) {
+            throw new IllegalArgumentException("No objectives defined in hardware configuration");
+        }
 
-            if (profileModality != null &&
-                    (profileModality.equals(baseModality) ||
-                            profileModality.equals(modalityName) ||
-                            modalityName.startsWith(profileModality))) {
+        if (detectors.isEmpty()) {
+            throw new IllegalArgumentException("No detectors defined in hardware configuration");
+        }
 
-                if (objective != null && detector != null) {
-                    try {
-                        return getModalityPixelSize(profileModality, objective, detector);
-                    } catch (IllegalArgumentException e) {
-                        // Continue searching if this profile doesn't have pixel size
-                        logger.debug("Profile found but no pixel size: {}", e.getMessage());
+        // Try each objective/detector combination until we find a valid pixel size
+        for (Map<String, Object> objective : objectives) {
+            String objectiveId = (String) objective.get("id");
+            if (objectiveId == null) continue;
+
+            for (String detectorId : detectors) {
+                try {
+                    double pixelSize = getModalityPixelSize(baseModality, objectiveId, detectorId);
+                    if (pixelSize > 0) {
+                        logger.debug("Found pixel size {} um for modality {} using {}/{}",
+                                     pixelSize, modalityName, objectiveId, detectorId);
+                        return pixelSize;
                     }
+                } catch (IllegalArgumentException e) {
+                    // Continue searching if this combination doesn't have pixel size
+                    logger.debug("No pixel size for {}/{}: {}", objectiveId, detectorId, e.getMessage());
                 }
             }
         }
 
         throw new IllegalArgumentException(
                 String.format("Cannot determine pixel size for modality '%s'. " +
-                        "No matching acquisition profile found.", modalityName));
+                        "No valid hardware configuration found.", modalityName));
     }
 
     /**
-     * Get autofocus parameters for a specific objective.
-     * Priority order:
-     * 1. External autofocus_{microscope}.yml file (preferred)
-     * 2. Embedded config: acq_profiles -> defaults -> settings -> autofocus
+     * Get autofocus parameters for a specific objective from the external autofocus file.
+     * Autofocus settings are stored in autofocus_{microscope}.yml.
      *
      * @param objective The objective ID
      * @return Map of autofocus parameters, or null if not found
@@ -725,31 +735,15 @@ public class MicroscopeConfigManager {
     public Map<String, Object> getAutofocusParams(String objective) {
         logger.debug("Getting autofocus parameters for objective: {}", objective);
 
-        // Priority 1: Check external autofocus file
+        // Check external autofocus file
         if (autofocusData != null && autofocusData.containsKey(objective)) {
             Map<String, Object> params = autofocusData.get(objective);
             logger.info("Found autofocus params for {} in external autofocus file", objective);
             return params;
         }
 
-        // Priority 2: Check embedded config (defaults section)
-        List<Object> defaults = getList("acq_profiles", "defaults");
-        if (defaults != null) {
-            for (Object def : defaults) {
-                if (def instanceof Map<?, ?>) {
-                    Map<String, Object> d = (Map<String, Object>) def;
-                    if (objective.equals(d.get("objective")) && d.containsKey("settings")) {
-                        Map<String, Object> settings = (Map<String, Object>) d.get("settings");
-                        if (settings.containsKey("autofocus")) {
-                            logger.info("Found autofocus params for {} in embedded config", objective);
-                            return (Map<String, Object>) settings.get("autofocus");
-                        }
-                    }
-                }
-            }
-        }
-
-        logger.error("No autofocus parameters found for objective: {}", objective);
+        logger.warn("No autofocus parameters found for objective: {} (check autofocus_{}.yml)",
+                objective, getString("microscope", "name"));
         return null;
     }
 
@@ -1375,7 +1369,7 @@ public class MicroscopeConfigManager {
 
                 // Core sections
                 new String[]{"modalities"},
-                new String[]{"acq_profiles"},
+                new String[]{"hardware"},
                 new String[]{"slide_size_um"}
         );
 
@@ -1391,20 +1385,8 @@ public class MicroscopeConfigManager {
             errors.add("No modalities defined in configuration");
         }
 
-        // Check acquisition profiles
-        List<Object> profiles = getList("acq_profiles", "profiles");
-        if (profiles == null || profiles.isEmpty()) {
-            errors.add("No acquisition profiles defined in configuration");
-        } else {
-            // Validate profile completeness and consistency
-            errors.addAll(validateProfiles(profiles, availableModalities));
-        }
-
-        // Check defaults for objectives
-        List<Object> defaults = getList("acq_profiles", "defaults");
-        if (defaults != null && profiles != null) {
-            errors.addAll(validateObjectiveDefaults(defaults, profiles));
-        }
+        // Check hardware section
+        errors.addAll(validateHardwareSection(availableModalities));
 
         // Check PPM-specific requirements if PPM modality is present
         if (availableModalities.contains("ppm")) {
@@ -1421,47 +1403,63 @@ public class MicroscopeConfigManager {
     }
 
     /**
-     * Validates acquisition profiles for completeness and consistency.
+     * Validates the hardware section for completeness and consistency.
      */
-    private List<String> validateProfiles(List<Object> profiles, Set<String> availableModalities) {
+    private List<String> validateHardwareSection(Set<String> availableModalities) {
         List<String> errors = new ArrayList<>();
-        boolean hasValidProfile = false;
-        Set<String> usedObjectives = new HashSet<>();
 
-        for (Object profileObj : profiles) {
-            if (!(profileObj instanceof Map)) continue;
+        // Check hardware.objectives
+        List<Map<String, Object>> objectives = getHardwareObjectives();
+        if (objectives.isEmpty()) {
+            errors.add("No objectives defined in hardware configuration");
+            return errors;
+        }
 
+        // Check hardware.detectors
+        Set<String> detectors = getHardwareDetectors();
+        if (detectors.isEmpty()) {
+            errors.add("No detectors defined in hardware configuration");
+            return errors;
+        }
+
+        // Validate each objective has required fields
+        for (Map<String, Object> objective : objectives) {
+            String objectiveId = (String) objective.get("id");
+            if (objectiveId == null || objectiveId.isBlank()) {
+                errors.add("Objective missing required 'id' field");
+                continue;
+            }
+
+            // Check pixel_size_xy_um exists
+            Object pixelSizeMap = objective.get("pixel_size_xy_um");
+            if (!(pixelSizeMap instanceof Map)) {
+                errors.add(String.format("Objective %s missing pixel_size_xy_um mapping", objectiveId));
+                continue;
+            }
+
+            // Check pixel sizes exist for all detectors
             @SuppressWarnings("unchecked")
-            Map<String, Object> profile = (Map<String, Object>) profileObj;
-
-            String modality = (String) profile.get("modality");
-            String objective = (String) profile.get("objective");
-            String detector = (String) profile.get("detector");
-
-            if (modality == null || objective == null || detector == null) {
-                errors.add(String.format("Profile missing required fields: modality=%s, objective=%s, detector=%s",
-                        modality, objective, detector));
-                continue;
+            Map<String, Object> pixelSizes = (Map<String, Object>) pixelSizeMap;
+            for (String detectorId : detectors) {
+                Object pixelSize = pixelSizes.get(detectorId);
+                if (!(pixelSize instanceof Number) || ((Number) pixelSize).doubleValue() <= 0) {
+                    errors.add(String.format("Objective %s missing valid pixel size for detector %s",
+                            objectiveId, detectorId));
+                }
             }
+        }
 
-            usedObjectives.add(objective);
-
-            // Check if modality exists
-            if (!availableModalities.contains(modality)) {
-                errors.add(String.format("Profile references unknown modality: %s", modality));
-                continue;
-            }
-
-            // Check if detector exists in resources
-            Map<String, Object> detectorSection = getResourceSection("id_detector");
-            if (detectorSection == null || !detectorSection.containsKey(detector)) {
-                errors.add(String.format("Profile references unknown detector: %s", detector));
+        // Validate each detector exists in resources
+        Map<String, Object> detectorSection = getResourceSection("id_detector");
+        for (String detectorId : detectors) {
+            if (detectorSection == null || !detectorSection.containsKey(detectorId)) {
+                errors.add(String.format("Detector %s not found in resources_LOCI.yml", detectorId));
                 continue;
             }
 
             // Validate detector dimensions
             @SuppressWarnings("unchecked")
-            Map<String, Object> detectorData = (Map<String, Object>) detectorSection.get(detector);
+            Map<String, Object> detectorData = (Map<String, Object>) detectorSection.get(detectorId);
             Integer width = detectorData != null && detectorData.get("width_px") instanceof Number ?
                     ((Number) detectorData.get("width_px")).intValue() : null;
             Integer height = detectorData != null && detectorData.get("height_px") instanceof Number ?
@@ -1469,87 +1467,49 @@ public class MicroscopeConfigManager {
 
             if (width == null || height == null || width <= 0 || height <= 0) {
                 errors.add(String.format("Detector %s has invalid dimensions: width=%s, height=%s",
-                        detector, width, height));
-                continue;
-            }
-
-            // Validate exposure settings from imageprocessing config
-            Map<String, Object> exposures = getModalityExposures(modality, objective, detector);
-            if (exposures == null || exposures.isEmpty()) {
-                errors.add(String.format("Profile %s/%s/%s missing exposures_ms (check imageprocessing config)",
-                        modality, objective, detector));
-                continue;
-            }
-
-            // Check pixel size (should come from defaults or profile)
-            double pixelSize = getModalityPixelSize(modality, objective, detector);
-            if (pixelSize <= 0) {
-                errors.add(String.format("Invalid pixel size for %s/%s/%s: %f",
-                        modality, objective, detector, pixelSize));
-                continue;
-            }
-
-            logger.debug("Valid profile found: {}/{}/{} with pixel size {} µm",
-                    modality, objective, detector, pixelSize);
-            hasValidProfile = true;
-        }
-
-        if (!hasValidProfile) {
-            errors.add("No valid acquisition profiles found");
-        }
-
-        return errors;
-    }
-
-    /**
-     * Validates objective defaults configuration.
-     */
-    private List<String> validateObjectiveDefaults(List<Object> defaults, List<Object> profiles) {
-        List<String> errors = new ArrayList<>();
-
-        // Track which objectives are used in profiles
-        Set<String> usedObjectives = new HashSet<>();
-        for (Object profileObj : profiles) {
-            if (profileObj instanceof Map) {
-                @SuppressWarnings("unchecked")
-                Map<String, Object> profile = (Map<String, Object>) profileObj;
-                String objective = (String) profile.get("objective");
-                if (objective != null) {
-                    usedObjectives.add(objective);
-                }
+                        detectorId, width, height));
             }
         }
 
-        // Check defaults for all used objectives
-        for (String objective : usedObjectives) {
-            boolean hasDefaults = false;
-            for (Object defaultObj : defaults) {
-                if (defaultObj instanceof Map) {
-                    @SuppressWarnings("unchecked")
-                    Map<String, Object> def = (Map<String, Object>) defaultObj;
-                    if (objective.equals(def.get("objective"))) {
-                        hasDefaults = true;
+        // Validate exposure settings exist for at least one modality/objective/detector combo
+        boolean hasValidExposures = false;
+        for (String modality : availableModalities) {
+            for (Map<String, Object> objective : objectives) {
+                String objectiveId = (String) objective.get("id");
+                if (objectiveId == null) continue;
 
-                        // Validate autofocus parameters
-                        Map<String, Object> autofocus = getAutofocusParams(objective);
-                        if (autofocus != null) {
-                            Integer nSteps = getAutofocusIntParam(objective, "n_steps");
-                            Integer searchRange = getAutofocusIntParam(objective, "search_range_um");
-
-                            if (nSteps == null || nSteps <= 0 || searchRange == null || searchRange <= 0) {
-                                logger.warn("Incomplete autofocus configuration for objective {}: n_steps={}, search_range_um={}",
-                                        objective, nSteps, searchRange);
-                                errors.add(String.format("Incomplete autofocus for objective %s", objective));
-                            }
-                        }
+                for (String detectorId : detectors) {
+                    Map<String, Object> exposures = getModalityExposures(modality, objectiveId, detectorId);
+                    if (exposures != null && !exposures.isEmpty()) {
+                        hasValidExposures = true;
+                        logger.debug("Valid exposure settings found for {}/{}/{}", modality, objectiveId, detectorId);
                         break;
                     }
                 }
+                if (hasValidExposures) break;
             }
+            if (hasValidExposures) break;
+        }
 
-            if (!hasDefaults) {
-                logger.warn("No defaults found for objective: {}", objective);
-                errors.add(String.format("No defaults defined for objective: %s", objective));
+        if (!hasValidExposures) {
+            errors.add("No valid exposure settings found in imageprocessing config for any modality/objective/detector combination");
+        }
+
+        // Validate autofocus settings exist for each objective (from external autofocus file)
+        for (Map<String, Object> objective : objectives) {
+            String objectiveId = (String) objective.get("id");
+            if (objectiveId == null) continue;
+
+            Map<String, Object> autofocus = getAutofocusParams(objectiveId);
+            if (autofocus != null) {
+                Integer nSteps = getAutofocusIntParam(objectiveId, "n_steps");
+                Integer searchRange = getAutofocusIntParam(objectiveId, "search_range_um");
+
+                if (nSteps == null || nSteps <= 0 || searchRange == null || searchRange <= 0) {
+                    logger.warn("Incomplete autofocus configuration for objective {}: n_steps={}, search_range_um={}",
+                            objectiveId, nSteps, searchRange);
+                    // Not an error - autofocus is optional
+                }
             }
         }
 
@@ -1608,77 +1568,129 @@ public class MicroscopeConfigManager {
         return false;
     }
 
-    // ========== NEW METHODS FOR UI DROPDOWNS ==========
+    // ========== HARDWARE SECTION ACCESS METHODS ==========
+
+    /**
+     * Get the list of available objectives from the hardware section.
+     *
+     * @return List of objective configuration maps, or empty list if not found
+     */
+    @SuppressWarnings("unchecked")
+    public List<Map<String, Object>> getHardwareObjectives() {
+        List<Object> objectives = getList("hardware", "objectives");
+        if (objectives == null) {
+            logger.warn("No objectives found in hardware section");
+            return Collections.emptyList();
+        }
+
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Object obj : objectives) {
+            if (obj instanceof Map) {
+                result.add((Map<String, Object>) obj);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Get the list of available detector IDs from the hardware section.
+     *
+     * @return Set of detector IDs, or empty set if not found
+     */
+    public Set<String> getHardwareDetectors() {
+        List<Object> detectors = getList("hardware", "detectors");
+        if (detectors == null) {
+            logger.warn("No detectors found in hardware section");
+            return Collections.emptySet();
+        }
+
+        Set<String> result = new HashSet<>();
+        for (Object obj : detectors) {
+            if (obj instanceof String) {
+                result.add((String) obj);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Get pixel size for a specific objective/detector combination from the hardware section.
+     *
+     * @param objectiveId The objective ID
+     * @param detectorId The detector ID
+     * @return Pixel size in microns, or null if not found
+     */
+    @SuppressWarnings("unchecked")
+    public Double getHardwarePixelSize(String objectiveId, String detectorId) {
+        List<Map<String, Object>> objectives = getHardwareObjectives();
+
+        for (Map<String, Object> objective : objectives) {
+            String id = (String) objective.get("id");
+            if (objectiveId.equals(id)) {
+                Object pixelSizeMap = objective.get("pixel_size_xy_um");
+                if (pixelSizeMap instanceof Map) {
+                    Object pixelSize = ((Map<String, Object>) pixelSizeMap).get(detectorId);
+                    if (pixelSize instanceof Number) {
+                        return ((Number) pixelSize).doubleValue();
+                    }
+                }
+            }
+        }
+
+        logger.debug("No pixel size found in hardware section for objective {} with detector {}",
+                     objectiveId, detectorId);
+        return null;
+    }
+
+    // ========== METHODS FOR UI DROPDOWNS ==========
 
     /**
      * Get available objectives for a given modality.
-     * 
-     * @param modalityName The base modality name (e.g., "ppm", "brightfield")
-     * @return Set of objective IDs that have profiles for this modality
+     * With the simplified hardware configuration, all objectives are available for all modalities.
+     *
+     * @param modalityName The base modality name (e.g., "ppm", "brightfield") - currently unused
+     *                     but kept for API compatibility and potential future restrictions
+     * @return Set of objective IDs available on this microscope
      */
     public Set<String> getAvailableObjectivesForModality(String modalityName) {
         logger.debug("Finding available objectives for modality: {}", modalityName);
-        
+
         Set<String> objectives = new HashSet<>();
-        List<Object> profiles = getList("acq_profiles", "profiles");
-        
-        if (profiles == null) {
-            logger.warn("No acquisition profiles found in configuration - profiles is null");
+        List<Map<String, Object>> hardwareObjectives = getHardwareObjectives();
+
+        if (hardwareObjectives.isEmpty()) {
+            logger.warn("No objectives found in hardware configuration");
             return objectives;
         }
-        
-        logger.debug("Found {} total profiles", profiles.size());
-        
-        for (Object profileObj : profiles) {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> profile = (Map<String, Object>) profileObj;
-            
-            String profileModality = (String) profile.get("modality");
-            String objective = (String) profile.get("objective");
-            
-            logger.debug("Profile: modality={}, objective={}", profileModality, objective);
-            
-            if (modalityName.equals(profileModality) && objective != null) {
-                objectives.add(objective);
-                logger.debug("Added objective {} for modality {}", objective, modalityName);
+
+        // With simplified hardware config, all objectives are available for all modalities
+        for (Map<String, Object> objectiveConfig : hardwareObjectives) {
+            String id = (String) objectiveConfig.get("id");
+            if (id != null) {
+                objectives.add(id);
             }
         }
-        
+
         logger.debug("Found {} objectives for modality {}: {}", objectives.size(), modalityName, objectives);
         return objectives;
     }
 
     /**
      * Get available detectors for a given modality and objective combination.
-     * 
-     * @param modalityName The base modality name (e.g., "ppm", "brightfield")
-     * @param objectiveId The objective ID (e.g., "LOCI_OBJECTIVE_OLYMPUS_20X_POL_001")
-     * @return Set of detector IDs that have profiles for this modality+objective combo
+     * With the simplified hardware configuration, all detectors are available for all
+     * modality+objective combinations.
+     *
+     * @param modalityName The base modality name (e.g., "ppm", "brightfield") - currently unused
+     * @param objectiveId The objective ID - currently unused but kept for API compatibility
+     * @return Set of detector IDs available on this microscope
      */
     public Set<String> getAvailableDetectorsForModalityObjective(String modalityName, String objectiveId) {
         logger.debug("Finding available detectors for modality: {}, objective: {}", modalityName, objectiveId);
-        
-        Set<String> detectors = new HashSet<>();
-        List<Object> profiles = getList("acq_profiles", "profiles");
-        
-        if (profiles != null) {
-            for (Object profileObj : profiles) {
-                @SuppressWarnings("unchecked")
-                Map<String, Object> profile = (Map<String, Object>) profileObj;
-                
-                String profileModality = (String) profile.get("modality");
-                String profileObjective = (String) profile.get("objective");
-                String detector = (String) profile.get("detector");
-                
-                if (modalityName.equals(profileModality) && 
-                    objectiveId.equals(profileObjective) && 
-                    detector != null) {
-                    detectors.add(detector);
-                }
-            }
-        }
-        
-        logger.debug("Found {} detectors for modality {} + objective {}: {}", 
+
+        // With simplified hardware config, all detectors are available for all combinations
+        Set<String> detectors = getHardwareDetectors();
+
+        logger.debug("Found {} detectors for modality {} + objective {}: {}",
                      detectors.size(), modalityName, objectiveId, detectors);
         return detectors;
     }
@@ -1799,14 +1811,13 @@ public class MicroscopeConfigManager {
 
     /**
      * Validate that a modality+objective+detector combination exists in the configuration.
-     * 
+     *
      * @param modalityName The base modality name
      * @param objectiveId The objective ID
      * @param detectorId The detector ID
-     * @return true if this combination has a configured profile
+     * @return true if this combination is valid (all components exist in config)
      */
     public boolean isValidModalityObjectiveDetectorCombination(String modalityName, String objectiveId, String detectorId) {
-        Map<String, Object> profile = getAcquisitionProfile(modalityName, objectiveId, detectorId);
-        return profile != null;
+        return isValidHardwareCombination(modalityName, objectiveId, detectorId);
     }
 }

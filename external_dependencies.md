@@ -101,9 +101,9 @@
 
 ### Required Configuration Sections
 - `microscope`: Basic microscope identity and default settings
-- `stage`: Physical stage limits and component IDs  
+- `stage`: Physical stage limits and component IDs
 - `modalities`: Imaging mode definitions and parameters
-- `acq_profiles`: Acquisition profiles with defaults and specific configurations
+- `hardware`: Available objectives (with pixel sizes) and detectors
 
 ## Version Compatibility
 

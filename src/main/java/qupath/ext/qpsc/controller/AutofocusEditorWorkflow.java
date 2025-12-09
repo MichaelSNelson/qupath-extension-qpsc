@@ -860,29 +860,22 @@ public class AutofocusEditorWorkflow {
     }
 
     /**
-     * Load list of objectives from main microscope config
+     * Load list of objectives from hardware configuration section.
      */
     private static List<String> loadObjectivesFromConfig(MicroscopeConfigManager configManager) {
         List<String> objectives = new ArrayList<>();
 
         try {
-            Map<String, Object> config = configManager.getAllConfig();
-            Map<String, Object> acqProfiles = (Map<String, Object>) config.get("acq_profiles");
+            List<Map<String, Object>> hardwareObjectives = configManager.getHardwareObjectives();
 
-            if (acqProfiles != null) {
-                List<Map<String, Object>> defaults = (List<Map<String, Object>>) acqProfiles.get("defaults");
-
-                if (defaults != null) {
-                    for (Map<String, Object> entry : defaults) {
-                        String objective = (String) entry.get("objective");
-                        if (objective != null && !objectives.contains(objective)) {
-                            objectives.add(objective);
-                        }
-                    }
+            for (Map<String, Object> objectiveConfig : hardwareObjectives) {
+                String objectiveId = (String) objectiveConfig.get("id");
+                if (objectiveId != null && !objectives.contains(objectiveId)) {
+                    objectives.add(objectiveId);
                 }
             }
         } catch (Exception e) {
-            logger.error("Error loading objectives from config", e);
+            logger.error("Error loading objectives from hardware config", e);
         }
 
         return objectives;

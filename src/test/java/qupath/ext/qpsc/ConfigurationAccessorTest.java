@@ -110,40 +110,47 @@ public class ConfigurationAccessorTest {
     }
 
     private static void testAcquisitionProfiles(MicroscopeConfigManager mgr) {
-        logger.info("\n--- Testing Acquisition Profiles ---");
+        logger.info("\n--- Testing Hardware Configuration ---");
 
-        // Get all profiles
-        List<Object> profiles = mgr.getList("acq_profiles", "profiles");
-        if (profiles != null) {
-            logger.info("Found {} acquisition profiles", profiles.size());
+        // Get hardware objectives and detectors
+        List<Map<String, Object>> objectives = mgr.getHardwareObjectives();
+        Set<String> detectors = mgr.getHardwareDetectors();
+        Set<String> modalities = mgr.getAvailableModalities();
 
-            // Test a few profiles
-            for (Object profileObj : profiles.subList(0, Math.min(3, profiles.size()))) {
-                @SuppressWarnings("unchecked")
-                Map<String, Object> profile = (Map<String, Object>) profileObj;
+        logger.info("Found {} objectives, {} detectors, {} modalities",
+                objectives.size(), detectors.size(), modalities.size());
 
-                String modality = (String) profile.get("modality");
-                String objective = (String) profile.get("objective");
-                String detector = (String) profile.get("detector");
+        if (!objectives.isEmpty() && !detectors.isEmpty() && !modalities.isEmpty()) {
+            // Test a sample combination
+            String modality = modalities.iterator().next();
+            String objectiveId = (String) objectives.get(0).get("id");
+            String detectorId = detectors.iterator().next();
 
-                logger.info("\n  Profile: {}/{}/{}", modality, objective, detector);
+            logger.info("\n  Testing combination: {}/{}/{}", modality, objectiveId, detectorId);
 
-                // Test pixel size
-                double pixelSize = mgr.getModalityPixelSize(modality, objective, detector);
-                logger.info("    Pixel size: {} µm", pixelSize);
-
-                // Test exposures
-                Map<String, Object> exposures = mgr.getModalityExposures(modality, objective, detector);
-                if (exposures != null) {
-                    logger.info("    Exposures: {}", exposures.keySet());
-                }
-
-                // Test gains
-                Object gains = mgr.getModalityGains(modality, objective, detector);
-                logger.info("    Gains type: {}", gains != null ? gains.getClass().getSimpleName() : "null");
+            // Test pixel size
+            try {
+                double pixelSize = mgr.getModalityPixelSize(modality, objectiveId, detectorId);
+                logger.info("    Pixel size: {} um", pixelSize);
+            } catch (IllegalArgumentException e) {
+                logger.warn("    Pixel size not found: {}", e.getMessage());
             }
+
+            // Test exposures
+            Map<String, Object> exposures = mgr.getModalityExposures(modality, objectiveId, detectorId);
+            if (exposures != null) {
+                logger.info("    Exposures: {}", exposures.keySet());
+            }
+
+            // Test gains
+            Object gains = mgr.getModalityGains(modality, objectiveId, detectorId);
+            logger.info("    Gains type: {}", gains != null ? gains.getClass().getSimpleName() : "null");
+
+            // Test hardware validation
+            boolean isValid = mgr.isValidHardwareCombination(modality, objectiveId, detectorId);
+            logger.info("    Valid combination: {}", isValid);
         } else {
-            logger.error("No acquisition profiles found");
+            logger.error("No hardware configuration found");
         }
     }
 
@@ -154,27 +161,26 @@ public class ConfigurationAccessorTest {
         logger.info("Default detector: {}",
                 defaultDetector.isEmpty() ? "Not configured" : defaultDetector);
 
-        // Test with specific detectors from profiles
-        List<Object> profiles = mgr.getList("acq_profiles", "profiles");
-        if (profiles != null && !profiles.isEmpty()) {
-            // Get first profile for testing
-            @SuppressWarnings("unchecked")
-            Map<String, Object> firstProfile = (Map<String, Object>) profiles.get(0);
+        // Test with hardware detectors and objectives
+        Set<String> detectors = mgr.getHardwareDetectors();
+        List<Map<String, Object>> objectives = mgr.getHardwareObjectives();
+        Set<String> modalities = mgr.getAvailableModalities();
 
-            String modality = (String) firstProfile.get("modality");
-            String objective = (String) firstProfile.get("objective");
-            String detector = (String) firstProfile.get("detector");
+        if (!detectors.isEmpty() && !objectives.isEmpty() && !modalities.isEmpty()) {
+            String modality = modalities.iterator().next();
+            String objectiveId = (String) objectives.get(0).get("id");
+            String detectorId = detectors.iterator().next();
 
-            logger.info("\nTesting detector: {}", detector);
+            logger.info("\nTesting detector: {}", detectorId);
 
-            int[] dims = mgr.getDetectorDimensions(detector);
+            int[] dims = mgr.getDetectorDimensions(detectorId);
             if (dims != null) {
                 logger.info("  Dimensions: {}x{} pixels", dims[0], dims[1]);
 
-                double[] fov = mgr.getModalityFOV(modality, objective, detector);
+                double[] fov = mgr.getModalityFOV(modality, objectiveId, detectorId);
                 if (fov != null) {
-                    logger.info("  FOV for {}/{}: {:.1f} x {:.1f} µm",
-                            modality, objective, fov[0], fov[1]);
+                    logger.info("  FOV for {}/{}: {} x {} um",
+                            modality, objectiveId, fov[0], fov[1]);
                 }
             } else {
                 logger.warn("  Detector dimensions not found");
@@ -210,28 +216,28 @@ public class ConfigurationAccessorTest {
     private static void testAutofocus(MicroscopeConfigManager mgr) {
         logger.info("\n--- Testing Autofocus Parameters ---");
 
-        // Get objectives from defaults
-        List<Object> defaults = mgr.getList("acq_profiles", "defaults");
-        if (defaults != null && !defaults.isEmpty()) {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> firstDefault = (Map<String, Object>) defaults.get(0);
-            String objective = (String) firstDefault.get("objective");
+        // Get objectives from hardware section
+        List<Map<String, Object>> objectives = mgr.getHardwareObjectives();
+        if (!objectives.isEmpty()) {
+            String objectiveId = (String) objectives.get(0).get("id");
 
-            logger.info("Testing autofocus for objective: {}", objective);
+            logger.info("Testing autofocus for objective: {}", objectiveId);
 
-            Map<String, Object> afParams = mgr.getAutofocusParams(objective);
+            Map<String, Object> afParams = mgr.getAutofocusParams(objectiveId);
             if (afParams != null) {
                 logger.info("  Full params: {}", afParams);
 
-                Integer nSteps = mgr.getAutofocusIntParam(objective, "n_steps");
-                Integer searchRange = mgr.getAutofocusIntParam(objective, "search_range_um");
-                Integer nTiles = mgr.getAutofocusIntParam(objective, "n_tiles");
+                Integer nSteps = mgr.getAutofocusIntParam(objectiveId, "n_steps");
+                Integer searchRange = mgr.getAutofocusIntParam(objectiveId, "search_range_um");
+                Integer nTiles = mgr.getAutofocusIntParam(objectiveId, "n_tiles");
 
                 logger.info("  n_steps: {}, search_range_um: {}, n_tiles: {}",
                         nSteps, searchRange, nTiles);
             } else {
-                logger.warn("  No autofocus parameters found");
+                logger.warn("  No autofocus parameters found (may be in external autofocus file)");
             }
+        } else {
+            logger.warn("  No objectives found in hardware section");
         }
     }
 
@@ -256,8 +262,12 @@ public class ConfigurationAccessorTest {
         logger.info("\n--- Testing Error Handling ---");
 
         // Try to get pixel size for non-existent combination
-        double pixelSize = mgr.getModalityPixelSize("non_existent", "fake_objective", "fake_detector");
-        logger.info("Non-existent modality pixel size (should be 1.0): {}", pixelSize);
+        try {
+            double pixelSize = mgr.getModalityPixelSize("non_existent", "fake_objective", "fake_detector");
+            logger.info("Non-existent modality pixel size (unexpected success): {}", pixelSize);
+        } catch (IllegalArgumentException e) {
+            logger.info("Non-existent modality pixel size threw expected exception: {}", e.getMessage());
+        }
 
         // Try to get stage limit for invalid axis
         double limit = mgr.getStageLimit("w", "low");
@@ -267,8 +277,8 @@ public class ConfigurationAccessorTest {
         boolean valid = mgr.isValidModality("fake_modality");
         logger.info("Non-existent modality valid (should be false): {}", valid);
 
-        // Try to get non-existent profile
-        Map<String, Object> fakeProfile = mgr.getAcquisitionProfile("fake", "fake", "fake");
-        logger.info("Non-existent profile (should be null): {}", fakeProfile);
+        // Try to validate non-existent hardware combination
+        boolean validCombo = mgr.isValidHardwareCombination("fake", "fake", "fake");
+        logger.info("Non-existent hardware combination valid (should be false): {}", validCombo);
     }
 }

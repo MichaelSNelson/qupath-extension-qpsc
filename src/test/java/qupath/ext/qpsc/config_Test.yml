@@ -32,43 +32,23 @@ modalities:
       method: 'divide'
       base_folder: "/test/backgrounds"
 
-# ========== ACQUISITION PROFILES ==========
-acq_profiles:
-  defaults:
-    - objective: 'LOCI_OBJECTIVE_TEST_10X_001'
-      settings:
-        autofocus:
-          n_steps: 5
-          search_range_um: 20
-          n_tiles: 3
-        pixel_size_xy_um:
-          LOCI_DETECTOR_TEST_001: 1.0
-          LOCI_DETECTOR_TEST_002: 0.5
-          
-    - objective: 'LOCI_OBJECTIVE_TEST_20X_001'
-      settings:
-        autofocus:
-          n_steps: 7
-          search_range_um: 10
-          n_tiles: 5
-        pixel_size_xy_um:
-          LOCI_DETECTOR_TEST_001: 0.5
-          LOCI_DETECTOR_TEST_002: 0.25
+# ========== AVAILABLE HARDWARE ==========
+# Lists of available hardware components on this test microscope.
+# All combinations of modality/objective/detector are valid.
+hardware:
+  objectives:
+    - id: 'LOCI_OBJECTIVE_TEST_10X_001'
+      pixel_size_xy_um:
+        LOCI_DETECTOR_TEST_001: 1.0
+        LOCI_DETECTOR_TEST_002: 0.5
+    - id: 'LOCI_OBJECTIVE_TEST_20X_001'
+      pixel_size_xy_um:
+        LOCI_DETECTOR_TEST_001: 0.5
+        LOCI_DETECTOR_TEST_002: 0.25
 
-  profiles:
-    # Brightfield profiles
-    - modality: 'test_brightfield'
-      objective: 'LOCI_OBJECTIVE_TEST_10X_001'
-      detector: 'LOCI_DETECTOR_TEST_001'
-
-    - modality: 'test_brightfield'
-      objective: 'LOCI_OBJECTIVE_TEST_20X_001'
-      detector: 'LOCI_DETECTOR_TEST_001'
-
-    # PPM profiles
-    - modality: 'test_ppm'
-      objective: 'LOCI_OBJECTIVE_TEST_10X_001'
-      detector: 'LOCI_DETECTOR_TEST_002'
+  detectors:
+    - 'LOCI_DETECTOR_TEST_001'
+    - 'LOCI_DETECTOR_TEST_002'
 
 # ========== STAGE CONFIGURATION ==========
 stage:
