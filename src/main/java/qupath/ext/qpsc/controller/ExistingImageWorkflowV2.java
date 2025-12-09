@@ -500,13 +500,17 @@ public class ExistingImageWorkflowV2 {
             }
 
             // Create tiles if needed
+            // For EXISTING images, annotations are already in the correct coordinate space.
+            // We should NOT apply any axis inversion when creating tiles for display.
             if (state.projectInfo != null) {
                 TileHelper.createTilesForAnnotations(
                         state.annotations,
                         state.sample,
                         state.projectInfo.getTempTileDirectory(),
                         state.projectInfo.getImagingModeWithIndex(),
-                        state.pixelSize
+                        state.pixelSize,
+                        false,  // No X inversion for existing images
+                        false   // No Y inversion for existing images
                 );
             }
 

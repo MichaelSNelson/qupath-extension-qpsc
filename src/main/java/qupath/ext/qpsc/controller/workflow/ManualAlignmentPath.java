@@ -180,19 +180,23 @@ public class ManualAlignmentPath {
             throw new RuntimeException("No annotations available for manual alignment");
         }
 
-        // Get flip status from image metadata (not global preferences)
-        // For existing images, the flip was applied when the image was imported
+        // For EXISTING images (already flipped or not), annotations are already in the
+        // correct coordinate space. We should NOT apply any axis inversion when creating
+        // tiles for display in QuPath - tiles should match the annotation positions directly.
+        //
+        // The invertX/invertY flags affect WHERE tiles are placed within annotation bounds
+        // (e.g., starting from top-left vs bottom-left). For existing images, we want
+        // tiles to appear exactly at the annotation coordinates, so no inversion needed.
+        boolean invertedX = false;
+        boolean invertedY = false;
+
         var currentEntry = QP.getProjectEntry();
         boolean isFlipped = currentEntry != null && ImageMetadataManager.isFlipped(currentEntry);
 
-        // For flipped images, we need to use the flip settings
-        boolean invertedX = isFlipped && QPPreferenceDialog.getFlipMacroXProperty();
-        boolean invertedY = isFlipped && QPPreferenceDialog.getFlipMacroYProperty();
-
-        logger.info("Creating tiles for manual alignment: isFlipped={}, invertedX={}, invertedY={}",
+        logger.info("Creating tiles for manual alignment: isFlipped={}, invertedX={}, invertedY={} (no inversion for existing images)",
                 isFlipped, invertedX, invertedY);
 
-        // Create tiles for alignment with explicit flip parameters
+        // Create tiles for alignment - no axis inversion for existing images
         TileHelper.createTilesForAnnotations(
                 state.annotations,
                 state.sample,

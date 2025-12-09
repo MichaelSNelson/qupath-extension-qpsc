@@ -274,13 +274,17 @@ public class ExistingImageWorkflow {
          * Creates tiles and prompts user to select one for refinement.
          */
         private CompletableFuture<WorkflowState> performSlideAlignmentRefinement() {
-            // Create tiles for refinement
+            // For EXISTING images, annotations are already in the correct coordinate space.
+            // We should NOT apply any axis inversion when creating tiles for display.
+            // Tiles should match the annotation positions directly.
             TileHelper.createTilesForAnnotations(
                     state.annotations,
                     state.sample,
                     state.projectInfo.getTempTileDirectory(),
                     state.projectInfo.getImagingModeWithIndex(),
-                    state.pixelSize
+                    state.pixelSize,
+                    false,  // No X inversion for existing images
+                    false   // No Y inversion for existing images
             );
 
             return SingleTileRefinement.performRefinement(
@@ -474,13 +478,17 @@ public class ExistingImageWorkflow {
             }
 
             // Create tiles for refinement if not already done
+            // For EXISTING images, annotations are already in the correct coordinate space.
+            // We should NOT apply any axis inversion when creating tiles for display.
             if (state.projectInfo != null) {
                 TileHelper.createTilesForAnnotations(
                         state.annotations,
                         state.sample,
                         state.projectInfo.getTempTileDirectory(),
                         state.projectInfo.getImagingModeWithIndex(),
-                        state.pixelSize
+                        state.pixelSize,
+                        false,  // No X inversion for existing images
+                        false   // No Y inversion for existing images
                 );
             }
 
