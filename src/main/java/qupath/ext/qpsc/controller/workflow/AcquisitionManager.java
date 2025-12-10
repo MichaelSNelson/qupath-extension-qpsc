@@ -120,10 +120,43 @@ public class AcquisitionManager {
                 .thenApply(success -> {
                     if (success) {
                         logger.info("Acquisition phase completed successfully");
+                        // Save timing data to persistent preferences for future estimates
+                        saveTimingDataToPreferences();
                         return state;
                     }
                     throw new RuntimeException("Acquisition failed or was cancelled");
                 });
+    }
+
+    /**
+     * Saves timing data from the current acquisition to persistent preferences.
+     * This data will be used to improve time estimates in future acquisitions.
+     */
+    private void saveTimingDataToPreferences() {
+        if (dualProgressDialog == null) {
+            logger.debug("No progress dialog - skipping timing data save");
+            return;
+        }
+
+        long[] timingData = dualProgressDialog.getFinalTimingData();
+        if (timingData == null) {
+            logger.debug("Insufficient timing data to save");
+            return;
+        }
+
+        String modality = state.sample.modality();
+        String objective = state.sample.objective();
+
+        PersistentPreferences.updateTimingData(
+                timingData[0], // baseTileTimeMs
+                timingData[1], // adaptiveAfTimeMs
+                timingData[2], // fullAfTimeMs
+                modality,
+                objective
+        );
+
+        logger.info("Saved timing data for {}/{}: base={}ms, adaptive={}ms, full={}ms",
+                modality, objective, timingData[0], timingData[1], timingData[2]);
     }
 
     /**
@@ -615,6 +648,11 @@ public class AcquisitionManager {
                                         handlingManualFocus.set(true);
                                         logger.info("Manual focus requested by server - showing dialog (retries remaining: {})", retriesRemaining);
 
+                                        // Pause timing tracking so user wait time doesn't inflate estimates
+                                        if (progressDialog != null) {
+                                            progressDialog.pauseTimingForManualFocus();
+                                        }
+
                                         // Use CountDownLatch to block until dialog is closed and acknowledged
                                         java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
 
@@ -647,6 +685,10 @@ public class AcquisitionManager {
                                                 }
                                             } finally {
                                                 handlingManualFocus.set(false);
+                                                // Resume timing tracking after manual focus is handled
+                                                if (progressDialog != null) {
+                                                    progressDialog.resumeTimingAfterManualFocus();
+                                                }
                                                 latch.countDown();
                                             }
                                         });

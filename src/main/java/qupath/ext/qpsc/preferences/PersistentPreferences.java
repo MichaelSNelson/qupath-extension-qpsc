@@ -583,4 +583,174 @@ public class PersistentPreferences {
 
     // Note: Filename configuration preferences have been moved to QPPreferenceDialog
     // to appear in the main preferences UI. Use QPPreferenceDialog.getFilenameInclude*() methods.
+
+    // ================== ACQUISITION TIMING DATA ==================
+    // Stores historical timing data to improve time estimates in acquisition dialogs.
+    // Format: milliseconds as long values, stored per modality/objective combination.
+    // These values are updated after each acquisition with rolling averages.
+
+    // Base tile time (acquisition without autofocus)
+    private static final StringProperty baseTileTimeMsSaved =
+            PathPrefs.createPersistentPreference("AcquisitionBaseTileTimeMs", "3000");
+
+    // Adaptive autofocus added time (additional time when adaptive AF runs)
+    private static final StringProperty adaptiveAfTimeMsSaved =
+            PathPrefs.createPersistentPreference("AcquisitionAdaptiveAfTimeMs", "8000");
+
+    // Full autofocus time (time for full AF at start of annotation)
+    private static final StringProperty fullAfTimeMsSaved =
+            PathPrefs.createPersistentPreference("AcquisitionFullAfTimeMs", "25000");
+
+    // Number of acquisitions used to calculate the averages (for weighted updates)
+    private static final StringProperty timingSampleCountSaved =
+            PathPrefs.createPersistentPreference("AcquisitionTimingSampleCount", "0");
+
+    // Last objective/modality used (to detect changes that should reset timing data)
+    private static final StringProperty lastTimingConfigSaved =
+            PathPrefs.createPersistentPreference("AcquisitionLastTimingConfig", "");
+
+    /**
+     * Gets the stored base tile time in milliseconds.
+     * This is the average time to acquire a single tile without autofocus.
+     */
+    public static long getBaseTileTimeMs() {
+        try {
+            return Long.parseLong(baseTileTimeMsSaved.getValue());
+        } catch (NumberFormatException e) {
+            return 3000; // Default 3 seconds
+        }
+    }
+
+    /**
+     * Gets the stored adaptive autofocus added time in milliseconds.
+     * This is the additional time when adaptive autofocus runs on a tile.
+     */
+    public static long getAdaptiveAfTimeMs() {
+        try {
+            return Long.parseLong(adaptiveAfTimeMsSaved.getValue());
+        } catch (NumberFormatException e) {
+            return 8000; // Default 8 seconds
+        }
+    }
+
+    /**
+     * Gets the stored full autofocus time in milliseconds.
+     * This is the time for the initial full autofocus at the start of each annotation.
+     */
+    public static long getFullAfTimeMs() {
+        try {
+            return Long.parseLong(fullAfTimeMsSaved.getValue());
+        } catch (NumberFormatException e) {
+            return 25000; // Default 25 seconds
+        }
+    }
+
+    /**
+     * Gets the number of acquisition samples used for the current timing averages.
+     */
+    public static int getTimingSampleCount() {
+        try {
+            return Integer.parseInt(timingSampleCountSaved.getValue());
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    /**
+     * Gets the last modality/objective configuration used for timing.
+     * Format: "modality:objective" e.g., "ppm:10x"
+     */
+    public static String getLastTimingConfig() {
+        return lastTimingConfigSaved.getValue();
+    }
+
+    /**
+     * Updates the stored timing data with new measurements.
+     * Uses exponential moving average with higher weight for newer data.
+     *
+     * @param baseTileTimeMs New base tile time measurement
+     * @param adaptiveAfTimeMs New adaptive autofocus time measurement
+     * @param fullAfTimeMs New full autofocus time measurement
+     * @param modality Current modality
+     * @param objective Current objective
+     */
+    public static void updateTimingData(long baseTileTimeMs, long adaptiveAfTimeMs,
+                                        long fullAfTimeMs, String modality, String objective) {
+        String currentConfig = modality + ":" + objective;
+        String lastConfig = getLastTimingConfig();
+
+        // If configuration changed, reset sample count (start fresh for new hardware)
+        int sampleCount = getTimingSampleCount();
+        if (!currentConfig.equals(lastConfig)) {
+            sampleCount = 0;
+            lastTimingConfigSaved.setValue(currentConfig);
+        }
+
+        // Calculate new averages using exponential moving average
+        // Weight newer data more heavily (alpha = 0.3 for new data)
+        double alpha = sampleCount == 0 ? 1.0 : 0.3;
+
+        long oldBaseTile = getBaseTileTimeMs();
+        long oldAdaptiveAf = getAdaptiveAfTimeMs();
+        long oldFullAf = getFullAfTimeMs();
+
+        long newBaseTile = (long) (alpha * baseTileTimeMs + (1 - alpha) * oldBaseTile);
+        long newAdaptiveAf = (long) (alpha * adaptiveAfTimeMs + (1 - alpha) * oldAdaptiveAf);
+        long newFullAf = (long) (alpha * fullAfTimeMs + (1 - alpha) * oldFullAf);
+
+        // Store updated values
+        baseTileTimeMsSaved.setValue(String.valueOf(newBaseTile));
+        adaptiveAfTimeMsSaved.setValue(String.valueOf(newAdaptiveAf));
+        fullAfTimeMsSaved.setValue(String.valueOf(newFullAf));
+        timingSampleCountSaved.setValue(String.valueOf(sampleCount + 1));
+    }
+
+    /**
+     * Calculates estimated acquisition time based on stored timing data.
+     *
+     * @param totalTiles Total number of tiles to acquire
+     * @param afPositionsPerAnnotation Number of autofocus positions per annotation
+     * @param numAnnotations Total number of annotations
+     * @return Estimated time in milliseconds
+     */
+    public static long estimateAcquisitionTime(int totalTiles, int afPositionsPerAnnotation, int numAnnotations) {
+        long baseTileTime = getBaseTileTimeMs();
+        long adaptiveAfTime = getAdaptiveAfTimeMs();
+        long fullAfTime = getFullAfTimeMs();
+
+        // All tiles take base time
+        long tileTime = baseTileTime * totalTiles;
+
+        // Each annotation has one full autofocus
+        long fullAfTotal = fullAfTime * numAnnotations;
+
+        // Adaptive AF happens at (afPositionsPerAnnotation - 1) positions per annotation
+        // (first position is full AF, not adaptive)
+        int adaptiveAfPerAnnotation = Math.max(0, afPositionsPerAnnotation - 1);
+        int totalAdaptiveAf = adaptiveAfPerAnnotation * numAnnotations;
+        long adaptiveAfTotal = adaptiveAfTime * totalAdaptiveAf;
+
+        return tileTime + fullAfTotal + adaptiveAfTotal;
+    }
+
+    /**
+     * Checks if we have any stored timing data.
+     *
+     * @return true if timing data has been collected from previous acquisitions
+     */
+    public static boolean hasTimingData() {
+        return getTimingSampleCount() > 0;
+    }
+
+    /**
+     * Resets all timing data to defaults.
+     * Call this if timing data appears to be corrupted or invalid.
+     */
+    public static void resetTimingData() {
+        baseTileTimeMsSaved.setValue("3000");
+        adaptiveAfTimeMsSaved.setValue("8000");
+        fullAfTimeMsSaved.setValue("25000");
+        timingSampleCountSaved.setValue("0");
+        lastTimingConfigSaved.setValue("");
+    }
 }

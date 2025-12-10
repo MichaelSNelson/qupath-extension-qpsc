@@ -899,9 +899,34 @@ public class ExistingImageAcquisitionController {
                     previewTilesLabel.setText(String.format("Tiles: %,d", totalTiles));
                 }
 
-                // Time estimate: ~2 seconds per image
-                double estimatedSeconds = totalImages * 2.0;
-                String timeEstimate = formatTime(estimatedSeconds);
+                // Time estimate using persistent timing data if available
+                String timeEstimate;
+                if (PersistentPreferences.hasTimingData()) {
+                    // Use stored timing data from previous acquisitions
+                    // Default to 5 AF positions per annotation if not configured
+                    int afPositionsPerAnnotation = 5;
+                    try {
+                        // Try to get AF positions from autofocus config
+                        String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
+                        MicroscopeConfigManager configManager = MicroscopeConfigManager.getInstance(configPath);
+                        Map<String, Object> afParams = configManager.getAutofocusParamsForObjective(objective);
+                        if (afParams != null && afParams.get("n_tiles") instanceof Number) {
+                            afPositionsPerAnnotation = ((Number) afParams.get("n_tiles")).intValue();
+                        }
+                    } catch (Exception e) {
+                        logger.debug("Could not get AF positions from config, using default: {}", e.getMessage());
+                    }
+
+                    int numAnnotations = annotations.size();
+                    long estimatedMs = PersistentPreferences.estimateAcquisitionTime(
+                            totalTiles, afPositionsPerAnnotation, numAnnotations);
+                    double estimatedSeconds = estimatedMs / 1000.0;
+                    timeEstimate = formatTime(estimatedSeconds) + " (based on previous acquisitions)";
+                } else {
+                    // Fallback: ~2 seconds per image (conservative estimate)
+                    double estimatedSeconds = totalImages * 2.0;
+                    timeEstimate = formatTime(estimatedSeconds) + " (estimate)";
+                }
                 previewTimeLabel.setText("Estimated Time: " + timeEstimate);
 
                 // Storage estimate: ~4 MB per image

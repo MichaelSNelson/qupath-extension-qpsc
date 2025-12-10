@@ -80,6 +80,10 @@ public class DualProgressDialog {
     // Per-annotation tracking for tile counts in future annotations
     private final List<Integer> futureTileCounts = Collections.synchronizedList(new ArrayList<>());
 
+    // Manual focus pause tracking - excludes user wait time from timing estimates
+    private final AtomicBoolean manualFocusPaused = new AtomicBoolean(false);
+    private final AtomicLong manualFocusPauseStartTime = new AtomicLong(0);
+
     // Control
     private final AtomicBoolean cancelled = new AtomicBoolean(false);
     private Consumer<Void> cancelCallback;
@@ -371,6 +375,39 @@ public class DualProgressDialog {
     }
 
     /**
+     * Pauses timing tracking when manual focus is requested.
+     * This prevents user wait time from inflating the time estimates.
+     * Call this when a manual focus dialog is shown.
+     */
+    public void pauseTimingForManualFocus() {
+        if (manualFocusPaused.compareAndSet(false, true)) {
+            manualFocusPauseStartTime.set(System.currentTimeMillis());
+            logger.info("Paused timing tracking for manual focus");
+            Platform.runLater(() -> statusLabel.setText("Waiting for manual focus..."));
+        }
+    }
+
+    /**
+     * Resumes timing tracking after manual focus is completed.
+     * Adjusts lastTileCompletionTime to exclude the pause duration.
+     * Call this when the manual focus dialog is dismissed.
+     */
+    public void resumeTimingAfterManualFocus() {
+        if (manualFocusPaused.compareAndSet(true, false)) {
+            long pauseStart = manualFocusPauseStartTime.get();
+            if (pauseStart > 0) {
+                long pauseDuration = System.currentTimeMillis() - pauseStart;
+                // Adjust lastTileCompletionTime forward by pause duration
+                // This way the next tile time calculation won't include the wait
+                lastTileCompletionTime.addAndGet(pauseDuration);
+                logger.info("Resumed timing tracking after manual focus (paused for {} ms)", pauseDuration);
+            }
+            manualFocusPauseStartTime.set(0);
+            Platform.runLater(() -> statusLabel.setText("Acquiring data..."));
+        }
+    }
+
+    /**
      * Updates the display with current progress and time estimates.
      */
     private void updateDisplay() {
@@ -596,7 +633,27 @@ public class DualProgressDialog {
             this.fullAfAddedTimeMs = fullAfAddedTimeMs;
         }
     }
-    
+
+    /**
+     * Gets the final timing data for saving to persistent preferences.
+     * Call this after acquisition completes to update the stored timing averages.
+     *
+     * @return Array of [baseTileTimeMs, adaptiveAfTimeMs, fullAfTimeMs], or null if insufficient data
+     */
+    public long[] getFinalTimingData() {
+        if (allTileTimes.size() < 5) {
+            logger.warn("Insufficient timing data to save ({} tiles)", allTileTimes.size());
+            return null;
+        }
+
+        TimingComponents timing = calculateTimingComponents();
+        return new long[] {
+                timing.baseTileTimeMs,
+                timing.adaptiveAfAddedTimeMs,
+                timing.fullAfAddedTimeMs
+        };
+    }
+
     /**
      * Formats time in seconds to a human-readable string.
      */
