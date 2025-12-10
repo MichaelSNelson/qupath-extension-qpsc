@@ -909,7 +909,7 @@ public class ExistingImageAcquisitionController {
                         // Try to get AF positions from autofocus config
                         String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
                         MicroscopeConfigManager configManager = MicroscopeConfigManager.getInstance(configPath);
-                        Map<String, Object> afParams = configManager.getAutofocusParamsForObjective(objective);
+                        Map<String, Object> afParams = configManager.getAutofocusParams(objective);
                         if (afParams != null && afParams.get("n_tiles") instanceof Number) {
                             afPositionsPerAnnotation = ((Number) afParams.get("n_tiles")).intValue();
                         }
