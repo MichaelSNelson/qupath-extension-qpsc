@@ -16,10 +16,12 @@ import qupath.ext.qpsc.service.microscope.MicroscopeSocketClient;
 import qupath.ext.qpsc.ui.AnnotationAcquisitionDialog;
 import qupath.ext.qpsc.ui.DualProgressDialog;
 import qupath.ext.qpsc.ui.UIFunctions;
+import qupath.ext.qpsc.service.AnnotationOrderingService;
 import qupath.ext.qpsc.utilities.AcquisitionConfigurationBuilder;
 import qupath.ext.qpsc.utilities.MicroscopeConfigManager;
 import qupath.ext.qpsc.utilities.MinorFunctions;
 import qupath.ext.qpsc.utilities.TransformationFunctions;
+import qupath.ext.qpsc.utilities.ZFocusPredictionModel;
 import qupath.fx.dialogs.Dialogs;
 import qupath.lib.gui.QuPathGUI;
 import qupath.lib.objects.PathObject;
@@ -78,6 +80,9 @@ public class AcquisitionManager {
     private final QuPathGUI gui;
     private final WorkflowState state;
     private DualProgressDialog dualProgressDialog;
+
+    /** Z-focus prediction model for tilt correction across the slide */
+    private final ZFocusPredictionModel zFocusModel = new ZFocusPredictionModel();
 
     /**
      * Creates a new acquisition manager.
@@ -396,6 +401,15 @@ public class AcquisitionManager {
         // Reorder annotations to prioritize the one containing the refinement tile (if any)
         prioritizeRefinementAnnotation();
 
+        // Sort remaining annotations by proximity to the first (for efficient travel and tilt model building)
+        if (state.transform != null && state.annotations.size() > 1) {
+            state.annotations = AnnotationOrderingService.sortByProximity(state.annotations, state.transform);
+            logger.info("Annotations ordered by proximity for tilt model optimization");
+        }
+
+        // Reset the Z-focus prediction model for this acquisition session
+        zFocusModel.reset();
+
         // Show initial progress notification
         showAcquisitionStartNotification(angleExposures);
 
@@ -449,6 +463,25 @@ public class AcquisitionManager {
                 return performSingleAnnotationAcquisition(annotation, angleExposures, progressDialog)
                         .thenApply(success -> {
                             if (success) {
+                                // Capture final Z for tilt correction model
+                                try {
+                                    MicroscopeSocketClient socketClient = MicroscopeController.getInstance().getSocketClient();
+                                    Double finalZ = socketClient.getLastAcquisitionFinalZ();
+                                    if (finalZ != null && state.transform != null) {
+                                        double[] stageCoords = TransformationFunctions.transformQuPathFullResToStage(
+                                                new double[]{annotation.getROI().getCentroidX(), annotation.getROI().getCentroidY()},
+                                                state.transform
+                                        );
+                                        zFocusModel.addDataPoint(stageCoords[0], stageCoords[1], finalZ);
+                                        logger.info("Updated Z-focus model: {} points, residual error: {:.2f} um",
+                                                zFocusModel.getPointCount(), zFocusModel.calculateResidualError());
+                                    }
+                                    // Clear for next acquisition
+                                    socketClient.clearLastAcquisitionFinalZ();
+                                } catch (Exception e) {
+                                    logger.warn("Could not update Z-focus model: {}", e.getMessage());
+                                }
+
                                 // Mark annotation complete in dual progress dialog
                                 if (progressDialog != null) {
                                     Platform.runLater(() -> progressDialog.completeCurrentAnnotation());
@@ -558,6 +591,27 @@ public class AcquisitionManager {
                         modalityWithIndex,
                         annotation.getName()
                 );
+
+                // Apply Z-focus prediction if model is ready (tilt correction)
+                if (state.transform != null) {
+                    double[] stageCoords = TransformationFunctions.transformQuPathFullResToStage(
+                            new double[]{annotation.getROI().getCentroidX(), annotation.getROI().getCentroidY()},
+                            state.transform
+                    );
+                    double distFromLast = zFocusModel.distanceFromLastPoint(stageCoords[0], stageCoords[1]);
+
+                    if (zFocusModel.canPredict(distFromLast)) {
+                        zFocusModel.predictZ(stageCoords[0], stageCoords[1]).ifPresent(predictedZ -> {
+                            config.commandBuilder().hintZ(predictedZ);
+                            logger.info("Z-focus prediction for {}: {:.2f} um (from {} points, dist={:.0f} um)",
+                                    annotation.getName(), predictedZ, zFocusModel.getPointCount(), distFromLast);
+                        });
+                    } else {
+                        logger.debug("Z prediction not ready: {} points, dist={:.0f} um",
+                                zFocusModel.getPointCount(), distFromLast);
+                    }
+                }
+
                 // Start acquisition
                 MicroscopeController.getInstance().startAcquisition(config.commandBuilder());
 

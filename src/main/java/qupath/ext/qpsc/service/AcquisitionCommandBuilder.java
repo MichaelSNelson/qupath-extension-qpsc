@@ -66,6 +66,9 @@ public class AcquisitionCommandBuilder {
     private Double zEnd;
     private Double zStep;
 
+    // Z-focus hint from prediction model (tilt correction)
+    private Double hintZ;
+
     /**
      * Private constructor - use static builder() method
      */
@@ -244,6 +247,21 @@ public class AcquisitionCommandBuilder {
     }
 
     /**
+     * Sets a predicted Z-focus hint from the tilt correction model.
+     *
+     * <p>When provided, the server will move to this Z position before starting
+     * autofocus, giving the autofocus algorithm a better starting point based
+     * on the predicted sample tilt at this XY location.</p>
+     *
+     * @param z Predicted Z-focus position in micrometers
+     * @return this builder for method chaining
+     */
+    public AcquisitionCommandBuilder hintZ(double z) {
+        this.hintZ = z;
+        return this;
+    }
+
+    /**
      * Gets the enhanced scan type that includes magnification from the objective.
      * If no objective is set, magnification cannot be extracted, or scan type is already enhanced,
      * returns the original scanType.
@@ -387,6 +405,11 @@ public class AcquisitionCommandBuilder {
             args.addAll(Arrays.asList("--z-start", String.valueOf(zStart)));
             args.addAll(Arrays.asList("--z-end", String.valueOf(zEnd)));
             args.addAll(Arrays.asList("--z-step", String.valueOf(zStep)));
+        }
+
+        // Add Z-focus hint from tilt prediction model
+        if (hintZ != null) {
+            args.addAll(Arrays.asList("--hint-z", String.format("%.2f", hintZ)));
         }
 
         // Join with spaces, properly quoting arguments

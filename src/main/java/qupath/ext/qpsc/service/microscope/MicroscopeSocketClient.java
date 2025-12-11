@@ -66,6 +66,9 @@ public class MicroscopeSocketClient implements AutoCloseable {
     // Acquisition error tracking
     private volatile String lastFailureMessage = null;
 
+    // Final Z position from completed acquisition (for tilt correction model)
+    private volatile Double lastAcquisitionFinalZ = null;
+
     // Reconnection handling
     private final ScheduledExecutorService reconnectExecutor = Executors.newSingleThreadScheduledExecutor(
             r -> {
@@ -1284,6 +1287,50 @@ public class MicroscopeSocketClient implements AutoCloseable {
             logger.info("Received SUCCESS message during status check: {}", stateStr.trim());
             lastFailureMessage = null; // Clear any previous failure message
             return AcquisitionState.COMPLETED;
+        } else if (stateStr.startsWith("COMPLETED")) {
+            // Check for extended format with final_z: "COMPLETED|final_z:1234.56"
+            // Read additional bytes if needed
+            synchronized (socketLock) {
+                try {
+                    byte[] additionalBytes = new byte[64]; // Enough for "COMPLETED|final_z:1234.56"
+                    int bytesRead = input.read(additionalBytes);
+
+                    if (bytesRead > 0) {
+                        String additionalStr = new String(additionalBytes, 0, bytesRead, StandardCharsets.UTF_8);
+                        stateStr = stateStr + additionalStr;
+                    }
+                } catch (IOException e) {
+                    // May timeout if no additional data - that's fine
+                    logger.debug("No additional bytes for COMPLETED status");
+                }
+            }
+
+            // Parse final_z if present: "COMPLETED|final_z:1234.56"
+            lastFailureMessage = null;
+            lastAcquisitionFinalZ = null;
+
+            if (stateStr.contains("|final_z:")) {
+                try {
+                    int startIdx = stateStr.indexOf("|final_z:") + "|final_z:".length();
+                    String zStr = stateStr.substring(startIdx).trim();
+                    // Handle potential trailing characters
+                    int endIdx = 0;
+                    while (endIdx < zStr.length() &&
+                           (Character.isDigit(zStr.charAt(endIdx)) || zStr.charAt(endIdx) == '.' || zStr.charAt(endIdx) == '-')) {
+                        endIdx++;
+                    }
+                    if (endIdx > 0) {
+                        lastAcquisitionFinalZ = Double.parseDouble(zStr.substring(0, endIdx));
+                        logger.info("Parsed final Z from COMPLETED status: {} um", lastAcquisitionFinalZ);
+                    }
+                } catch (NumberFormatException e) {
+                    logger.warn("Could not parse final_z from COMPLETED response: {}", stateStr);
+                }
+            }
+
+            logger.info("Received COMPLETED status{}",
+                lastAcquisitionFinalZ != null ? " with final_z: " + lastAcquisitionFinalZ + " um" : "");
+            return AcquisitionState.COMPLETED;
         }
 
         AcquisitionState state = AcquisitionState.fromString(stateStr);
@@ -1299,6 +1346,26 @@ public class MicroscopeSocketClient implements AutoCloseable {
      */
     public String getLastFailureMessage() {
         return lastFailureMessage;
+    }
+
+    /**
+     * Gets the final Z-focus position from the last completed acquisition.
+     *
+     * <p>This value is used by the tilt correction model to build a plane
+     * that predicts optimal Z positions across the slide.</p>
+     *
+     * @return The final Z position in micrometers, or null if not available
+     */
+    public Double getLastAcquisitionFinalZ() {
+        return lastAcquisitionFinalZ;
+    }
+
+    /**
+     * Clears the stored final Z value.
+     * Should be called before starting a new acquisition.
+     */
+    public void clearLastAcquisitionFinalZ() {
+        lastAcquisitionFinalZ = null;
     }
 
     /**
