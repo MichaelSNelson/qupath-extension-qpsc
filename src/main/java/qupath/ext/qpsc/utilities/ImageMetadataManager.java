@@ -191,9 +191,57 @@ public class ImageMetadataManager {
             metadata.put(ORIGINAL_IMAGE_ID, parentEntry.getID());
         }
 
+        // Propagate metadata entries that start with the configured prefix from parent
+        if (parentEntry != null) {
+            propagatePrefixedMetadata(parentEntry, metadata);
+        }
+
         logger.debug("Applied metadata to {}: collection={}, base_image={}, offset=({},{}), flipped={}, sample={}, modality={}, objective={}, angle={}, annotation={}, index={}",
                 entry.getImageName(), collectionNumber, baseImage, xOffset, yOffset, isFlipped, sampleName,
                 modality, objective, angle, annotationName, imageIndex);
+    }
+
+    /**
+     * Propagates metadata entries from parent that start with the configured prefix.
+     *
+     * <p>This allows metadata such as OCR-extracted text fields to be automatically
+     * inherited by child images during acquisition workflows. The prefix is configured
+     * in Edit > Preferences under "Metadata Propagation Prefix" (default: "OCR").
+     *
+     * @param parentEntry The parent image entry to copy metadata from
+     * @param targetMetadata The target metadata map to copy into
+     */
+    private static void propagatePrefixedMetadata(ProjectImageEntry<?> parentEntry,
+                                                   Map<String, String> targetMetadata) {
+        if (parentEntry == null || targetMetadata == null) {
+            return;
+        }
+
+        String prefix = QPPreferenceDialog.getMetadataPropagationPrefix();
+        if (prefix == null || prefix.isEmpty()) {
+            logger.debug("Metadata propagation prefix is empty, skipping propagation");
+            return;
+        }
+
+        Map<String, String> parentMetadata = parentEntry.getMetadata();
+        int propagatedCount = 0;
+
+        for (Map.Entry<String, String> entry : parentMetadata.entrySet()) {
+            String key = entry.getKey();
+            if (key != null && key.startsWith(prefix)) {
+                String value = entry.getValue();
+                if (value != null && !value.isEmpty()) {
+                    targetMetadata.put(key, value);
+                    propagatedCount++;
+                    logger.debug("Propagated metadata: {} = {}", key, value);
+                }
+            }
+        }
+
+        if (propagatedCount > 0) {
+            logger.info("Propagated {} metadata entries with prefix '{}' from parent: {}",
+                    propagatedCount, prefix, parentEntry.getImageName());
+        }
     }
 
     /**

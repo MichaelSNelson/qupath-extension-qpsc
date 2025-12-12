@@ -303,6 +303,31 @@ public class PersistentPreferences {
         macroImagePixelSizeInMicrons.setValue(macroPixelSize);
     }
 
+    // ================== METADATA PROPAGATION ==================
+    private static final StringProperty metadataPropagationPrefixSaved =
+            PathPrefs.createPersistentPreference("MetadataPropagationPrefix", "OCR");
+
+    /**
+     * Gets the prefix used to identify metadata keys that should be propagated
+     * from parent images to child images during acquisition workflows.
+     * Any metadata key starting with this prefix will be copied from the parent
+     * image entry to newly acquired images.
+     *
+     * @return The metadata propagation prefix (default: "OCR")
+     */
+    public static String getMetadataPropagationPrefix() {
+        return metadataPropagationPrefixSaved.getValue();
+    }
+
+    /**
+     * Sets the prefix used to identify metadata keys that should be propagated.
+     *
+     * @param prefix The prefix to use (e.g., "OCR", "LIMS_", "custom_")
+     */
+    public static void setMetadataPropagationPrefix(final String prefix) {
+        metadataPropagationPrefixSaved.setValue(prefix);
+    }
+
     // ================== AUTOMATION SETTINGS ==================
     private static final StringProperty classListSaved =
             PathPrefs.createPersistentPreference("classList", "Tumor, Stroma, Immune");

@@ -104,6 +104,10 @@ public class QPPreferenceDialog {
     private static final BooleanProperty includeAngleInFilenameProperty =
             PathPrefs.createPersistentPreference("FilenameIncludeAngle", true);
 
+    // Metadata propagation prefix for copying metadata from parent to child images
+    private static final StringProperty metadataPropagationPrefixProperty =
+            PathPrefs.createPersistentPreference("MetadataPropagationPrefix", "OCR");
+
     /**
      * Register all preferences in QuPath's PreferencePane. Call once during extension installation.
      */
@@ -244,6 +248,16 @@ public class QPPreferenceDialog {
                              "Critical for PPM and other polarized imaging modalities.\n" +
                              "With angle: SampleName_001_7.0.ome.zarr, SampleName_001_-7.0.ome.zarr\n" +
                              "Note: All metadata is always stored in QuPath regardless of filename settings.")
+                .build());
+
+        items.add(new PropertyItemBuilder<>(metadataPropagationPrefixProperty, String.class)
+                .name("Metadata Propagation Prefix")
+                .category(CATEGORY)
+                .description("Prefix for metadata keys that should be automatically propagated from parent " +
+                             "images to acquired child images.\n" +
+                             "Any metadata key starting with this prefix will be copied.\n" +
+                             "Default: 'OCR' (for OCR-extracted text fields)\n" +
+                             "Examples: 'OCR_PatientID', 'OCR_SlideLabel' would be propagated with prefix 'OCR'")
                 .build());
     }
 
@@ -387,5 +401,24 @@ public class QPPreferenceDialog {
 
     public static void setFilenameIncludeAngle(boolean include) {
         includeAngleInFilenameProperty.set(include);
+    }
+
+    /**
+     * Gets the prefix used to identify metadata keys that should be propagated
+     * from parent images to child images during acquisition workflows.
+     *
+     * @return The metadata propagation prefix (default: "OCR")
+     */
+    public static String getMetadataPropagationPrefix() {
+        return metadataPropagationPrefixProperty.get();
+    }
+
+    /**
+     * Sets the prefix used to identify metadata keys that should be propagated.
+     *
+     * @param prefix The prefix to use (e.g., "OCR", "LIMS_", "custom_")
+     */
+    public static void setMetadataPropagationPrefix(String prefix) {
+        metadataPropagationPrefixProperty.set(prefix);
     }
 }
