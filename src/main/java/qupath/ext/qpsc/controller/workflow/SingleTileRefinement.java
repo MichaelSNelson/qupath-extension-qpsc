@@ -132,18 +132,53 @@ public class SingleTileRefinement {
             AffineTransform initialTransform,
             CompletableFuture<RefinementResult> future) throws Exception {
 
-        // Get tile coordinates
+        // Get tile coordinates (centroid)
         double[] tileCoords = {
                 selectedTile.getROI().getCentroidX(),
                 selectedTile.getROI().getCentroidY()
         };
 
-        logger.info("Selected tile '{}' at coordinates: ({}, {})",
-                selectedTile.getName(), tileCoords[0], tileCoords[1]);
+        // Get frame dimensions from tile ROI (in pixels)
+        double frameWidth = selectedTile.getROI().getBoundsWidth();
+        double frameHeight = selectedTile.getROI().getBoundsHeight();
 
-        // Transform to stage position
+        // Get flip status - when image is flipped, the estimation is systematically
+        // off by 1 frame in the flip direction due to coordinate system differences
+        boolean flipX = QPPreferenceDialog.getFlipMacroXProperty();
+        boolean flipY = QPPreferenceDialog.getFlipMacroYProperty();
+
+        logger.info("Selected tile '{}' at coordinates: ({}, {}), frame size: {}x{}, flips: X={}, Y={}",
+                selectedTile.getName(), tileCoords[0], tileCoords[1], frameWidth, frameHeight, flipX, flipY);
+
+        // Apply flip-based correction to pixel coordinates before transform
+        // In flipped image space, the prediction is 1 frame higher (Y) and 1 frame right (X)
+        // To correct: shift coordinates in the opposite direction of the flip
+        double[] correctedCoords = {tileCoords[0], tileCoords[1]};
+        if (flipX) {
+            // In flipped X: prediction is 1 frame to the right, so subtract frame width
+            correctedCoords[0] -= frameWidth;
+            logger.debug("Applied flipX correction: X {} -> {}", tileCoords[0], correctedCoords[0]);
+        }
+        if (flipY) {
+            // In flipped Y: prediction is 1 frame higher (smaller Y), so add frame height
+            correctedCoords[1] += frameHeight;
+            logger.debug("Applied flipY correction: Y {} -> {}", tileCoords[1], correctedCoords[1]);
+        }
+
+        // Transform corrected coordinates to stage position
         double[] estimatedStageCoords = TransformationFunctions.transformQuPathFullResToStage(
-                tileCoords, initialTransform);
+                correctedCoords, initialTransform);
+
+        if (flipX || flipY) {
+            // Also log what the uncorrected position would have been for comparison
+            double[] uncorrectedStageCoords = TransformationFunctions.transformQuPathFullResToStage(
+                    tileCoords, initialTransform);
+            logger.info("Stage position: corrected=({}, {}), uncorrected=({}, {})",
+                    String.format("%.1f", estimatedStageCoords[0]),
+                    String.format("%.1f", estimatedStageCoords[1]),
+                    String.format("%.1f", uncorrectedStageCoords[0]),
+                    String.format("%.1f", uncorrectedStageCoords[1]));
+        }
 
         // Center viewer on tile
         centerViewerOnTile(gui, selectedTile);
