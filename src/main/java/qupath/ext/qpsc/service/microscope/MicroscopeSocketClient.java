@@ -522,8 +522,8 @@ public class MicroscopeSocketClient implements AutoCloseable {
                                            String angles, String exposures) throws IOException {
 
         // Build BGACQUIRE-specific command message
-        String message = String.format("--yaml %s --output %s --modality %s --angles %s --exposures %s END_MARKER",
-                yamlPath, outputPath, modality, angles, exposures);
+        String message = String.format("--yaml %s --output %s --modality %s --angles %s --exposures %s %s",
+                yamlPath, outputPath, modality, angles, exposures, END_MARKER);
         byte[] messageBytes = message.getBytes(StandardCharsets.UTF_8);
 
         logger.info("Sending background acquisition command:");
@@ -668,8 +668,8 @@ public class MicroscopeSocketClient implements AutoCloseable {
             throws IOException {
 
         // Build TESTAF-specific command message
-        String message = String.format("--yaml %s --output %s --objective %s END_MARKER",
-                yamlPath, outputPath, objective);
+        String message = String.format("--yaml %s --output %s --objective %s %s",
+                yamlPath, outputPath, objective, END_MARKER);
         byte[] messageBytes = message.getBytes(StandardCharsets.UTF_8);
 
         logger.info("Sending autofocus test command:");
@@ -812,8 +812,8 @@ public class MicroscopeSocketClient implements AutoCloseable {
             throws IOException {
 
         // Build TESTADAF-specific command message
-        String message = String.format("--yaml %s --output %s --objective %s END_MARKER",
-                yamlPath, outputPath, objective);
+        String message = String.format("--yaml %s --output %s --objective %s %s",
+                yamlPath, outputPath, objective, END_MARKER);
         byte[] messageBytes = message.getBytes(StandardCharsets.UTF_8);
 
         logger.info("Sending adaptive autofocus test command:");
@@ -952,8 +952,8 @@ public class MicroscopeSocketClient implements AutoCloseable {
                                            double stepSize, double exposureMs) throws IOException {
 
         // Build POLCAL-specific command message
-        String message = String.format("--yaml %s --output %s --start %.1f --end %.1f --step %.1f --exposure %.1f END_MARKER",
-                yamlPath, outputPath, startAngle, endAngle, stepSize, exposureMs);
+        String message = String.format("--yaml %s --output %s --start %.1f --end %.1f --step %.1f --exposure %.1f %s",
+                yamlPath, outputPath, startAngle, endAngle, stepSize, exposureMs, END_MARKER);
         byte[] messageBytes = message.getBytes(StandardCharsets.UTF_8);
 
         logger.info("Sending polarizer calibration command:");
