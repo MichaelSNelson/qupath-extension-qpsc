@@ -67,7 +67,8 @@ public class StitchingHelper {
         public final ProjectImageEntry<BufferedImage> parentEntry;
         public final double xOffset;
         public final double yOffset;
-        public final boolean isFlipped;
+        public final boolean flipX;
+        public final boolean flipY;
         public final String sampleName;
 
         // Additional identification fields
@@ -82,14 +83,15 @@ public class StitchingHelper {
          */
         public StitchingMetadata(ProjectImageEntry<BufferedImage> parentEntry,
                                  double xOffset, double yOffset,
-                                 boolean isFlipped, String sampleName,
+                                 boolean flipX, boolean flipY, String sampleName,
                                  String modality, String objective,
                                  String angle, String annotationName,
                                  Integer imageIndex) {
             this.parentEntry = parentEntry;
             this.xOffset = xOffset;
             this.yOffset = yOffset;
-            this.isFlipped = isFlipped;
+            this.flipX = flipX;
+            this.flipY = flipY;
             this.sampleName = sampleName;
             this.modality = modality;
             this.objective = objective;
@@ -104,8 +106,8 @@ public class StitchingHelper {
          */
         public StitchingMetadata(ProjectImageEntry<BufferedImage> parentEntry,
                                  double xOffset, double yOffset,
-                                 boolean isFlipped, String sampleName) {
-            this(parentEntry, xOffset, yOffset, isFlipped, sampleName,
+                                 boolean flipX, boolean flipY, String sampleName) {
+            this(parentEntry, xOffset, yOffset, flipX, flipY, sampleName,
                  null, null, null, null, null);
         }
     }
@@ -239,8 +241,8 @@ public class StitchingHelper {
 
                     logger.info("Performing batch stitching for {} with {} angles",
                             annotationName, angleExposures.size());
-                    logger.info("Metadata - offset: ({}, {}) µm, flipped: {}, parent: {}",
-                            metadata.xOffset, metadata.yOffset, metadata.isFlipped,
+                    logger.info("Metadata - offset: ({}, {}) um, flipX: {}, flipY: {}, parent: {}",
+                            metadata.xOffset, metadata.yOffset, metadata.flipX, metadata.flipY,
                             metadata.parentEntry != null ? metadata.parentEntry.getImageName() : "none");
 
                     // Get standard stitching configuration
@@ -534,8 +536,8 @@ public class StitchingHelper {
                     }
 
                     logger.info("Stitching single acquisition for {}", annotationName);
-                    logger.info("Metadata - offset: ({}, {}) µm, flipped: {}, parent: {}",
-                            metadata.xOffset, metadata.yOffset, metadata.isFlipped,
+                    logger.info("Metadata - offset: ({}, {}) um, flipX: {}, flipY: {}, parent: {}",
+                            metadata.xOffset, metadata.yOffset, metadata.flipX, metadata.flipY,
                             metadata.parentEntry != null ? metadata.parentEntry.getImageName() : "none");
 
                     String compression = String.valueOf(
@@ -674,8 +676,8 @@ public class StitchingHelper {
 
                     logger.info("Performing batch stitching for {} with {} angles",
                             regionName, angleExposures.size());
-                    logger.info("Metadata - offset: ({}, {}) µm, flipped: {}, parent: {}",
-                            metadata.xOffset, metadata.yOffset, metadata.isFlipped,
+                    logger.info("Metadata - offset: ({}, {}) um, flipX: {}, flipY: {}, parent: {}",
+                            metadata.xOffset, metadata.yOffset, metadata.flipX, metadata.flipY,
                             metadata.parentEntry != null ? metadata.parentEntry.getImageName() : "none");
 
                     // Get standard stitching configuration
@@ -951,12 +953,12 @@ public class StitchingHelper {
                         blockingDialog.updateStatus(operationId, "Stitching " + regionName + "...");
                     }
 
-                    logger.info("Metadata - offset: ({}, {}) µm, flipped: {}, parent: {}",
-                            metadata.xOffset, metadata.yOffset, metadata.isFlipped,
+                    logger.info("Metadata - offset: ({}, {}) um, flipX: {}, flipY: {}, parent: {}",
+                            metadata.xOffset, metadata.yOffset, metadata.flipX, metadata.flipY,
                             metadata.parentEntry != null ? metadata.parentEntry.getImageName() : "none");
 
                     // Get standard stitching configuration
-                    StitchingConfiguration.StitchingParams stitchingConfig = 
+                    StitchingConfiguration.StitchingParams stitchingConfig =
                         StitchingConfiguration.getStandardConfiguration();
                     String compression = stitchingConfig.compressionType();
 
@@ -1031,20 +1033,23 @@ public class StitchingHelper {
         double yOffset = 0.0;
 
         // Check flip status from parent or preferences
-        boolean isFlipped = false;
+        boolean flipX = false;
+        boolean flipY = false;
         if (parentEntry != null) {
-            isFlipped = ImageMetadataManager.isFlipped(parentEntry);
+            flipX = ImageMetadataManager.isFlippedX(parentEntry);
+            flipY = ImageMetadataManager.isFlippedY(parentEntry);
         } else {
             // If no parent, use preferences
-            isFlipped = QPPreferenceDialog.getFlipMacroXProperty() ||
-                    QPPreferenceDialog.getFlipMacroYProperty();
+            flipX = QPPreferenceDialog.getFlipMacroXProperty();
+            flipY = QPPreferenceDialog.getFlipMacroYProperty();
         }
 
         return new StitchingMetadata(
                 parentEntry,
                 xOffset,
                 yOffset,
-                isFlipped,
+                flipX,
+                flipY,
                 sampleName
         );
     }
@@ -1072,20 +1077,23 @@ public class StitchingHelper {
                 annotation, fullResToStage);
 
         // Check flip status from parent or preferences
-        boolean isFlipped = false;
+        boolean flipX = false;
+        boolean flipY = false;
         if (parentEntry != null) {
-            isFlipped = ImageMetadataManager.isFlipped(parentEntry);
+            flipX = ImageMetadataManager.isFlippedX(parentEntry);
+            flipY = ImageMetadataManager.isFlippedY(parentEntry);
         } else {
             // If no parent, use preferences
-            isFlipped = QPPreferenceDialog.getFlipMacroXProperty() ||
-                    QPPreferenceDialog.getFlipMacroYProperty();
+            flipX = QPPreferenceDialog.getFlipMacroXProperty();
+            flipY = QPPreferenceDialog.getFlipMacroYProperty();
         }
 
         return new StitchingMetadata(
                 parentEntry,
                 offset[0],
                 offset[1],
-                isFlipped,
+                flipX,
+                flipY,
                 sampleName
         );
     }

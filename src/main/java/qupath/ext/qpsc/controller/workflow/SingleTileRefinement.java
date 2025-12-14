@@ -8,8 +8,10 @@ import org.slf4j.LoggerFactory;
 import qupath.ext.qpsc.controller.MicroscopeController;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.ui.UIFunctions;
+import qupath.ext.qpsc.utilities.ImageMetadataManager;
 import qupath.ext.qpsc.utilities.MicroscopeConfigManager;
 import qupath.ext.qpsc.utilities.TransformationFunctions;
+import qupath.lib.projects.ProjectImageEntry;
 import qupath.fx.dialogs.Dialogs;
 import qupath.lib.gui.QuPathGUI;
 import qupath.lib.objects.PathObject;
@@ -142,10 +144,23 @@ public class SingleTileRefinement {
         double frameWidth = selectedTile.getROI().getBoundsWidth();
         double frameHeight = selectedTile.getROI().getBoundsHeight();
 
-        // Get flip status - when image is flipped, the estimation is systematically
-        // off by 1 frame in the flip direction due to coordinate system differences
-        boolean flipX = QPPreferenceDialog.getFlipMacroXProperty();
-        boolean flipY = QPPreferenceDialog.getFlipMacroYProperty();
+        // Get flip status from image metadata - the actual flip state of THIS image,
+        // not from global preferences which may have changed
+        boolean flipX = false;
+        boolean flipY = false;
+        ProjectImageEntry<?> currentEntry = gui.getProject() != null && gui.getImageData() != null
+                ? gui.getProject().getEntry(gui.getImageData())
+                : null;
+        if (currentEntry != null) {
+            flipX = ImageMetadataManager.isFlippedX(currentEntry);
+            flipY = ImageMetadataManager.isFlippedY(currentEntry);
+            logger.debug("Using flip status from image metadata: flipX={}, flipY={}", flipX, flipY);
+        } else {
+            // Fallback to global preferences if no image entry available
+            flipX = QPPreferenceDialog.getFlipMacroXProperty();
+            flipY = QPPreferenceDialog.getFlipMacroYProperty();
+            logger.debug("No image entry, using global preferences: flipX={}, flipY={}", flipX, flipY);
+        }
 
         logger.info("Selected tile '{}' at coordinates: ({}, {}), frame size: {}x{}, flips: X={}, Y={}",
                 selectedTile.getName(), tileCoords[0], tileCoords[1], frameWidth, frameHeight, flipX, flipY);

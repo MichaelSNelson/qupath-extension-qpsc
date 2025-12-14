@@ -40,7 +40,8 @@ public class ImageMetadataManager {
     public static final String IMAGE_COLLECTION = "image_collection";
     public static final String XY_OFFSET_X = "xy_offset_x_microns";
     public static final String XY_OFFSET_Y = "xy_offset_y_microns";
-    public static final String IS_FLIPPED = "is_flipped";
+    public static final String FLIP_X = "flip_x";
+    public static final String FLIP_Y = "flip_y";
     public static final String SAMPLE_NAME = "sample_name";
     public static final String ORIGINAL_IMAGE_ID = "original_image_id";
 
@@ -93,7 +94,8 @@ public class ImageMetadataManager {
      * @param parentEntry Optional parent entry for collection inheritance
      * @param xOffset X offset from slide corner in microns
      * @param yOffset Y offset from slide corner in microns
-     * @param isFlipped Whether the image has been flipped
+     * @param flipX Whether the image has been flipped horizontally
+     * @param flipY Whether the image has been flipped vertically
      * @param sampleName The sample name
      * @param modality The imaging modality (e.g., "ppm", "bf")
      * @param objective The objective/magnification (e.g., "20x", "10x")
@@ -104,7 +106,7 @@ public class ImageMetadataManager {
     public static void applyImageMetadata(ProjectImageEntry<?> entry,
                                           ProjectImageEntry<?> parentEntry,
                                           double xOffset, double yOffset,
-                                          boolean isFlipped, String sampleName,
+                                          boolean flipX, boolean flipY, String sampleName,
                                           String modality, String objective,
                                           String angle, String annotationName,
                                           Integer imageIndex) {
@@ -156,7 +158,8 @@ public class ImageMetadataManager {
         metadata.put(IMAGE_COLLECTION, collectionNumber);
         metadata.put(XY_OFFSET_X, String.valueOf(xOffset));
         metadata.put(XY_OFFSET_Y, String.valueOf(yOffset));
-        metadata.put(IS_FLIPPED, String.valueOf(isFlipped));
+        metadata.put(FLIP_X, flipX ? "1" : "0");
+        metadata.put(FLIP_Y, flipY ? "1" : "0");
 
         if (baseImage != null && !baseImage.isEmpty()) {
             metadata.put(BASE_IMAGE, baseImage);
@@ -187,7 +190,7 @@ public class ImageMetadataManager {
         }
 
         // If this is a flipped duplicate, store reference to original
-        if (parentEntry != null && isFlipped) {
+        if (parentEntry != null && (flipX || flipY)) {
             metadata.put(ORIGINAL_IMAGE_ID, parentEntry.getID());
         }
 
@@ -196,8 +199,8 @@ public class ImageMetadataManager {
             propagatePrefixedMetadata(parentEntry, metadata);
         }
 
-        logger.debug("Applied metadata to {}: collection={}, base_image={}, offset=({},{}), flipped={}, sample={}, modality={}, objective={}, angle={}, annotation={}, index={}",
-                entry.getImageName(), collectionNumber, baseImage, xOffset, yOffset, isFlipped, sampleName,
+        logger.debug("Applied metadata to {}: collection={}, base_image={}, offset=({},{}), flipX={}, flipY={}, sample={}, modality={}, objective={}, angle={}, annotation={}, index={}",
+                entry.getImageName(), collectionNumber, baseImage, xOffset, yOffset, flipX, flipY, sampleName,
                 modality, objective, angle, annotationName, imageIndex);
     }
 
@@ -253,14 +256,15 @@ public class ImageMetadataManager {
      * @param parentEntry Optional parent entry for collection inheritance
      * @param xOffset X offset from slide corner in microns
      * @param yOffset Y offset from slide corner in microns
-     * @param isFlipped Whether the image has been flipped
+     * @param flipX Whether the image has been flipped horizontally
+     * @param flipY Whether the image has been flipped vertically
      * @param sampleName The sample name
      */
     public static void applyImageMetadata(ProjectImageEntry<?> entry,
                                           ProjectImageEntry<?> parentEntry,
                                           double xOffset, double yOffset,
-                                          boolean isFlipped, String sampleName) {
-        applyImageMetadata(entry, parentEntry, xOffset, yOffset, isFlipped, sampleName,
+                                          boolean flipX, boolean flipY, String sampleName) {
+        applyImageMetadata(entry, parentEntry, xOffset, yOffset, flipX, flipY, sampleName,
                 null, null, null, null, null);
     }
 
@@ -286,18 +290,24 @@ public class ImageMetadataManager {
             return true;
         }
 
-        // Check if image is marked as flipped
-        String isFlippedStr = entry.getMetadata().get(IS_FLIPPED);
-        boolean isFlipped = "true".equalsIgnoreCase(isFlippedStr);
+        // Check if image is marked as flipped in the required axes
+        boolean imageFlipX = isFlippedX(entry);
+        boolean imageFlipY = isFlippedY(entry);
 
-        if (!isFlipped && (requiresFlipX || requiresFlipY)) {
-            logger.warn("Image {} is not flipped but flip is required in preferences",
+        if (requiresFlipX && !imageFlipX) {
+            logger.warn("Image {} is not flipped on X but flipX is required in preferences",
                     entry.getImageName());
             return false;
         }
 
-        logger.debug("Image {} validation passed (flipped={}, requiresFlip={})",
-                entry.getImageName(), isFlipped, (requiresFlipX || requiresFlipY));
+        if (requiresFlipY && !imageFlipY) {
+            logger.warn("Image {} is not flipped on Y but flipY is required in preferences",
+                    entry.getImageName());
+            return false;
+        }
+
+        logger.debug("Image {} validation passed (flipX={}, flipY={}, requiresFlipX={}, requiresFlipY={})",
+                entry.getImageName(), imageFlipX, imageFlipY, requiresFlipX, requiresFlipY);
         return true;
     }
 
@@ -344,8 +354,12 @@ public class ImageMetadataManager {
                 metadata.put(XY_OFFSET_Y, "0.0");
                 anyChanges = true;
             }
-            if (metadata.get(IS_FLIPPED) == null) {
-                metadata.put(IS_FLIPPED, "false");
+            if (metadata.get(FLIP_X) == null) {
+                metadata.put(FLIP_X, "0");
+                anyChanges = true;
+            }
+            if (metadata.get(FLIP_Y) == null) {
+                metadata.put(FLIP_Y, "0");
                 anyChanges = true;
             }
         }
@@ -408,18 +422,43 @@ public class ImageMetadataManager {
     }
 
     /**
-     * Checks if an image entry is marked as flipped.
+     * Checks if an image entry is marked as flipped on the X axis.
      *
      * @param entry The image entry to check
-     * @return true if the image is marked as flipped, false otherwise
+     * @return true if the image is flipped horizontally, false otherwise
      */
-    public static boolean isFlipped(ProjectImageEntry<?> entry) {
+    public static boolean isFlippedX(ProjectImageEntry<?> entry) {
         if (entry == null) {
             return false;
         }
 
-        String isFlippedStr = entry.getMetadata().get(IS_FLIPPED);
-        return "true".equalsIgnoreCase(isFlippedStr);
+        String flipXStr = entry.getMetadata().get(FLIP_X);
+        return "1".equals(flipXStr);
+    }
+
+    /**
+     * Checks if an image entry is marked as flipped on the Y axis.
+     *
+     * @param entry The image entry to check
+     * @return true if the image is flipped vertically, false otherwise
+     */
+    public static boolean isFlippedY(ProjectImageEntry<?> entry) {
+        if (entry == null) {
+            return false;
+        }
+
+        String flipYStr = entry.getMetadata().get(FLIP_Y);
+        return "1".equals(flipYStr);
+    }
+
+    /**
+     * Checks if an image entry is marked as flipped on either axis.
+     *
+     * @param entry The image entry to check
+     * @return true if the image is flipped on X or Y axis, false otherwise
+     */
+    public static boolean isFlipped(ProjectImageEntry<?> entry) {
+        return isFlippedX(entry) || isFlippedY(entry);
     }
 
     /**

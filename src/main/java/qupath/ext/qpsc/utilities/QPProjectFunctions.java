@@ -522,7 +522,7 @@ public class QPProjectFunctions {
         if (newEntry != null) {
             // Apply comprehensive metadata with all identification fields
             ImageMetadataManager.applyImageMetadata(
-                    newEntry, parentEntry, xOffset, yOffset, isFlippedX || isFlippedY, sampleName,
+                    newEntry, parentEntry, xOffset, yOffset, isFlippedX, isFlippedY, sampleName,
                     modality, objective, angle, annotationName, imageIndex
             );
 
@@ -695,7 +695,7 @@ public class QPProjectFunctions {
                 flippedEntry,
                 originalEntry, // Use original as parent to inherit collection and base_image
                 offsets[0], offsets[1],
-                true, // Mark as flipped
+                flipX, flipY, // Mark which axes are flipped
                 sampleName
         );
 
