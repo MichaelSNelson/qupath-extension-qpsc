@@ -1,41 +1,66 @@
-# QuPath extension template
-
-[Documentation for old version of qp-scope](https://docs.google.com/document/d/1XBRZRJ0p-M71GUEMJQ4xSMDFfq8fcTMy6KwfbtxXz-Q/edit?tab=t.0)
-[Documentation for setup of qpsc](https://docs.google.com/document/d/1XBRZRJ0p-M71GUEMJQ4xSMDFfq8fcTMy6KwfbtxXz-Q/edit?tab=t.0)
-
-[PPM project](https://docs.google.com/document/u/3/d/1XefVDE7qYCOOUUUYZDh4zW0qORQXOUilt47npvDIW3M/mobilebasic#heading=h.ywwydiewamwm)
-[Software design MVC]()
-
-
 # QuPath Scope Control (QPSC) Extension
 
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)](#)
-[![QuPath Version](https://img.shields.io/badge/qupath-0.5.1+-blue)](#)
-[![License](https://img.shields.io/badge/license-MIT-lightgrey)](#)
+[![QuPath Version](https://img.shields.io/badge/qupath-0.6.0+-blue)](https://qupath.github.io/)
+[![License](https://img.shields.io/badge/license-MIT-lightgrey)](#license)
+[![Status](https://img.shields.io/badge/status-active%20development-orange)](#)
 
 ## Overview
 
-**QP Scope Control (QPSC)** is a modular extension for [QuPath](https://qupath.github.io/) that enables **automated stage control, microscope integration, and workflow-driven image acquisition** from within the QuPath GUI.  
-The extension bridges QuPath, Python-based microscope controllers (e.g., Pycro-Manager), and custom acquisition workflows—enabling seamless, reproducible, and high-throughput imaging directly from your digital pathology projects.
+**QPSC** is an extension for [QuPath](https://qupath.github.io/) that lets you **control your microscope directly from QuPath** to automatically acquire high-resolution images of regions you select.
+
+**In plain terms:** Draw a box around a region in QuPath, and QPSC will move your microscope stage, capture all the tiles needed to cover that region, stitch them together, and add the resulting image back to your QuPath project.
+
+The extension connects QuPath to your microscope via [Pycro-Manager](https://pycro-manager.readthedocs.io/) and [Micro-Manager](https://micro-manager.org/), enabling reproducible, high-throughput imaging workflows for digital pathology research.
+
+---
+
+## Contents
+
+- [Features](#features)
+- [Getting Started](#getting-started)
+  - [Prerequisites](#prerequisites)
+  - [Installation](#installation)
+  - [First-Time Setup Checklist](#first-time-setup-checklist)
+  - [Usage](#usage)
+- [Multi-Sample Project Support](#multi-sample-project-support)
+- [Image Naming and Metadata System](#image-naming-and-metadata-system)
+- [Calibration Workflows](#calibration-workflows)
+  - [Background Collection](#background-collection)
+  - [Polarizer Calibration (PPM)](#polarizer-calibration-ppm)
+  - [Autofocus Settings Editor](#autofocus-settings-editor)
+- [File Structure (For Developers)](#file-structure-for-developers)
+- [YAML Configuration](#yaml-configuration)
+- [Future Plans](#future-plans)
+- [Troubleshooting](#troubleshooting)
+- [Getting Help](#getting-help)
 
 ---
 
 ## Features
 
-- **Automated Stage Control**: Move XY, Z, and rotational (polarizer) stages with GUI bounds checking.
-- **Flexible Acquisition Workflows**:
-    - **Bounding Box Tiling**: Define a region in QuPath, auto-compute acquisition tiles, and trigger microscopy scans.
-    - **Existing Image Registration**: Register new tile scans to previously acquired macro images with affine transformation support.
-    - **Background Collection**: Automated flat-field correction image acquisition with adaptive exposure control for consistent background intensities.
-    - **Polarizer Calibration (PPM)**: Automated rotation stage calibration to find crossed polarizer positions via angle sweep and sine curve fitting.
-    - **Autofocus Configuration Editor**: GUI editor for per-objective autofocus parameters (focus steps, search range, and spatial frequency).
-- **Modality Handlers**: Imaging modes are resolved through pluggable handlers (e.g., PPM). Modalities with no special requirements use a no-op handler.
-- **Integration with Python Controllers**: Robust socket-based communication with real-time progress reporting and heartbeat monitoring between QuPath and your Python microscope backend.
-- **Project & Data Management**: Automatic project creation, tile config, and stitched OME-TIFF integration.
-- **Extensible GUI**: Easily add dialogs for new acquisition/analysis routines.
-- **Error Handling**: User notifications for bounds violations, acquisition errors, and resource validation.
+### Core Capabilities
 
-> **Note:** Polarized (PPM) acquisitions always use the PPM modality prefix (e.g., `ppm_20x`). Even at 90° rotation the run is still PPM rather than "brightfield". Modalities without the `ppm` prefix perform single-pass acquisitions with no polarization.
+| Feature | Description |
+|---------|-------------|
+| **Bounding Box Acquisition** | Draw a region in QuPath, automatically tile and acquire at high resolution |
+| **Existing Image Acquisition** | Target specific annotations on a previously scanned slide |
+| **Automated Stage Control** | Move XY, Z, and rotation stages with safety bounds checking |
+| **Multi-angle Imaging (PPM)** | Polarized light microscopy with automatic rotation sequences |
+
+### Calibration Tools
+
+- **Background Collection**: Acquire flat-field correction images (removes uneven illumination)
+- **Polarizer Calibration**: Find optimal rotation angles for crossed polarizers
+- **Autofocus Editor**: Configure focus parameters per objective
+
+### Technical Features
+
+- **Automatic Stitching**: Tiles are automatically stitched into pyramidal OME-TIFF/OME-ZARR images
+- **Project Integration**: Acquired images automatically added to your QuPath project
+- **Real-time Progress**: Live feedback during acquisition via socket communication
+- **Modality System**: Pluggable imaging modes (PPM, brightfield, future: SHG)
+
+> **Note:** Polarized (PPM) acquisitions use the `ppm_` prefix (e.g., `ppm_20x`). Modalities without this prefix perform single-pass acquisitions.
 
 ---
 
@@ -43,11 +68,17 @@ The extension bridges QuPath, Python-based microscope controllers (e.g., Pycro-M
 
 ### Prerequisites
 
-- [QuPath 0.6.0+](https://qupath.github.io/)
-- Java 21+
-- [qupath-extension-tiles-to-pyramid](https://github.com/MichaelSNelson/qupath-extension-tiles-to-pyramid) - Required for stitching acquired tiles into pyramidal images
-- Python 3.8+ with [Pycro-Manager](https://pycro-manager.readthedocs.io/) for microscope control
-- Micro-Manager 2.0 configured for your microscope hardware
+**Hardware Requirements:**
+- Motorized XY microscope stage (controlled via Micro-Manager)
+- Digital camera compatible with Micro-Manager
+- Optional: Motorized Z-stage for autofocus, rotation stage for polarized imaging (PPM)
+
+**Software Requirements:**
+- **Operating System**: Windows 10+ (primary), Linux (limited testing), macOS (untested)
+- [QuPath 0.6.0+](https://qupath.github.io/) with Java 21+
+- [qupath-extension-tiles-to-pyramid](https://github.com/MichaelSNelson/qupath-extension-tiles-to-pyramid) - Required for image stitching
+- [Micro-Manager 2.0](https://micro-manager.org/) configured for your microscope
+- Python 3.8+ with [Pycro-Manager](https://pycro-manager.readthedocs.io/) installed
 
 ### Installation
 
@@ -63,88 +94,99 @@ The extension bridges QuPath, Python-based microscope controllers (e.g., Pycro-M
 
 5. **Set preferences** in QuPath: Edit -> Preferences -> QPSC Extension (Python controller path, server settings).
 
+### First-Time Setup Checklist
+
+Before your first acquisition, verify each component:
+
+- [ ] **QuPath**: "QP Scope" menu visible in menu bar
+- [ ] **Micro-Manager**: Can control stage manually (test XY movement)
+- [ ] **Python Server**: Server script starts without errors
+- [ ] **Connection**: Use "Stage Control" to test QuPath can move the stage
+- [ ] **Configuration**: YAML files point to correct hardware IDs
+
+**Recommended first test:** Use "Stage Control" from the QP Scope menu to verify communication before attempting a full acquisition.
+
 ### Usage
 
-- **Launch QuPath** and open the "QP Scope" menu.
-- **Acquisition Workflows**:
-  - **"Start with Bounding Box"**: Acquire a defined region with automatic tiling.
-  - **"Start with Existing Image"**: Register new high-res scans to a pre-existing macro image using affine transforms and annotation selection.
-  - **"Microscope to Microscope Alignment"**: Semi-automated alignment workflow for coordinate transformation between QuPath and microscope coordinates.
-- **Calibration & Configuration**:
-  - **"Collect Background Images"**: Acquire flat-field correction backgrounds with adaptive exposure control. The system automatically adjusts exposure times to reach target intensities for consistent background quality.
-  - **"Polarizer Calibration (PPM)"**: Calibrate PPM rotation stage to determine crossed polarizer positions. Sweeps rotation angles, fits data to sine curve, and generates a report with suggested `config_PPM.yml` angles. Run this only after optical component changes.
-  - **"Autofocus Settings Editor"**: Edit per-objective autofocus parameters in a user-friendly dialog. Configure focus steps (n_steps), Z search range (search_range_um), and spatial frequency (n_tiles) for each objective. Settings stored in `autofocus_{microscope}.yml` for easy management.
-- **Utilities**:
-  - **"Basic Stage Control"**: Manual stage movement interface for testing.
-  - **"Server Connection Settings"**: Configure socket communication with Python microscope server.
+Open the **QP Scope** menu in QuPath to access all features:
+
+**Main Workflows:**
+| Menu Item | When to Use |
+|-----------|-------------|
+| Bounding Box Acquisition | New acquisition - draw region, acquire tiles |
+| Existing Image Acquisition | Re-acquire regions from a previously scanned slide |
+| Microscope Alignment | Initial setup - align QuPath coordinates to stage |
+
+**Calibration (run as needed):**
+| Menu Item | When to Use |
+|-----------|-------------|
+| Collect Background Images | After lamp changes, for flat-field correction |
+| Polarizer Calibration | After hardware changes (PPM only) |
+| Autofocus Settings | To tune focus quality per objective |
+
+**Utilities:**
+| Menu Item | Purpose |
+|-----------|---------|
+| Stage Control | Test stage movement, verify connection |
+| Server Settings | Configure Python server connection |
 
 ---
-Multi-Sample Project Support
+
+## Multi-Sample Project Support
+
 QPSC supports managing multiple samples within a single QuPath project through an automatic metadata tracking system. This enables complex multi-slide studies while maintaining proper data organization and acquisition validation.
-How Metadata Works
+
+### How Metadata Works
+
 Each image in a project is automatically tagged with metadata to track:
 
-Image Collection: Groups related images (e.g., all acquisitions from the same physical slide)
-XY Offsets: Physical position on the slide in micrometers for precise re-acquisition
-Flip Status: Whether the image has been flipped (critical for microscope alignment)
-Sample Name: Identifies which physical sample the image represents
-Parent Relationships: Links sub-images to their source images
+- **Image Collection**: Groups related images (e.g., all acquisitions from the same physical slide)
+- **XY Offsets**: Physical position on the slide in micrometers for precise re-acquisition
+- **Flip Status**: Whether the image has been flipped (critical for microscope alignment)
+- **Sample Name**: Identifies which physical sample the image represents
+- **Parent Relationships**: Links sub-images to their source images
 
-Key Behaviors
+### Key Behaviors
 
-Automatic Collection Assignment
+**Automatic Collection Assignment:**
+- First image in a project gets `image_collection=1`
+- New unrelated images increment the collection number
+- Sub-images inherit their parent's collection number
 
-First image in a project gets image_collection=1
-New unrelated images increment the collection number
-Sub-images inherit their parent's collection number
+**Flip Validation:**
+- When X/Y flips are enabled in preferences, only flipped images can be used for acquisition
+- Prevents acquisition errors due to coordinate system mismatches
+- Original (unflipped) images are preserved with all annotations
 
+**Position Tracking:**
+- Each image stores its offset from the slide corner
+- Sub-images calculate their position relative to the parent
+- Enables accurate stage positioning for multi-region acquisition
 
-Flip Validation
+### Multi-Sample Workflow Example
 
-When X/Y flips are enabled in preferences, only flipped images can be used for acquisition
-Prevents acquisition errors due to coordinate system mismatches
-Original (unflipped) images are preserved with all annotations
+1. **Import multiple slides into one project**
+   - Each gets a unique `image_collection` number
+   - Metadata tracks which images belong together
 
+2. **Create flipped versions if needed**
+   - Use the "Create Flipped Duplicate" function
+   - Annotations and hierarchy are automatically transformed
+   - Both versions exist in the project with proper metadata
 
-Position Tracking
+3. **Acquire sub-regions from any image**
+   - Extension validates flip status before acquisition
+   - Sub-images inherit the parent's collection
+   - All related images stay grouped by metadata
 
-Each image stores its offset from the slide corner
-Sub-images calculate their position relative to the parent
-Enables accurate stage positioning for multi-region acquisition
+### Best Practices
 
+- Let the system manage metadata automatically - manual editing may break workflows
+- When working with flipped images, always use the flipped version for acquisition
+- Use descriptive sample names when setting up projects for easier identification
+- Sub-images from the same parent will share the same collection number for easy filtering
 
-
-Multi-Sample Workflow Example
-
-Import multiple slides into one project
-
-Each gets a unique image_collection number
-Metadata tracks which images belong together
-
-
-Create flipped versions if needed
-
-Use the "Create Flipped Duplicate" function
-Annotations and hierarchy are automatically transformed
-Both versions exist in the project with proper metadata
-
-
-Acquire sub-regions from any image
-
-Extension validates flip status before acquisition
-Sub-images inherit the parent's collection
-All related images stay grouped by metadata
-
-
-
-Best Practices
-
-Let the system manage metadata automatically - manual editing may break workflows
-When working with flipped images, always use the flipped version for acquisition
-Use descriptive sample names when setting up projects for easier identification
-Sub-images from the same parent will share the same collection number for easy filtering
-
-This metadata system operates transparently in the background, ensuring data integrity while supporting complex multi-sample workflows.
+> This metadata system operates transparently in the background, ensuring data integrity while supporting complex multi-sample workflows.
 
 ---
 
@@ -404,7 +446,7 @@ autofocus_settings:
 
 ---
 
-📁 File Structure
+## File Structure (For Developers)
 
 ```text
 
@@ -548,22 +590,45 @@ The following features and improvements are planned for upcoming releases:
 
 ## Troubleshooting
 
-**Quick Reference:**
+**Common Issues:**
 
-No hardware connection? Check CLI path and microscope YAML.
+| Problem | Likely Cause | Solution |
+|---------|--------------|----------|
+| "QP Scope" menu doesn't appear | Extension not loaded | Verify both JAR files are in extensions folder, restart QuPath |
+| "Cannot connect to server" | Python server not running | Start the Python microscope server before acquisition |
+| Stage won't move | Micro-Manager not configured | Check Micro-Manager can control your stage independently |
+| Timeouts during acquisition | Network/heartbeat issue | Check Python script heartbeat, adjust timeout settings |
+| Stitching fails | tiles-to-pyramid missing | Install the [tiles-to-pyramid extension](https://github.com/MichaelSNelson/qupath-extension-tiles-to-pyramid) |
 
-Timeouts during acquisition? Adjust inactivity timeouts and check the Python script's heartbeat.
+**For detailed troubleshooting**, see the comprehensive troubleshooting guide in the project documentation.
 
-Resource warnings? Verify the path to resources_LOCI.yml is correct and matches your microscope folder layout.
+---
+
+## Getting Help
+
+- **Bug Reports & Feature Requests**: [GitHub Issues](https://github.com/MichaelSNelson/qupath-extension-qpsc/issues)
+- **QuPath Community**: [image.sc Forum](https://forum.image.sc/tag/qupath) (tag: qupath)
+- **Micro-Manager Help**: [Micro-Manager Documentation](https://micro-manager.org/wiki/Documentation)
+
+When reporting issues, please include:
+1. QuPath version and operating system
+2. Error messages from QuPath console (View -> Show Log)
+3. Steps to reproduce the problem
+
+---
 
 ## License
-MIT License (see LICENSE)
+
+MIT License - see [LICENSE](LICENSE) for details.
 
 ## Citation
-If you use this extension in published work, please cite the QuPath platform and this repository.
 
-Acknowledgments
-Developed by LOCI, UW-Madison
-With thanks to the QuPath community and everyone contributing to open-source microscopy.
+If you use QPSC in published work, please cite:
+- The [QuPath platform](https://qupath.github.io/)
+- This repository
 
-For support, issues, and feature requests, please use GitHub Issues.
+## Acknowledgments
+
+Developed by [LOCI](https://eliceirilab.org/), University of Wisconsin-Madison.
+
+With thanks to the QuPath community and everyone contributing to open-source microscopy software.
