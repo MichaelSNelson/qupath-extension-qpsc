@@ -45,21 +45,23 @@ The extension bridges QuPath, Python-based microscope controllers (e.g., Pycro-M
 
 - [QuPath 0.6.0+](https://qupath.github.io/)
 - Java 21+
-- Python 3.8+ (with your microscope control scripts, e.g., Pycro-Manager)
-- Basic understanding of your microscope’s YAML configuration and available CLI interface
+- [qupath-extension-tiles-to-pyramid](https://github.com/MichaelSNelson/qupath-extension-tiles-to-pyramid) - Required for stitching acquired tiles into pyramidal images
+- Python 3.8+ with [Pycro-Manager](https://pycro-manager.readthedocs.io/) for microscope control
+- Micro-Manager 2.0 configured for your microscope hardware
 
 ### Installation
 
-1. **Clone this repository:**
-    ```bash
-    git clone https://github.com/your-lab/qupath-extension-qpsc.git
-    cd qupath-extension-qpsc
-    ```
-2. **Build and copy the extension JAR** to your QuPath `extensions/` folder. Or, more easily, drag and drop the jar file into an open QuPath window.
-3. **Configure** your microscope YAML (see `config_PPM.yml` sample) and shared hardware resource file (`resources/resources_LOCI.yml`).
-4. **Edit your Python controller path** in the QuPath preferences as needed.
+1. **Download the extension JARs:**
+   - `qupath-extension-qpsc-[version].jar` - This extension
+   - `qupath-extension-tiles-to-pyramid-[version].jar` - [Required dependency](https://github.com/MichaelSNelson/qupath-extension-tiles-to-pyramid)
 
-This extension requires qupath-extension-tiles-to-pyramid to create the pyramidal ome.tif files that will be added to your project.
+2. **Install in QuPath:** Drag both JAR files into an open QuPath window, or copy them to your QuPath `extensions/` folder.
+
+3. **Restart QuPath** and verify the "QP Scope" menu appears.
+
+4. **Configure** your microscope YAML (see `config_PPM.yml` sample) and shared hardware resource file (`resources/resources_LOCI.yml`).
+
+5. **Set preferences** in QuPath: Edit -> Preferences -> QPSC Extension (Python controller path, server settings).
 
 ### Usage
 
@@ -524,10 +526,33 @@ Unit tests use JUnit and Mockito. See src/test/ for examples.
 
 Extending: Add new dialogs, Python commands, or custom modalities by implementing a `ModalityHandler` and registering it via `ModalityRegistry.registerHandler`.
 
+## Future Plans
+
+The following features and improvements are planned for upcoming releases:
+
+**Documentation & Onboarding**:
+- **Configuration templates**: Annotated YAML examples for common microscope setups
+- **Quickstart guide**: Step-by-step tutorial for first-time acquisition
+- **Video tutorials**: Installation and workflow walkthroughs
+
+**New Modalities**:
+- **SHG (Second Harmonic Generation)**: Support for multiphoton microscopy workflows
+- **Laser scanning**: Integration with confocal and multi-photon laser scanning systems
+
+**Additional Improvements**:
+- Pre-built JAR releases via GitHub Actions
+- Configuration validation wizard
+- Expanded troubleshooting documentation
+
+---
+
 ## Troubleshooting
+
+**Quick Reference:**
+
 No hardware connection? Check CLI path and microscope YAML.
 
-Timeouts during acquisition? Adjust inactivity timeouts and check the Python script’s heartbeat.
+Timeouts during acquisition? Adjust inactivity timeouts and check the Python script's heartbeat.
 
 Resource warnings? Verify the path to resources_LOCI.yml is correct and matches your microscope folder layout.
 
