@@ -115,7 +115,6 @@ public class AcquisitionManager {
                 .thenCompose(valid -> {
                     if (!valid) {
                         logger.info("Annotation validation failed or cancelled");
-                        state.cancelled = true; // Mark workflow as cancelled
                         return CompletableFuture.completedFuture(null);
                     }
                     return getRotationAngles();
