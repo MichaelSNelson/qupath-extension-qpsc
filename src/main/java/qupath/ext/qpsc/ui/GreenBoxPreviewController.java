@@ -365,8 +365,9 @@ public class GreenBoxPreviewController {
                     if (result != null) {
                         previewView.setImage(SwingFXUtils.toFXImage(result.getDebugImage(), null));
 
-                        if (result.getConfidence() > 0.7) {
-                            // HIGH CONFIDENCE - collapse parameters, show success
+                        if (result.getConfidence() > 0.30) {
+                            // ACCEPTABLE CONFIDENCE (30%+) - collapse parameters, show success
+                            // Note: Typical confidence scores are 30-50% for good detections
                             statusLabel.setText(String.format("[OK] Green box detected! Confidence: %.0f%% - Location: (%.0f, %.0f)",
                                     result.getConfidence() * 100,
                                     result.getDetectedBox().getBoundsX(),
@@ -375,9 +376,9 @@ public class GreenBoxPreviewController {
                             paramsPane.setExpanded(false);
                             paramsPane.setText("Detection Parameters (adjust if needed)");
                             confirmButton.setDisable(false);
-                            logger.info("Auto-detection succeeded with high confidence: {}", result.getConfidence());
+                            logger.info("Auto-detection succeeded with acceptable confidence: {}", result.getConfidence());
                         } else {
-                            // LOW CONFIDENCE - expand parameters, show warning
+                            // LOW CONFIDENCE (below 30%) - expand parameters, show warning
                             statusLabel.setText(String.format("[!] Detection uncertain (%.0f%%) - Consider adjusting parameters",
                                     result.getConfidence() * 100));
                             statusLabel.setStyle("-fx-text-fill: #E65100; -fx-font-weight: bold; -fx-font-size: 12px;");
@@ -511,9 +512,11 @@ public class GreenBoxPreviewController {
                         result.getDetectedBox().getBoundsHeight(),
                         result.getConfidence() * 100));
 
-                if (result.getConfidence() > 0.7) {
+                if (result.getConfidence() > 0.30) {
+                    // Acceptable confidence (30%+)
                     statusLabel.setStyle("-fx-text-fill: #2E7D32; -fx-font-weight: bold; -fx-font-size: 12px;");
                 } else {
+                    // Low confidence (below 30%)
                     statusLabel.setStyle("-fx-text-fill: #E65100; -fx-font-weight: bold; -fx-font-size: 12px;");
                 }
 

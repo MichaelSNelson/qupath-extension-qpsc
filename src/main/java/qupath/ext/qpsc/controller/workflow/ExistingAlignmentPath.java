@@ -257,19 +257,28 @@ public class ExistingAlignmentPath {
      * @return CompletableFuture containing the updated workflow state
      */
     private CompletableFuture<WorkflowState> createTransform(GreenBoxContext context) {
-        return CompletableFuture.supplyAsync(() -> {
-            // Get annotations
+        // CRITICAL: Do NOT use supplyAsync() here! We need to stay on the same thread
+        // that completed validateAndFlipImage() to ensure we see the updated gui.getImageData()
+        // with the flipped image hierarchy. Using supplyAsync() spawns a new thread that
+        // may see stale image data (the original unflipped image), causing tiles to appear
+        // at wrong positions.
+        try {
+            // Get annotations from the current (flipped) image hierarchy
+            logger.info("Retrieving annotations from current image hierarchy");
             state.annotations = AnnotationHelper.ensureAnnotationsExist(gui, state.pixelSize, state.selectedAnnotationClasses);
             if (state.annotations.isEmpty()) {
-                throw new RuntimeException("No valid annotations found");
+                return CompletableFuture.failedFuture(new RuntimeException("No valid annotations found"));
             }
+
+            logger.info("Found {} annotations for tile creation", state.annotations.size());
 
             // Create transform
             AffineTransform fullResToStage = createFullResToStageTransform(context);
 
             // Validate transform
             if (!validateTransform(fullResToStage)) {
-                throw new RuntimeException("Transform validation failed - produces out-of-bounds coordinates");
+                return CompletableFuture.failedFuture(
+                        new RuntimeException("Transform validation failed - produces out-of-bounds coordinates"));
             }
 
             state.transform = fullResToStage;
@@ -280,15 +289,16 @@ public class ExistingAlignmentPath {
                 saveSlideAlignment(context);
             }
 
-            return state;
-        }).thenCompose(currentState -> {
             // Handle refinement if requested
             if (state.refinementChoice != RefinementChoice.NONE) {
                 return performRefinement(context);
             } else {
-                return CompletableFuture.completedFuture(currentState);
+                return CompletableFuture.completedFuture(state);
             }
-        });
+        } catch (Exception e) {
+            logger.error("Error in createTransform", e);
+            return CompletableFuture.failedFuture(e);
+        }
     }
 
     /**

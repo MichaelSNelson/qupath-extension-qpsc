@@ -158,6 +158,10 @@ public class AnnotationHelper {
             return Collections.emptyList();
         }
 
+        // Enhanced logging to help diagnose tile positioning issues
+        String imageName = gui.getImageData().getServer().getPath();
+        logger.info("Retrieving annotations from image: {}", imageName);
+
         var hierarchy = gui.getImageData().getHierarchy();
         var allAnnotations = hierarchy.getAnnotationObjects();
 
@@ -167,8 +171,20 @@ public class AnnotationHelper {
                         validClasses.contains(ann.getPathClass().getName()))
                 .collect(Collectors.toList());
 
-        logger.debug("Found {} valid annotations from {} total with classes: {} (using GUI hierarchy)",
-                annotations.size(), allAnnotations.size(), validClasses);
+        // Log annotation positions to help diagnose coordinate issues
+        if (!annotations.isEmpty()) {
+            PathObject firstAnn = annotations.get(0);
+            logger.info("Found {} valid annotations. First annotation '{}' at position: ({}, {}) size: {}x{}",
+                    annotations.size(),
+                    firstAnn.getName() != null ? firstAnn.getName() : "unnamed",
+                    firstAnn.getROI().getBoundsX(),
+                    firstAnn.getROI().getBoundsY(),
+                    firstAnn.getROI().getBoundsWidth(),
+                    firstAnn.getROI().getBoundsHeight());
+        } else {
+            logger.debug("Found {} valid annotations from {} total with classes: {} (using GUI hierarchy)",
+                    annotations.size(), allAnnotations.size(), validClasses);
+        }
 
         return annotations;
     }
