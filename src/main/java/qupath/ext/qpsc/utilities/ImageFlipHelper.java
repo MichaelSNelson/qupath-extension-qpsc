@@ -72,10 +72,45 @@ public class ImageFlipHelper {
             }
 
             // Check current image's flip status
+            // CRITICAL FIX: When project.getEntry() returns null, it might be because
+            // the GUI hasn't updated to the new project entry yet. We need to find
+            // the entry by other means to ensure proper flip validation.
             ProjectImageEntry<BufferedImage> currentEntry = project.getEntry(gui.getImageData());
+
             if (currentEntry == null) {
-                logger.info("Current image not in project yet - will be handled during import");
-                return true;
+                logger.info("Current image not directly matched to project entry - searching by criteria");
+
+                // Try to find an entry that matches the current image
+                // This handles the case where project was just created and GUI hasn't synced
+                currentEntry = findMatchingEntry(gui, project);
+
+                if (currentEntry == null) {
+                    // Still can't find it - check if there's only one entry and flip is required
+                    var entries = project.getImageList();
+                    if (entries.size() == 1) {
+                        currentEntry = entries.get(0);
+                        logger.info("Using only project entry: {}", currentEntry.getImageName());
+                    } else if (!entries.isEmpty()) {
+                        // Multiple entries - try to find one that's already flipped and matches requirements
+                        for (var entry : entries) {
+                            if (ImageMetadataManager.isFlipped(entry)) {
+                                boolean flipXMatch = !requiresFlipX || ImageMetadataManager.isFlippedX(entry);
+                                boolean flipYMatch = !requiresFlipY || ImageMetadataManager.isFlippedY(entry);
+                                if (flipXMatch && flipYMatch) {
+                                    logger.info("Found matching flipped entry: {}", entry.getImageName());
+                                    // Open this entry to ensure it's the current image
+                                    return openAndVerifyEntry(gui, project, entry);
+                                }
+                            }
+                        }
+                        logger.warn("Could not find matching entry in project with {} entries", entries.size());
+                    }
+                }
+
+                if (currentEntry == null) {
+                    logger.error("Cannot find current image in project - flip validation failed");
+                    return false;
+                }
             }
 
             // Always ensure base_image is set on the current entry
@@ -88,9 +123,22 @@ public class ImageFlipHelper {
             }
 
             boolean isFlipped = ImageMetadataManager.isFlipped(currentEntry);
+            boolean flipXMatches = !requiresFlipX || ImageMetadataManager.isFlippedX(currentEntry);
+            boolean flipYMatches = !requiresFlipY || ImageMetadataManager.isFlippedY(currentEntry);
 
-            if (isFlipped) {
-                logger.info("Current image flip status matches requirements");
+            if (isFlipped && flipXMatches && flipYMatches) {
+                logger.info("Current image flip status matches requirements (flipX={}, flipY={})",
+                        ImageMetadataManager.isFlippedX(currentEntry),
+                        ImageMetadataManager.isFlippedY(currentEntry));
+
+                // CRITICAL: Verify this entry is actually open in the GUI
+                // If not, we need to open it
+                ProjectImageEntry<BufferedImage> openEntry = project.getEntry(gui.getImageData());
+                if (openEntry == null || !openEntry.equals(currentEntry)) {
+                    logger.info("Flipped entry found but not currently open - opening it");
+                    return openAndVerifyEntry(gui, project, currentEntry);
+                }
+
                 return true;
             }
 
@@ -286,6 +334,156 @@ public class ImageFlipHelper {
                     logger.error("Failed to sync project after setting base_image", e);
                 }
             }
+        }
+    }
+
+    /**
+     * Tries to find a project entry that matches the current image in the GUI.
+     *
+     * <p>This is used when project.getEntry(gui.getImageData()) returns null,
+     * which can happen when the project was just created and the GUI hasn't
+     * fully synchronized yet.
+     *
+     * @param gui QuPath GUI instance
+     * @param project Current project
+     * @return Matching entry, or null if not found
+     */
+    private static ProjectImageEntry<BufferedImage> findMatchingEntry(
+            QuPathGUI gui,
+            Project<BufferedImage> project) {
+
+        ImageData<BufferedImage> currentData = gui.getImageData();
+        if (currentData == null || currentData.getServer() == null) {
+            return null;
+        }
+
+        String currentPath = currentData.getServer().getPath();
+        String currentName = null;
+
+        // Try to extract just the filename from the path
+        if (currentPath != null) {
+            int lastSlash = Math.max(currentPath.lastIndexOf('/'), currentPath.lastIndexOf('\\'));
+            if (lastSlash >= 0 && lastSlash < currentPath.length() - 1) {
+                currentName = currentPath.substring(lastSlash + 1);
+            } else {
+                currentName = currentPath;
+            }
+        }
+
+        logger.debug("Looking for entry matching path: {} or name: {}", currentPath, currentName);
+
+        for (ProjectImageEntry<BufferedImage> entry : project.getImageList()) {
+            String entryName = entry.getImageName();
+
+            // Try exact name match
+            if (entryName != null && currentName != null) {
+                if (entryName.equals(currentName) || entryName.contains(currentName) ||
+                        currentName.contains(entryName)) {
+                    logger.info("Found matching entry by name: {}", entryName);
+                    return entry;
+                }
+            }
+
+            // Try to read the entry's server path
+            try {
+                var entryBuilder = entry.getServerBuilder();
+                if (entryBuilder != null) {
+                    var uris = entryBuilder.getURIs();
+                    for (var uri : uris) {
+                        if (uri.toString().contains(currentName != null ? currentName : currentPath)) {
+                            logger.info("Found matching entry by URI: {}", entryName);
+                            return entry;
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                logger.debug("Error checking entry URI: {}", e.getMessage());
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Opens a project entry and waits for it to load.
+     *
+     * <p>This is used when we've found the correct flipped entry but it's not
+     * currently open in the GUI. We need to open it and verify the load completes.
+     *
+     * @param gui QuPath GUI instance
+     * @param project Current project
+     * @param entry Entry to open
+     * @return true if entry was successfully opened, false otherwise
+     */
+    private static boolean openAndVerifyEntry(
+            QuPathGUI gui,
+            Project<BufferedImage> project,
+            ProjectImageEntry<BufferedImage> entry) {
+
+        CompletableFuture<Boolean> loadFuture = new CompletableFuture<>();
+
+        Platform.runLater(() -> {
+            try {
+                // Create a listener for load completion
+                javafx.beans.value.ChangeListener<ImageData<BufferedImage>> loadListener =
+                        new javafx.beans.value.ChangeListener<>() {
+                            @Override
+                            public void changed(
+                                    javafx.beans.value.ObservableValue<? extends ImageData<BufferedImage>> observable,
+                                    ImageData<BufferedImage> oldValue,
+                                    ImageData<BufferedImage> newValue) {
+
+                                if (newValue != null && !loadFuture.isDone()) {
+                                    try {
+                                        ProjectImageEntry<BufferedImage> loadedEntry = project.getEntry(newValue);
+                                        if (loadedEntry != null && loadedEntry.equals(entry)) {
+                                            logger.info("Entry loaded successfully: {}", entry.getImageName());
+                                            gui.getViewer().imageDataProperty().removeListener(this);
+                                            loadFuture.complete(true);
+                                        }
+                                    } catch (Exception e) {
+                                        logger.debug("Error checking loaded entry: {}", e.getMessage());
+                                    }
+                                }
+                            }
+                        };
+
+                gui.getViewer().imageDataProperty().addListener(loadListener);
+                logger.info("Opening entry: {}", entry.getImageName());
+                gui.openImageEntry(entry);
+
+                // Timeout handler
+                CompletableFuture.delayedExecutor(15, TimeUnit.SECONDS).execute(() -> {
+                    if (!loadFuture.isDone()) {
+                        Platform.runLater(() -> {
+                            gui.getViewer().imageDataProperty().removeListener(loadListener);
+                            // Final check
+                            try {
+                                var currentEntry = project.getEntry(gui.getImageData());
+                                if (currentEntry != null && currentEntry.equals(entry)) {
+                                    loadFuture.complete(true);
+                                    return;
+                                }
+                            } catch (Exception e) {
+                                logger.debug("Error in timeout check: {}", e.getMessage());
+                            }
+                            logger.error("Failed to open entry within timeout: {}", entry.getImageName());
+                            loadFuture.complete(false);
+                        });
+                    }
+                });
+
+            } catch (Exception e) {
+                logger.error("Error opening entry", e);
+                loadFuture.complete(false);
+            }
+        });
+
+        try {
+            return loadFuture.get(20, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            logger.error("Error waiting for entry to open", e);
+            return false;
         }
     }
 }

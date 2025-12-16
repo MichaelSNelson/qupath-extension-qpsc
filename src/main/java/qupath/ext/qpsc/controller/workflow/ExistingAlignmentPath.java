@@ -13,6 +13,7 @@ import qupath.ext.qpsc.utilities.*;
 import qupath.lib.gui.QuPathGUI;
 import qupath.lib.objects.PathObject;
 import qupath.lib.projects.Project;
+import qupath.lib.projects.ProjectImageEntry;
 import qupath.lib.scripting.QP;
 import qupath.lib.roi.interfaces.ROI;
 
@@ -263,6 +264,14 @@ public class ExistingAlignmentPath {
         // may see stale image data (the original unflipped image), causing tiles to appear
         // at wrong positions.
         try {
+            // CRITICAL VERIFICATION: Ensure we have the correct (flipped) image open
+            // This guards against race conditions where the GUI hasn't updated to the flipped image
+            if (!verifyCorrectImageIsOpen()) {
+                logger.error("Wrong image is open - cannot proceed with tile creation");
+                return CompletableFuture.failedFuture(
+                        new RuntimeException("Image verification failed - the correct flipped image is not open"));
+            }
+
             // Get annotations from the current (flipped) image hierarchy
             logger.info("Retrieving annotations from current image hierarchy");
             state.annotations = AnnotationHelper.ensureAnnotationsExist(gui, state.pixelSize, state.selectedAnnotationClasses);
@@ -271,6 +280,9 @@ public class ExistingAlignmentPath {
             }
 
             logger.info("Found {} annotations for tile creation", state.annotations.size());
+
+            // Log annotation positions for debugging
+            logAnnotationPositions(state.annotations);
 
             // Create transform
             AffineTransform fullResToStage = createFullResToStageTransform(context);
@@ -652,6 +664,137 @@ public class ExistingAlignmentPath {
 
         return allValid;
     }
+
+    /**
+     * Verifies that the correct (flipped) image is currently open.
+     *
+     * <p>This is a critical verification step to prevent tile positioning bugs.
+     * If flip is required by preferences, we verify:
+     * <ol>
+     *   <li>An image is currently open in the GUI</li>
+     *   <li>The image can be found in the project</li>
+     *   <li>The image has the correct flip metadata matching requirements</li>
+     * </ol>
+     *
+     * @return true if the correct image is open, false otherwise
+     */
+    @SuppressWarnings("unchecked")
+    private boolean verifyCorrectImageIsOpen() {
+        boolean requiresFlipX = QPPreferenceDialog.getFlipMacroXProperty();
+        boolean requiresFlipY = QPPreferenceDialog.getFlipMacroYProperty();
+
+        // If no flipping required, any image is acceptable
+        if (!requiresFlipX && !requiresFlipY) {
+            logger.info("Image verification: No flip required - any image is acceptable");
+            return true;
+        }
+
+        // Check that we have an image open
+        if (gui.getImageData() == null) {
+            logger.error("Image verification FAILED: No image is open in the GUI");
+            return false;
+        }
+
+        // Check we can find this image in the project
+        Project<BufferedImage> project = (Project<BufferedImage>) gui.getProject();
+        if (project == null) {
+            logger.error("Image verification FAILED: No project is open");
+            return false;
+        }
+
+        ProjectImageEntry<BufferedImage> currentEntry = project.getEntry(gui.getImageData());
+        if (currentEntry == null) {
+            // Try to find the entry by other means
+            logger.warn("Cannot directly match GUI image to project entry - searching...");
+
+            // Try to find an entry that's already flipped
+            for (var entry : project.getImageList()) {
+                boolean entryFlipX = ImageMetadataManager.isFlippedX(entry);
+                boolean entryFlipY = ImageMetadataManager.isFlippedY(entry);
+
+                boolean flipXMatches = !requiresFlipX || entryFlipX;
+                boolean flipYMatches = !requiresFlipY || entryFlipY;
+
+                if (flipXMatches && flipYMatches) {
+                    logger.info("Found a correctly flipped entry: {} - but it may not be open!", entry.getImageName());
+                    // This is a potential issue - we found a flipped entry but can't confirm it's open
+                    // Return false to force a re-validation
+                    logger.warn("Image verification FAILED: Cannot confirm the flipped entry is actually open");
+                    return false;
+                }
+            }
+
+            logger.error("Image verification FAILED: No flipped entry found in project");
+            return false;
+        }
+
+        // Check the entry's flip metadata
+        boolean isFlippedX = ImageMetadataManager.isFlippedX(currentEntry);
+        boolean isFlippedY = ImageMetadataManager.isFlippedY(currentEntry);
+
+        boolean flipXMatches = !requiresFlipX || isFlippedX;
+        boolean flipYMatches = !requiresFlipY || isFlippedY;
+
+        if (flipXMatches && flipYMatches) {
+            logger.info("Image verification PASSED: {} has correct flip status (flipX={}, flipY={})",
+                    currentEntry.getImageName(), isFlippedX, isFlippedY);
+            return true;
+        } else {
+            logger.error("Image verification FAILED: {} has wrong flip status " +
+                            "(flipX={}, flipY={}, required flipX={}, flipY={})",
+                    currentEntry.getImageName(), isFlippedX, isFlippedY, requiresFlipX, requiresFlipY);
+            return false;
+        }
+    }
+
+    /**
+     * Logs the positions of annotations for debugging tile positioning issues.
+     *
+     * @param annotations List of annotations to log
+     */
+    private void logAnnotationPositions(java.util.List<PathObject> annotations) {
+        if (annotations == null || annotations.isEmpty()) {
+            logger.warn("No annotations to log positions for");
+            return;
+        }
+
+        int imageWidth = gui.getImageData().getServer().getWidth();
+        int imageHeight = gui.getImageData().getServer().getHeight();
+
+        logger.info("Annotation positions (image size: {} x {}):", imageWidth, imageHeight);
+
+        for (int i = 0; i < Math.min(annotations.size(), 5); i++) {
+            PathObject ann = annotations.get(i);
+            ROI roi = ann.getROI();
+            if (roi != null) {
+                double centroidX = roi.getCentroidX();
+                double centroidY = roi.getCentroidY();
+
+                // Calculate position as percentage of image dimensions
+                double xPercent = (centroidX / imageWidth) * 100;
+                double yPercent = (centroidY / imageHeight) * 100;
+
+                // Check if position seems reasonable (annotations typically in center for tissue)
+                String positionNote = "";
+                if (xPercent < 10 || xPercent > 90 || yPercent < 10 || yPercent > 90) {
+                    positionNote = " [EDGE - may indicate coordinate issue]";
+                }
+
+                logger.info("  Annotation '{}': centroid=({}, {}), position=({}%, {}%){}",
+                        ann.getName() != null ? ann.getName() : "unnamed",
+                        String.format("%.0f", centroidX),
+                        String.format("%.0f", centroidY),
+                        String.format("%.1f", xPercent),
+                        String.format("%.1f", yPercent),
+                        positionNote);
+            }
+        }
+
+        if (annotations.size() > 5) {
+            logger.info("  ... and {} more annotations", annotations.size() - 5);
+        }
+    }
+
     // Inner context classes
 
     /**
