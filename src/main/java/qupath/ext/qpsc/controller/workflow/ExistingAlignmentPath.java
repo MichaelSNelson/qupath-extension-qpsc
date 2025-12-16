@@ -3,7 +3,7 @@ package qupath.ext.qpsc.controller.workflow;
 import javafx.application.Platform;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import qupath.ext.qpsc.controller.ExistingImageWorkflow.WorkflowState;
+import qupath.ext.qpsc.controller.ExistingImageWorkflowV2.WorkflowState;
 import qupath.ext.qpsc.controller.MicroscopeController;
 import qupath.ext.qpsc.ui.RefinementSelectionController.RefinementChoice;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
@@ -674,10 +674,11 @@ public class ExistingAlignmentPath {
      *   <li>An image is currently open in the GUI</li>
      *   <li>The image can be found in the project</li>
      *   <li>The image has the correct flip metadata matching requirements</li>
+     *   <li>The GUI is actually displaying the flipped entry (not just that it exists)</li>
      * </ol>
      *
      * <p>Note: QuPath's project.getEntry() doesn't always work correctly with
-     * TransformedServer images. We use multiple strategies to find the correct entry.
+     * TransformedServer images. We use multiple strategies to find and verify the correct entry.
      *
      * @return true if the correct image is open, false otherwise
      */
@@ -705,59 +706,106 @@ public class ExistingAlignmentPath {
             return false;
         }
 
-        // Strategy 1: Check if the server path indicates this is a flipped image
-        // TransformedServer paths often contain indicators of the transformation
-        String serverPath = gui.getImageData().getServer().getPath();
-        logger.info("Current image server path: {}", serverPath);
+        // Get the current image's server path for comparison
+        String currentServerPath = gui.getImageData().getServer().getPath();
+        logger.info("Current image server path: {}", currentServerPath);
 
-        // Strategy 2: Try to find the entry by project.getEntry()
+        // Strategy 1: Try to find the entry by project.getEntry()
         ProjectImageEntry<BufferedImage> currentEntry = project.getEntry(gui.getImageData());
 
-        // Strategy 3: If getEntry() failed or returned wrong entry, search by name
-        // Look for an entry with "(flipped" in the name that matches flip requirements
-        if (currentEntry == null || !hasCorrectFlipStatus(currentEntry, requiresFlipX, requiresFlipY)) {
-            logger.info("Direct entry lookup returned {}, searching for flipped entry...",
-                    currentEntry != null ? currentEntry.getImageName() : "null");
+        // If direct lookup worked and entry has correct flip status, we're done
+        if (currentEntry != null && hasCorrectFlipStatus(currentEntry, requiresFlipX, requiresFlipY)) {
+            logger.info("Image verification PASSED: {} has correct flip status (flipX={}, flipY={})",
+                    currentEntry.getImageName(),
+                    ImageMetadataManager.isFlippedX(currentEntry),
+                    ImageMetadataManager.isFlippedY(currentEntry));
 
-            // Search for a flipped entry
-            ProjectImageEntry<BufferedImage> flippedEntry = null;
-            for (var entry : project.getImageList()) {
-                String entryName = entry.getImageName();
+            // Also verify the hierarchy has annotations (sanity check)
+            int annotationCount = gui.getImageData().getHierarchy().getAnnotationObjects().size();
+            logger.info("Current image has {} annotations in hierarchy", annotationCount);
 
-                // Check if this entry has "(flipped" in name (indicates it's a flipped duplicate)
-                if (entryName != null && entryName.contains("(flipped")) {
-                    boolean entryFlipX = ImageMetadataManager.isFlippedX(entry);
-                    boolean entryFlipY = ImageMetadataManager.isFlippedY(entry);
+            return true;
+        }
 
-                    logger.info("Found flipped entry: {} (flipX={}, flipY={})",
-                            entryName, entryFlipX, entryFlipY);
+        // Strategy 2: Search for a flipped entry and verify the GUI is showing it
+        logger.info("Direct entry lookup returned {}, searching for flipped entry...",
+                currentEntry != null ? currentEntry.getImageName() : "null");
 
-                    if (hasCorrectFlipStatus(entry, requiresFlipX, requiresFlipY)) {
-                        flippedEntry = entry;
-                        break;
-                    }
+        ProjectImageEntry<BufferedImage> flippedEntry = null;
+        for (var entry : project.getImageList()) {
+            String entryName = entry.getImageName();
+
+            // Check if this entry has "(flipped" in name (indicates it's a flipped duplicate)
+            if (entryName != null && entryName.contains("(flipped")) {
+                boolean entryFlipX = ImageMetadataManager.isFlippedX(entry);
+                boolean entryFlipY = ImageMetadataManager.isFlippedY(entry);
+
+                logger.info("Found flipped entry: {} (flipX={}, flipY={})",
+                        entryName, entryFlipX, entryFlipY);
+
+                if (hasCorrectFlipStatus(entry, requiresFlipX, requiresFlipY)) {
+                    flippedEntry = entry;
+                    break;
                 }
             }
+        }
 
-            if (flippedEntry != null) {
-                // We found a correctly flipped entry in the project
-                // The image should be this one based on ImageFlipHelper's confirmation
-                logger.info("Image verification PASSED (by flipped entry search): {} has correct flip status",
-                        flippedEntry.getImageName());
-                return true;
-            }
-
-            // No flipped entry found - this is a problem
+        if (flippedEntry == null) {
             logger.error("Image verification FAILED: No entry with correct flip status found in project");
             return false;
         }
 
-        // Entry found and has correct flip status
-        logger.info("Image verification PASSED: {} has correct flip status (flipX={}, flipY={})",
-                currentEntry.getImageName(),
-                ImageMetadataManager.isFlippedX(currentEntry),
-                ImageMetadataManager.isFlippedY(currentEntry));
-        return true;
+        // CRITICAL: Verify the GUI is actually showing this flipped entry
+        // Check if the current server path matches the flipped entry
+        // This is the key fix - we don't just check that a flipped entry EXISTS,
+        // we verify the GUI is actually DISPLAYING it
+        boolean guiShowsFlippedEntry = false;
+
+        // Check 1: Does the server path contain the flipped entry name?
+        String flippedName = flippedEntry.getImageName();
+        if (currentServerPath != null && flippedName != null) {
+            // TransformedServer paths are complex, but they should reference the flipped entry
+            if (currentServerPath.contains(flippedName) ||
+                currentServerPath.contains("(flipped")) {
+                guiShowsFlippedEntry = true;
+                logger.info("GUI appears to be showing flipped entry (path contains flipped indicator)");
+            }
+        }
+
+        // Check 2: Compare annotation counts as a sanity check
+        // The flipped entry should have transformed annotations
+        if (!guiShowsFlippedEntry) {
+            try {
+                var flippedData = flippedEntry.readImageData();
+                int flippedAnnotationCount = flippedData.getHierarchy().getAnnotationObjects().size();
+                int currentAnnotationCount = gui.getImageData().getHierarchy().getAnnotationObjects().size();
+
+                logger.info("Annotation count comparison: flipped entry={}, current GUI={}",
+                        flippedAnnotationCount, currentAnnotationCount);
+
+                // If both have the same non-zero annotation count, likely showing flipped entry
+                if (flippedAnnotationCount > 0 && flippedAnnotationCount == currentAnnotationCount) {
+                    guiShowsFlippedEntry = true;
+                    logger.info("GUI likely showing flipped entry (annotation counts match)");
+                }
+            } catch (Exception e) {
+                logger.debug("Could not read flipped entry data for comparison: {}", e.getMessage());
+            }
+        }
+
+        if (guiShowsFlippedEntry) {
+            logger.info("Image verification PASSED (verified GUI shows flipped entry): {}",
+                    flippedEntry.getImageName());
+            return true;
+        }
+
+        // GUI is NOT showing the flipped entry - this is the bug we're trying to catch
+        logger.error("Image verification FAILED: Flipped entry '{}' exists but GUI is showing different image",
+                flippedEntry.getImageName());
+        logger.error("Current server path: {}", currentServerPath);
+        logger.error("This indicates the flipped image did not load correctly after creation");
+
+        return false;
     }
 
     /**

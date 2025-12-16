@@ -154,6 +154,25 @@ public class ImageFlipHelper {
             );
 
             try {
+                // CRITICAL FIX: Save the current GUI hierarchy to the project entry BEFORE
+                // creating the flipped duplicate. This ensures that any annotations drawn
+                // by the user (which may not have been saved yet) are captured in the saved
+                // hierarchy. createFlippedDuplicate() reads from the saved hierarchy, so
+                // without this step, unsaved annotations would be lost/not transformed.
+                ImageData<BufferedImage> currentImageData = gui.getImageData();
+                if (currentImageData != null) {
+                    logger.info("Saving current image data to ensure annotations are persisted before flip");
+                    try {
+                        currentEntry.saveImageData(currentImageData);
+                        project.syncChanges();
+                        logger.info("Successfully saved {} annotations before creating flipped duplicate",
+                                currentImageData.getHierarchy().getAnnotationObjects().size());
+                    } catch (IOException e) {
+                        logger.warn("Failed to save current image data before flip: {}", e.getMessage());
+                        // Continue anyway - the flip might still work if annotations were already saved
+                    }
+                }
+
                 ProjectImageEntry<BufferedImage> flippedEntry = QPProjectFunctions.createFlippedDuplicate(
                         project,
                         currentEntry,
