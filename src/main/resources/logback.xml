@@ -99,8 +99,8 @@
         <appender-ref ref="CONSOLE" />
     </logger>
 
-    <!-- Specific logger for TestWorkflow - can disable heartbeat test logs entirely -->
-    <logger name="qupath.ext.qpsc.ui.TestWorkFlowController" level="WARN" additivity="false">
+    <!-- Specific logger for MicroscopeAlignmentWorkflow - can disable alignment logs if needed -->
+    <logger name="qupath.ext.qpsc.controller.MicroscopeAlignmentWorkflow" level="DEBUG" additivity="false">
         <appender-ref ref="ACQUISITION_LOG" />
         <appender-ref ref="PROJECT_LOG" />
         <appender-ref ref="CONSOLE" />

@@ -43,7 +43,7 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 	private static final Version EXTENSION_QUPATH_VERSION =
 			Version.parse("v0.6.0");
 	private static final GitHubRepo EXTENSION_REPOSITORY =
-			GitHubRepo.create(EXTENSION_NAME, "MichaelSNelson", "qupath-extension-qpsc");
+			GitHubRepo.create(EXTENSION_NAME, "uw-loci", "qupath-extension-qpsc");
 
 	/** True if the microscope YAML passed validation. */
 	private boolean configValid;
@@ -98,9 +98,9 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 		// Create or get the top level Extensions > QP Scope menu
 		var extensionMenu = qupath.getMenu("Extensions>" + EXTENSION_NAME, true);
 
-		// === WORKFLOW MENU ITEMS ===
+		// === MAIN WORKFLOW MENU ITEMS ===
 
-		// 1) Bounded Acquisition (new unified dialog workflow)
+		// 1) Bounded Acquisition - acquire tiles from a defined bounding box region
 		MenuItem boundedAcquisitionOption = new MenuItem(res.getString("menu.boundedAcquisition"));
 		boundedAcquisitionOption.setDisable(!configValid);
 		boundedAcquisitionOption.setOnAction(e -> {
@@ -111,49 +111,10 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 			}
 		});
 
-		// 2) Start with a bounding box workflow (legacy - to be deprecated)
-		MenuItem boundingBoxOption = new MenuItem(res.getString("menu.boundingbox"));
-		boundingBoxOption.setDisable(!configValid);
-		boundingBoxOption.setOnAction(e ->
-				{
-					try {
-						QPScopeController.getInstance().startWorkflow("boundingBox");
-					} catch (IOException ex) {
-						throw new RuntimeException(ex);
-					}
-				}
-		);
-
-		// 2) Start with existing image (only enabled if an image is open & config is valid)
+		// 2) Existing Image Acquisition - acquire from annotations on an existing image
 		MenuItem existingImageOption = new MenuItem(res.getString("menu.existingimage"));
 		existingImageOption.disableProperty().bind(
 				Bindings.or(
-						// no image open?
-						Bindings.createBooleanBinding(
-								() -> qupath.getImageData() == null,
-								qupath.imageDataProperty()
-						),
-						// or config invalid?
-						Bindings.createBooleanBinding(
-								() -> !configValid,
-								qupath.imageDataProperty()
-						)
-				)
-		);
-		existingImageOption.setOnAction(e ->
-				{
-					try {
-						QPScopeController.getInstance().startWorkflow("existingImage");
-					} catch (IOException ex) {
-						throw new RuntimeException(ex);
-					}
-				}
-		);
-
-		// 2b) Existing Image V2 - Consolidated dialog version (New UI)
-		MenuItem existingImageV2Option = new MenuItem("Acquire from Existing Image (New UI)");
-		existingImageV2Option.disableProperty().bind(
-				Bindings.or(
 						Bindings.createBooleanBinding(
 								() -> qupath.getImageData() == null,
 								qupath.imageDataProperty()
@@ -164,9 +125,9 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 						)
 				)
 		);
-		existingImageV2Option.setOnAction(e -> {
+		existingImageOption.setOnAction(e -> {
 			try {
-				QPScopeController.getInstance().startWorkflow("existingImageV2");
+				QPScopeController.getInstance().startWorkflow("existingImage");
 			} catch (IOException ex) {
 				throw new RuntimeException(ex);
 			}
@@ -174,39 +135,26 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 
 		// 3) Microscope alignment workflow (only enabled if image has macro)
 		MenuItem alignmentOption = new MenuItem(res.getString("menu.microscopeAlignment"));
-
-		logger.info("Creating microscope alignment menu item. Config valid: {}", configValid);
-
-		// Create a simple binding like existing image uses
 		alignmentOption.disableProperty().bind(
 				Bindings.createBooleanBinding(
 						() -> {
 							if (!configValid) {
 								return true;
 							}
-
 							var imageData = qupath.getImageData();
 							if (imageData == null) {
 								return true;
 							}
-
 							try {
 								var server = imageData.getServer();
 								if (server == null) {
 									return true;
 								}
-
-								// Get associated images list
 								var associatedImages = server.getAssociatedImageList();
 								if (associatedImages == null) {
 									return true;
 								}
-
-								// Check if any associated image contains "macro" in its name
-								// This handles both "macro" and "Series X (macro image)" formats
-								boolean hasMacro = MacroImageUtility.isMacroImageAvailable(qupath);
-								return !hasMacro;
-
+								return !MacroImageUtility.isMacroImageAvailable(qupath);
 							} catch (Exception e) {
 								logger.error("Error in macro menu binding", e);
 								return true;
@@ -215,7 +163,6 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 						qupath.imageDataProperty()
 				)
 		);
-
 		alignmentOption.setOnAction(e -> {
 			try {
 				QPScopeController.getInstance().startWorkflow("microscopeAlignment");
@@ -224,7 +171,20 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 			}
 		});
 
-		// 4) Background collection (for flat field correction)
+		// 4) Stage Control - manual stage movement interface
+		MenuItem stageControlOption = new MenuItem(res.getString("menu.stagecontrol"));
+		stageControlOption.setOnAction(e -> {
+			try {
+				QPScopeController.getInstance().startWorkflow("basicStageInterface");
+			} catch (IOException ex) {
+				throw new RuntimeException(ex);
+			}
+		});
+
+		// === UTILITIES SUBMENU ===
+		Menu utilitiesMenu = new Menu("Utilities");
+
+		// Background collection (for flat field correction)
 		MenuItem backgroundCollectionOption = new MenuItem(res.getString("menu.backgroundCollection"));
 		backgroundCollectionOption.setDisable(!configValid);
 		backgroundCollectionOption.setOnAction(e -> {
@@ -235,7 +195,7 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 			}
 		});
 
-		// 5) Polarizer calibration (PPM only)
+		// Polarizer calibration (PPM only)
 		MenuItem polarizerCalibrationOption = new MenuItem(res.getString("menu.polarizerCalibration"));
 		polarizerCalibrationOption.setDisable(!configValid);
 		polarizerCalibrationOption.setOnAction(e -> {
@@ -246,7 +206,7 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 			}
 		});
 
-		// 6) Autofocus settings editor
+		// Autofocus settings editor
 		MenuItem autofocusEditorOption = new MenuItem(res.getString("menu.autofocusEditor"));
 		autofocusEditorOption.setDisable(!configValid);
 		autofocusEditorOption.setOnAction(e -> {
@@ -257,22 +217,8 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 			}
 		});
 
-		// === UTILITY MENU ITEMS ===
-
-		// 6) Basic stage control (test only)
-		MenuItem stageControlOption = new MenuItem(res.getString("menu.stagecontrol"));
-		stageControlOption.setOnAction(e ->
-				{
-					try {
-						QPScopeController.getInstance().startWorkflow("basicStageInterface");
-					} catch (IOException ex) {
-						throw new RuntimeException(ex);
-					}
-				}
-		);
-
-		// 5) Server Connection Settings
-		MenuItem serverConnectionOption = new MenuItem("Server Connection Settings...");
+		// Server Connection Settings
+		MenuItem serverConnectionOption = new MenuItem(res.getString("menu.serverConnection"));
 		serverConnectionOption.setOnAction(e -> {
 			try {
 				QPScopeController.getInstance().startWorkflow("serverConnection");
@@ -281,38 +227,24 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 			}
 		});
 
-		// 6) Testing (TODO: remove before release)
-		MenuItem testOption = new MenuItem("Test");
-		testOption.setOnAction(e ->
-				{
-					try {
-						QPScopeController.getInstance().startWorkflow("test");
-					} catch (IOException ex) {
-						throw new RuntimeException(ex);
-					}
-				}
-		);
-
-		// Add all menu items with proper organization
-		extensionMenu.getItems().addAll(
-				// Main workflows
-				boundedAcquisitionOption,
-				existingImageOption,
-				existingImageV2Option,  // New consolidated dialog version
-				alignmentOption,
-				new SeparatorMenuItem(),  // Visual separator
-				boundingBoxOption,  // Legacy workflow (to be deprecated)
-				// Calibration and configuration
+		// Add items to utilities submenu
+		utilitiesMenu.getItems().addAll(
 				backgroundCollectionOption,
 				polarizerCalibrationOption,
 				autofocusEditorOption,
-				new SeparatorMenuItem(),  // Visual separator
-				// Utilities
+				new SeparatorMenuItem(),
+				serverConnectionOption
+		);
+
+		// === BUILD FINAL MENU ===
+		extensionMenu.getItems().addAll(
+				boundedAcquisitionOption,
+				existingImageOption,
+				alignmentOption,
+				new SeparatorMenuItem(),
 				stageControlOption,
-				serverConnectionOption,
-				new SeparatorMenuItem(),  // Visual separator
-				// Development/Testing
-				testOption
+				new SeparatorMenuItem(),
+				utilitiesMenu
 		);
 
 		logger.info("Menu items added for extension: " + EXTENSION_NAME);

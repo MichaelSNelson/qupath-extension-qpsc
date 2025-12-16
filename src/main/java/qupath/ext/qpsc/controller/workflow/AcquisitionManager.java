@@ -4,7 +4,7 @@ import javafx.application.Platform;
 import javafx.scene.control.Alert;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import qupath.ext.qpsc.controller.ExistingImageWorkflow.WorkflowState;
+import qupath.ext.qpsc.controller.ExistingImageWorkflowV2.WorkflowState;
 import qupath.ext.qpsc.controller.MicroscopeController;
 import qupath.ext.qpsc.modality.AngleExposure;
 import qupath.ext.qpsc.modality.ModalityHandler;
@@ -218,7 +218,7 @@ public class AcquisitionManager {
      * <p>For polarized light imaging or other multi-angle acquisitions, this method
      * retrieves the configured rotation angles and decimal exposure times.
      * If the user provided angle overrides in the annotation dialog, those will be
-     * applied following the BoundingBoxWorkflow pattern.
+     * applied following the BoundedAcquisitionWorkflow pattern.
      *
      * @return CompletableFuture containing list of rotation angles with exposure settings
      */
@@ -238,7 +238,7 @@ public class AcquisitionManager {
             }
         }
 
-        // Handle angle overrides if provided (following BoundingBoxWorkflow pattern)
+        // Handle angle overrides if provided (following BoundedAcquisitionWorkflow pattern)
         if (state.angleOverrides != null && !state.angleOverrides.isEmpty() && "ppm".equals(state.sample.modality())) {
             logger.info("Applying angle overrides from user dialog: {}", state.angleOverrides);
 

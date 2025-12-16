@@ -32,7 +32,7 @@ package qupath.ext.qpsc;
 //
 //Add a small blank slide.
 //
-//        Call runBoundingBoxWorkflow() with a known rectangle.
+//        Call BoundedAcquisitionWorkflow with a known rectangle.
 //
 //Verify the CLI was invoked the expected number of times.
 //

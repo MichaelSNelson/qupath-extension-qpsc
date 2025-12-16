@@ -26,18 +26,18 @@ import java.util.concurrent.*;
 import java.util.stream.Collectors;
 
 /**
- * ExistingImageWorkflowV2 - Consolidated dialog version of the Existing Image workflow.
+ * ExistingImageWorkflowV2 - Existing Image acquisition workflow.
  *
- * <p>This workflow uses the new {@link ExistingImageAcquisitionController} consolidated
+ * <p>This workflow uses the {@link ExistingImageAcquisitionController} consolidated
  * dialog to gather all configuration in a single step, then routes to appropriate
  * sub-workflows based on user selections.
  *
- * <p>Key differences from ExistingImageWorkflow:
+ * <p>Key features:
  * <ul>
- *   <li>Single consolidated dialog instead of multiple sequential dialogs</li>
- *   <li>Confidence-based recommendations integrated into the main dialog</li>
+ *   <li>Single consolidated dialog for all configuration</li>
+ *   <li>Confidence-based alignment recommendations</li>
  *   <li>Refinement options presented upfront</li>
- *   <li>Green box parameters editable in advanced section</li>
+ *   <li>Green box detection parameters editable in advanced section</li>
  * </ul>
  *
  * <p>Workflow stages:
@@ -434,7 +434,7 @@ public class ExistingImageWorkflowV2 {
             logger.info("Delegating to ExistingAlignmentPath for transform pipeline");
 
             // Delegate to the existing working implementation
-            return new ExistingAlignmentPath(gui, convertToLegacyState(state)).execute()
+            return new ExistingAlignmentPath(gui, state).execute()
                     .thenApply(legacyState -> {
                         // Copy back relevant state from the working implementation
                         state.transform = legacyState.transform;
@@ -455,7 +455,7 @@ public class ExistingImageWorkflowV2 {
             logger.info("Delegating to ManualAlignmentPath for alignment");
 
             // Delegate to the existing working implementation
-            return new ManualAlignmentPath(gui, convertToLegacyState(state)).execute()
+            return new ManualAlignmentPath(gui, state).execute()
                     .thenApply(legacyState -> {
                         // Copy back relevant state
                         state.transform = legacyState.transform;
@@ -556,7 +556,7 @@ public class ExistingImageWorkflowV2 {
 
             logger.info("Starting acquisition phase");
 
-            return new AcquisitionManager(gui, convertToLegacyState(state)).execute()
+            return new AcquisitionManager(gui, state).execute()
                     .thenApply(legacyState -> {
                         if (legacyState != null) {
                             // Copy stitching futures back from legacy state to V2 state
@@ -579,25 +579,6 @@ public class ExistingImageWorkflowV2 {
             return CompletableFuture.allOf(
                     state.stitchingFutures.toArray(new CompletableFuture[0])
             ).thenApply(v -> state);
-        }
-
-        /**
-         * Converts V2 state to legacy state format for compatibility.
-         */
-        private ExistingImageWorkflow.WorkflowState convertToLegacyState(WorkflowState v2State) {
-            ExistingImageWorkflow.WorkflowState legacyState = new ExistingImageWorkflow.WorkflowState();
-            legacyState.sample = v2State.sample;
-            legacyState.alignmentChoice = v2State.alignmentChoice;
-            legacyState.transform = v2State.transform;
-            legacyState.projectInfo = v2State.projectInfo;
-            legacyState.annotations = v2State.annotations;
-            legacyState.pixelSize = v2State.pixelSize;
-            legacyState.angleOverrides = v2State.angleOverrides;
-            // Pass selected annotation classes to legacy state
-            if (v2State.selectedAnnotationClasses != null && !v2State.selectedAnnotationClasses.isEmpty()) {
-                legacyState.selectedAnnotationClasses = v2State.selectedAnnotationClasses;
-            }
-            return legacyState;
         }
 
         /**

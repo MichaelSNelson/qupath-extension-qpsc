@@ -28,8 +28,7 @@ import java.util.stream.Collectors;
  * Bounded acquisition workflow using the unified acquisition dialog.
  * <p>
  * This workflow provides a streamlined user experience with all configuration
- * visible in a single dialog, replacing the multi-dialog approach of the
- * original BoundingBoxWorkflow.
+ * visible in a single dialog.
  * <p>
  * Workflow steps:
  * <ol>

@@ -14,7 +14,7 @@ import java.util.Map;
 
 /**
  * Centralized builder for acquisition configuration that consolidates duplicated logic
- * from BoundingBoxWorkflow and AcquisitionManager.
+ * from BoundedAcquisitionWorkflow and AcquisitionManager.
  */
 public class AcquisitionConfigurationBuilder {
     

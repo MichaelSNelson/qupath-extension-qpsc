@@ -255,8 +255,8 @@ Sample names are validated for cross-platform filename safety:
 - **Automatic sanitization**: Invalid characters replaced with underscores
 
 **Workflows:**
-- **BoundingBox Workflow**: User specifies sample name (editable, validated)
-- **ExistingImage Workflow**: Defaults to current image name without extension (editable)
+- **Bounded Acquisition**: User specifies sample name (editable, validated)
+- **Acquire from Existing Image**: Defaults to current image name without extension (editable)
 
 ### Multi-Sample Projects
 
@@ -520,22 +520,22 @@ heartbeat_client.py – Python script for test/integration workflows.
 
 
 Workflow Overview:
-The diagram below illustrates the sequence of operations when a user performs an “Acquire by Bounding Box” workflow in the QP Scope extension. User input and configuration guide the Java workflow, which orchestrates microscope control via Python scripts, handles asynchronous stitching, and integrates the final OME-TIFF into the QuPath project.
-### Bounding Box Acquisition Workflow
+The diagram below illustrates the sequence of operations when a user performs a "Bounded Acquisition" workflow in the QP Scope extension. User input and configuration guide the Java workflow, which orchestrates microscope control via Python scripts, handles asynchronous stitching, and integrates the final OME-TIFF into the QuPath project.
+### Bounded Acquisition Workflow
 ```mermaid
 sequenceDiagram
     participant User
     participant Q as QuPath GUI
     participant Ext as QP Scope Extension
-    participant WF as BoundingBoxWorkflow
+    participant WF as BoundedAcquisitionWorkflow
     participant Py as Python CLI (PycroManager)
     participant Stitch as Stitcher
     participant Proj as QuPath Project
 
     Q->>Ext: Calls SetupScope.installExtension()
     Ext->>Q: Adds menu item
-    User->>Ext: Bounding Box menu item selected
-    Ext->>WF: QPScopeController.startWorkflow("boundingBox")
+    User->>Ext: Bounded Acquisition menu item selected
+    Ext->>WF: QPScopeController.startWorkflow("boundedAcquisition")
 
     WF->>User: Show sample setup dialog
     User->>WF: Enter sample/project info

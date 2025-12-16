@@ -609,10 +609,10 @@ public class StitchingHelper {
     }
 
     /**
-     * Performs stitching for a region identified by name (for BoundingBoxWorkflow).
+     * Performs stitching for a region identified by name (for BoundedAcquisitionWorkflow).
      * This is used when there's no actual PathObject annotation, just a region name like "bounds".
      *
-     * @param regionName The name of the region (e.g., "bounds" for BoundingBoxWorkflow)
+     * @param regionName The name of the region (e.g., "bounds" for BoundedAcquisitionWorkflow)
      * @param sample Sample setup information
      * @param modeWithIndex Imaging mode with index suffix
      * @param angleExposures Rotation angles with exposure settings (empty for single acquisition)
@@ -638,7 +638,7 @@ public class StitchingHelper {
             String sampleName,
             String projectsFolder) {
 
-        // Calculate metadata for BoundingBox case (no actual annotation) - use explicit sampleName
+        // Calculate metadata for Bounded Acquisition case (no actual annotation) - use explicit sampleName
         StitchingMetadata metadata = calculateMetadataForRegion(
                 regionName, sampleName, gui, project
         );
@@ -1003,7 +1003,7 @@ public class StitchingHelper {
     }
 
     /**
-     * Calculates metadata for a region-based acquisition (BoundingBoxWorkflow).
+     * Calculates metadata for a region-based acquisition (BoundedAcquisitionWorkflow).
      * Since there's no actual annotation, we create default metadata.
      *
      * @param sampleName The actual sample folder name (from ProjectInfo)
@@ -1014,9 +1014,9 @@ public class StitchingHelper {
             QuPathGUI gui,
             Project<BufferedImage> project) {
 
-        // Get parent entry (the current open image) - may be null in BoundingBox workflow
+        // Get parent entry (the current open image) - may be null in Bounded Acquisition
         ProjectImageEntry<BufferedImage> parentEntry = null;
-        // In BoundingBox workflow, there's typically no current image open
+        // In Bounded Acquisition, there's typically no current image open
         // Use QuPath's proper method to check for open image
         if (gui.getViewer().hasServer() && gui.getImageData() != null) {
             try {
@@ -1027,7 +1027,7 @@ public class StitchingHelper {
             }
         }
 
-        // For BoundingBox workflow, we don't have actual annotation coordinates
+        // For Bounded Acquisition, we don't have actual annotation coordinates
         // The offset should be 0,0 since it's a full-slide acquisition
         double xOffset = 0.0;
         double yOffset = 0.0;

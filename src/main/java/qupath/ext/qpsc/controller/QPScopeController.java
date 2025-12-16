@@ -25,13 +25,14 @@ import qupath.ext.qpsc.ui.StageMovementController;
  *
  * <p>Supported workflow modes:
  * <ol>
- *   <li><strong>boundingBox</strong> - Full acquisition workflow from annotation selection</li>
+ *   <li><strong>boundedAcquisition</strong> - Full acquisition workflow from bounding box region</li>
  *   <li><strong>existingImage</strong> - Targeted acquisition on existing images with coordinate transformation</li>
  *   <li><strong>microscopeAlignment</strong> - Semi-automated alignment between QuPath and microscope coordinates</li>
  *   <li><strong>backgroundCollection</strong> - Simplified workflow for acquiring flat field correction backgrounds</li>
+ *   <li><strong>polarizerCalibration</strong> - PPM rotation stage calibration workflow</li>
+ *   <li><strong>autofocusEditor</strong> - Per-objective autofocus settings editor</li>
  *   <li><strong>basicStageInterface</strong> - Manual stage movement and testing interface</li>
  *   <li><strong>serverConnection</strong> - Connection testing and server communication diagnostics</li>
- *   <li><strong>test</strong> - Hardware connectivity and system validation testing</li>
  * </ol>
  *
  * @author Mike Nelson
@@ -125,33 +126,24 @@ public class QPScopeController {
      *
      * @param mode the workflow mode identifier
      * @throws IOException if workflow initialization or file operations fail
-     * @see BoundingBoxWorkflow#run() for full acquisition workflow
-     * @see ExistingImageWorkflow#run() for targeted acquisition on existing images
+     * @see BoundedAcquisitionWorkflow#run() for bounding box acquisition
+     * @see ExistingImageWorkflowV2#start() for existing image acquisition
      * @see MicroscopeAlignmentWorkflow#run() for coordinate system alignment
-     * @see TestWorkflow#run() for hardware connectivity testing
      */
     public void startWorkflow(String mode) throws IOException {
         logger.info("Starting workflow mode: {}", mode);
-        
+
         switch (mode) {
             case "boundedAcquisition" -> {
-                logger.debug("Launching bounded acquisition workflow (unified dialog)");
+                logger.debug("Launching bounded acquisition workflow");
                 BoundedAcquisitionWorkflow.run();
             }
-            case "boundingBox" -> {
-                logger.debug("Launching bounding box acquisition workflow (legacy)");
-                BoundingBoxWorkflow.run();
-            }
             case "existingImage" -> {
-                logger.debug("Launching existing image targeted acquisition workflow");
-                ExistingImageWorkflow.run();
-            }
-            case "existingImageV2" -> {
-                logger.debug("Launching existing image workflow with consolidated dialog (V2)");
+                logger.debug("Launching existing image acquisition workflow");
                 ExistingImageWorkflowV2.start();
             }
             case "basicStageInterface" -> {
-                logger.debug("Launching basic stage movement interface");
+                logger.debug("Launching stage movement interface");
                 StageMovementController.showTestStageMovementDialog();
             }
             case "microscopeAlignment" -> {
@@ -178,15 +170,11 @@ public class QPScopeController {
                             return null;
                         });
             }
-            case "test" -> {
-                logger.debug("Launching test workflow for hardware validation");
-                TestWorkflow.run();
-            }
             default -> {
                 logger.warn("Unknown workflow mode: {}", mode);
             }
         }
-        
+
         logger.debug("Workflow mode '{}' startup completed", mode);
     }
 
