@@ -264,17 +264,12 @@ public class ExistingAlignmentPath {
         // may see stale image data (the original unflipped image), causing tiles to appear
         // at wrong positions.
         try {
-            // CRITICAL VERIFICATION: Ensure we have the correct (flipped) image open
-            // This guards against race conditions where the GUI hasn't updated to the flipped image
-            if (!verifyCorrectImageIsOpen()) {
-                logger.error("Wrong image is open - cannot proceed with tile creation");
-                return CompletableFuture.failedFuture(
-                        new RuntimeException("Image verification failed - the correct flipped image is not open"));
-            }
-
-            // Get annotations from the current (flipped) image hierarchy
-            logger.info("Retrieving annotations from current image hierarchy");
-            state.annotations = AnnotationHelper.ensureAnnotationsExist(gui, state.pixelSize, state.selectedAnnotationClasses);
+            // CRITICAL: Get annotations from the CORRECT source
+            // The GUI may not have fully switched to the flipped image yet, so gui.getImageData()
+            // might return the original image's hierarchy with unflipped coordinates.
+            // We need to read from the flipped entry's saved data directly.
+            logger.info("Retrieving annotations for tile creation");
+            state.annotations = getAnnotationsFromCorrectSource();
             if (state.annotations.isEmpty()) {
                 return CompletableFuture.failedFuture(new RuntimeException("No valid annotations found"));
             }
@@ -820,6 +815,105 @@ public class ExistingAlignmentPath {
         boolean flipYMatches = !requiresFlipY || isFlippedY;
 
         return flipXMatches && flipYMatches;
+    }
+
+    /**
+     * Gets annotations from the correct source based on flip requirements.
+     *
+     * <p>CRITICAL: When flip is required, the GUI's gui.getImageData().getHierarchy() may
+     * still return the ORIGINAL image's hierarchy (with unflipped coordinates) even after
+     * the flipped entry is supposedly loaded. This causes tiles to appear at wrong positions.
+     *
+     * <p>This method directly reads from the flipped entry's saved data to ensure we get
+     * the correctly transformed annotations.
+     *
+     * @return List of annotations with correct coordinates for the current image state
+     */
+    @SuppressWarnings("unchecked")
+    private List<PathObject> getAnnotationsFromCorrectSource() {
+        boolean requiresFlipX = QPPreferenceDialog.getFlipMacroXProperty();
+        boolean requiresFlipY = QPPreferenceDialog.getFlipMacroYProperty();
+
+        // If no flip required, use normal annotation retrieval
+        if (!requiresFlipX && !requiresFlipY) {
+            logger.info("No flip required - using standard annotation retrieval");
+            return AnnotationHelper.ensureAnnotationsExist(gui, state.pixelSize, state.selectedAnnotationClasses);
+        }
+
+        // Flip is required - we need to read from the flipped entry directly
+        Project<BufferedImage> project = (Project<BufferedImage>) gui.getProject();
+        if (project == null) {
+            logger.error("No project available - falling back to GUI hierarchy");
+            return AnnotationHelper.ensureAnnotationsExist(gui, state.pixelSize, state.selectedAnnotationClasses);
+        }
+
+        // Find the flipped entry
+        ProjectImageEntry<BufferedImage> flippedEntry = null;
+        for (var entry : project.getImageList()) {
+            String entryName = entry.getImageName();
+            if (entryName != null && entryName.contains("(flipped")) {
+                if (hasCorrectFlipStatus(entry, requiresFlipX, requiresFlipY)) {
+                    flippedEntry = entry;
+                    break;
+                }
+            }
+        }
+
+        if (flippedEntry == null) {
+            logger.error("Could not find flipped entry - falling back to GUI hierarchy");
+            return AnnotationHelper.ensureAnnotationsExist(gui, state.pixelSize, state.selectedAnnotationClasses);
+        }
+
+        // Read annotations directly from the flipped entry's saved data
+        try {
+            logger.info("Reading annotations from flipped entry: {}", flippedEntry.getImageName());
+            ImageData<BufferedImage> flippedData = flippedEntry.readImageData();
+            var hierarchy = flippedData.getHierarchy();
+            var allAnnotations = hierarchy.getAnnotationObjects();
+
+            // Filter by selected classes
+            var annotations = allAnnotations.stream()
+                    .filter(ann -> ann.getROI() != null && !ann.getROI().isEmpty())
+                    .filter(ann -> ann.getPathClass() != null &&
+                            state.selectedAnnotationClasses.contains(ann.getPathClass().getName()))
+                    .collect(java.util.stream.Collectors.toList());
+
+            if (!annotations.isEmpty()) {
+                PathObject firstAnn = annotations.get(0);
+                logger.info("Retrieved {} annotations from flipped entry. First at position: ({}, {})",
+                        annotations.size(),
+                        String.format("%.0f", firstAnn.getROI().getCentroidX()),
+                        String.format("%.0f", firstAnn.getROI().getCentroidY()));
+
+                // Verify the coordinates look flipped (should be in the "other half" of the image)
+                int imageWidth = flippedData.getServer().getWidth();
+                int imageHeight = flippedData.getServer().getHeight();
+                double xPercent = (firstAnn.getROI().getCentroidX() / imageWidth) * 100;
+                double yPercent = (firstAnn.getROI().getCentroidY() / imageHeight) * 100;
+                logger.info("First annotation position: {}% x, {}% y (flipped coordinates)",
+                        String.format("%.1f", xPercent), String.format("%.1f", yPercent));
+            }
+
+            // Ensure annotation names
+            for (PathObject ann : annotations) {
+                if (ann.getName() == null || ann.getName().trim().isEmpty()) {
+                    String className = ann.getPathClass() != null ? ann.getPathClass().getName() : "Annotation";
+                    String name = String.format("%s_%d_%d",
+                            className,
+                            Math.round(ann.getROI().getCentroidX()),
+                            Math.round(ann.getROI().getCentroidY()));
+                    ann.setName(name);
+                    logger.debug("Auto-named annotation: {}", name);
+                }
+            }
+
+            return annotations;
+
+        } catch (Exception e) {
+            logger.error("Failed to read annotations from flipped entry: {}", e.getMessage());
+            logger.error("Falling back to GUI hierarchy (may have wrong coordinates!)");
+            return AnnotationHelper.ensureAnnotationsExist(gui, state.pixelSize, state.selectedAnnotationClasses);
+        }
     }
 
     /**
