@@ -303,14 +303,13 @@ public class AcquisitionManager {
             List<AngleExposure> angleExposures) {
 
         return CompletableFuture.supplyAsync(() -> {
-            // Check for cancellation
-            if (state.cancelled) {
+            // Check for cancellation (null angleExposures indicates cancelled/failed)
+            if (angleExposures == null) {
                 logger.info("Skipping acquisition preparation - workflow was cancelled");
                 return null;
             }
 
-            logger.info("Preparing for acquisition with {} angles",
-                    angleExposures != null ? angleExposures.size() : 1);
+            logger.info("Preparing for acquisition with {} angles", angleExposures.size());
 
             // Save project entry state before acquisition starts
             try {
@@ -386,8 +385,8 @@ public class AcquisitionManager {
     private CompletableFuture<Boolean> processAnnotations(
             List<AngleExposure> angleExposures) {
 
-        // Check for cancellation
-        if (state.cancelled) {
+        // Check for cancellation (null angleExposures indicates cancelled/failed)
+        if (angleExposures == null) {
             logger.info("Skipping annotation processing - workflow was cancelled");
             return CompletableFuture.completedFuture(false);
         }
