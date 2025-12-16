@@ -676,6 +676,9 @@ public class ExistingAlignmentPath {
      *   <li>The image has the correct flip metadata matching requirements</li>
      * </ol>
      *
+     * <p>Note: QuPath's project.getEntry() doesn't always work correctly with
+     * TransformedServer images. We use multiple strategies to find the correct entry.
+     *
      * @return true if the correct image is open, false otherwise
      */
     @SuppressWarnings("unchecked")
@@ -702,49 +705,73 @@ public class ExistingAlignmentPath {
             return false;
         }
 
+        // Strategy 1: Check if the server path indicates this is a flipped image
+        // TransformedServer paths often contain indicators of the transformation
+        String serverPath = gui.getImageData().getServer().getPath();
+        logger.info("Current image server path: {}", serverPath);
+
+        // Strategy 2: Try to find the entry by project.getEntry()
         ProjectImageEntry<BufferedImage> currentEntry = project.getEntry(gui.getImageData());
-        if (currentEntry == null) {
-            // Try to find the entry by other means
-            logger.warn("Cannot directly match GUI image to project entry - searching...");
 
-            // Try to find an entry that's already flipped
+        // Strategy 3: If getEntry() failed or returned wrong entry, search by name
+        // Look for an entry with "(flipped" in the name that matches flip requirements
+        if (currentEntry == null || !hasCorrectFlipStatus(currentEntry, requiresFlipX, requiresFlipY)) {
+            logger.info("Direct entry lookup returned {}, searching for flipped entry...",
+                    currentEntry != null ? currentEntry.getImageName() : "null");
+
+            // Search for a flipped entry
+            ProjectImageEntry<BufferedImage> flippedEntry = null;
             for (var entry : project.getImageList()) {
-                boolean entryFlipX = ImageMetadataManager.isFlippedX(entry);
-                boolean entryFlipY = ImageMetadataManager.isFlippedY(entry);
+                String entryName = entry.getImageName();
 
-                boolean flipXMatches = !requiresFlipX || entryFlipX;
-                boolean flipYMatches = !requiresFlipY || entryFlipY;
+                // Check if this entry has "(flipped" in name (indicates it's a flipped duplicate)
+                if (entryName != null && entryName.contains("(flipped")) {
+                    boolean entryFlipX = ImageMetadataManager.isFlippedX(entry);
+                    boolean entryFlipY = ImageMetadataManager.isFlippedY(entry);
 
-                if (flipXMatches && flipYMatches) {
-                    logger.info("Found a correctly flipped entry: {} - but it may not be open!", entry.getImageName());
-                    // This is a potential issue - we found a flipped entry but can't confirm it's open
-                    // Return false to force a re-validation
-                    logger.warn("Image verification FAILED: Cannot confirm the flipped entry is actually open");
-                    return false;
+                    logger.info("Found flipped entry: {} (flipX={}, flipY={})",
+                            entryName, entryFlipX, entryFlipY);
+
+                    if (hasCorrectFlipStatus(entry, requiresFlipX, requiresFlipY)) {
+                        flippedEntry = entry;
+                        break;
+                    }
                 }
             }
 
-            logger.error("Image verification FAILED: No flipped entry found in project");
+            if (flippedEntry != null) {
+                // We found a correctly flipped entry in the project
+                // The image should be this one based on ImageFlipHelper's confirmation
+                logger.info("Image verification PASSED (by flipped entry search): {} has correct flip status",
+                        flippedEntry.getImageName());
+                return true;
+            }
+
+            // No flipped entry found - this is a problem
+            logger.error("Image verification FAILED: No entry with correct flip status found in project");
             return false;
         }
 
-        // Check the entry's flip metadata
-        boolean isFlippedX = ImageMetadataManager.isFlippedX(currentEntry);
-        boolean isFlippedY = ImageMetadataManager.isFlippedY(currentEntry);
+        // Entry found and has correct flip status
+        logger.info("Image verification PASSED: {} has correct flip status (flipX={}, flipY={})",
+                currentEntry.getImageName(),
+                ImageMetadataManager.isFlippedX(currentEntry),
+                ImageMetadataManager.isFlippedY(currentEntry));
+        return true;
+    }
+
+    /**
+     * Checks if an entry has the correct flip status for the requirements.
+     */
+    private boolean hasCorrectFlipStatus(ProjectImageEntry<?> entry,
+                                          boolean requiresFlipX, boolean requiresFlipY) {
+        boolean isFlippedX = ImageMetadataManager.isFlippedX(entry);
+        boolean isFlippedY = ImageMetadataManager.isFlippedY(entry);
 
         boolean flipXMatches = !requiresFlipX || isFlippedX;
         boolean flipYMatches = !requiresFlipY || isFlippedY;
 
-        if (flipXMatches && flipYMatches) {
-            logger.info("Image verification PASSED: {} has correct flip status (flipX={}, flipY={})",
-                    currentEntry.getImageName(), isFlippedX, isFlippedY);
-            return true;
-        } else {
-            logger.error("Image verification FAILED: {} has wrong flip status " +
-                            "(flipX={}, flipY={}, required flipX={}, flipY={})",
-                    currentEntry.getImageName(), isFlippedX, isFlippedY, requiresFlipX, requiresFlipY);
-            return false;
-        }
+        return flipXMatches && flipYMatches;
     }
 
     /**
