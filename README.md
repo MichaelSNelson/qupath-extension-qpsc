@@ -76,7 +76,7 @@ The extension connects QuPath to your microscope via [Pycro-Manager](https://pyc
 **Software Requirements:**
 - **Operating System**: Windows 10+ (primary), Linux (limited testing), macOS (untested)
 - [QuPath 0.6.0+](https://qupath.github.io/) with Java 21+
-- [qupath-extension-tiles-to-pyramid](https://github.com/MichaelSNelson/qupath-extension-tiles-to-pyramid) - Required for image stitching
+- [qupath-extension-tiles-to-pyramid](https://github.com/uw-loci/qupath-extension-tiles-to-pyramid) - Required for image stitching
 - [Micro-Manager 2.0](https://micro-manager.org/) configured for your microscope
 - Python 3.8+ with [Pycro-Manager](https://pycro-manager.readthedocs.io/) installed
 
@@ -84,7 +84,7 @@ The extension connects QuPath to your microscope via [Pycro-Manager](https://pyc
 
 1. **Download the extension JARs:**
    - `qupath-extension-qpsc-[version].jar` - This extension
-   - `qupath-extension-tiles-to-pyramid-[version].jar` - [Required dependency](https://github.com/MichaelSNelson/qupath-extension-tiles-to-pyramid)
+   - `qupath-extension-tiles-to-pyramid-[version].jar` - [Required dependency](https://github.com/uw-loci/qupath-extension-tiles-to-pyramid)
 
 2. **Install in QuPath:** Drag both JAR files into an open QuPath window, or copy them to your QuPath `extensions/` folder.
 
@@ -598,7 +598,7 @@ The following features and improvements are planned for upcoming releases:
 | "Cannot connect to server" | Python server not running | Start the Python microscope server before acquisition |
 | Stage won't move | Micro-Manager not configured | Check Micro-Manager can control your stage independently |
 | Timeouts during acquisition | Network/heartbeat issue | Check Python script heartbeat, adjust timeout settings |
-| Stitching fails | tiles-to-pyramid missing | Install the [tiles-to-pyramid extension](https://github.com/MichaelSNelson/qupath-extension-tiles-to-pyramid) |
+| Stitching fails | tiles-to-pyramid missing | Install the [tiles-to-pyramid extension](https://github.com/uw-loci/qupath-extension-tiles-to-pyramid) |
 
 **For detailed troubleshooting**, see the comprehensive troubleshooting guide in the project documentation.
 
@@ -606,7 +606,7 @@ The following features and improvements are planned for upcoming releases:
 
 ## Getting Help
 
-- **Bug Reports & Feature Requests**: [GitHub Issues](https://github.com/MichaelSNelson/qupath-extension-qpsc/issues)
+- **Bug Reports & Feature Requests**: [GitHub Issues](https://github.com/uw-loci/qupath-extension-qpsc/issues)
 - **QuPath Community**: [image.sc Forum](https://forum.image.sc/tag/qupath) (tag: qupath)
 - **Micro-Manager Help**: [Micro-Manager Documentation](https://micro-manager.org/wiki/Documentation)
 

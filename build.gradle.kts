@@ -10,10 +10,10 @@ plugins {
 // Configure your extension here
 qupathExtension {
     name = "qupath-extension-qpsc"
-    group = "io.github.michaelsnelson"
+    group = "io.github.uw-loci"
     version = "0.2.0"
     description = "A QuPath extension to allow interaction with a microscope through PycroManager and MicroManager."
-    automaticModule = "io.github.michaelsnelson.extension.qpsc"
+    automaticModule = "io.github.uw-loci.extension.qpsc"
 }
 
 
@@ -41,7 +41,7 @@ dependencies {
     shadow(libs.snakeyaml)
     shadow(libs.gson)
 
-    implementation("io.github.michaelsnelson:qupath-extension-tiles-to-pyramid:0.1.0")
+    implementation("io.github.uw-loci:qupath-extension-tiles-to-pyramid:0.1.0")
     implementation("io.github.qupath:qupath-extension-bioformats:0.6.0-rc4")
     // If you aren't using Groovy, this can be removed
     shadow(libs.bundles.groovy)
