@@ -600,20 +600,27 @@ The following features and improvements are planned for upcoming releases:
 | Timeouts during acquisition | Network/heartbeat issue | Check Python script heartbeat, adjust timeout settings |
 | Stitching fails | tiles-to-pyramid missing | Install the [tiles-to-pyramid extension](https://github.com/uw-loci/qupath-extension-tiles-to-pyramid) |
 
-**For detailed troubleshooting**, see the comprehensive troubleshooting guide in the project documentation.
+**For detailed troubleshooting**, see the comprehensive [Troubleshooting Guide](documentation/TROUBLESHOOTING.md) with:
+- Quick diagnostic checklist
+- FAQ organized by category
+- Error message reference
+- Configuration validation tips
+- Log file interpretation guide
 
 ---
 
 ## Getting Help
 
+- **Troubleshooting Guide**: [documentation/TROUBLESHOOTING.md](documentation/TROUBLESHOOTING.md) - Comprehensive FAQ and error reference
 - **Bug Reports & Feature Requests**: [GitHub Issues](https://github.com/uw-loci/qupath-extension-qpsc/issues)
 - **QuPath Community**: [image.sc Forum](https://forum.image.sc/tag/qupath) (tag: qupath)
 - **Micro-Manager Help**: [Micro-Manager Documentation](https://micro-manager.org/wiki/Documentation)
 
 When reporting issues, please include:
 1. QuPath version and operating system
-2. Error messages from QuPath console (View -> Show Log)
+2. Error messages from QuPath console (View > Show Log)
 3. Steps to reproduce the problem
+4. Relevant log excerpts (see [Troubleshooting Guide](documentation/TROUBLESHOOTING.md#log-files-and-diagnostics))
 
 ---
 
