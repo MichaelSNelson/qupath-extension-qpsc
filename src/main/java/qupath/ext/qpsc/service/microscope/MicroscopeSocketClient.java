@@ -6,6 +6,7 @@ import qupath.ext.qpsc.service.AcquisitionCommandBuilder;
 
 import java.nio.charset.StandardCharsets;
 import java.util.function.Consumer;
+import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
 import java.io.*;
