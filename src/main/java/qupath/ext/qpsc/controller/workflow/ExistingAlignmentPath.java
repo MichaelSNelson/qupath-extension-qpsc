@@ -16,6 +16,7 @@ import qupath.lib.projects.Project;
 import qupath.lib.projects.ProjectImageEntry;
 import qupath.lib.scripting.QP;
 import qupath.lib.roi.interfaces.ROI;
+import qupath.lib.images.ImageData;
 
 import java.awt.*;
 import java.awt.geom.AffineTransform;
