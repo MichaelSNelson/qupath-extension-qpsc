@@ -26,6 +26,8 @@ import javafx.scene.paint.Color;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import qupath.lib.gui.QuPathGUI;
+import qupath.lib.gui.viewer.tools.PathTools;
 import qupath.lib.objects.PathObject;
 import qupath.lib.scripting.QP;
 
@@ -647,6 +649,17 @@ public class UIFunctions {
 
             stage.setScene(new Scene(layout));
             stage.show();
+
+            // Switch to Move tool for easier tile selection
+            try {
+                QuPathGUI gui = QuPathGUI.getInstance();
+                if (gui != null && gui.getToolManager() != null) {
+                    gui.getToolManager().setSelectedTool(PathTools.MOVE);
+                    logger.debug("Switched to Move tool for tile selection");
+                }
+            } catch (Exception e) {
+                logger.debug("Could not switch to Move tool: {}", e.getMessage());
+            }
         });
 
         return future;
