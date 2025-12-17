@@ -1,15 +1,22 @@
 package qupath.ext.qpsc.controller;
 
 import javafx.application.Platform;
+import javafx.geometry.Insets;
+import javafx.geometry.Pos;
+import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.ButtonType;
+import javafx.scene.control.Label;
+import javafx.scene.control.ProgressIndicator;
 import javafx.scene.control.TextArea;
+import javafx.scene.layout.VBox;
+import javafx.stage.Modality;
+import javafx.stage.Stage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.service.microscope.MicroscopeSocketClient;
 import qupath.ext.qpsc.ui.AutofocusBenchmarkDialog;
-import qupath.ext.qpsc.ui.DualProgressDialog;
 import qupath.fx.dialogs.Dialogs;
 
 import java.io.File;
@@ -173,26 +180,43 @@ public class AutofocusBenchmarkWorkflow {
     private static void runBenchmark(MicroscopeSocketClient client, AutofocusBenchmarkDialog.BenchmarkParams params) {
         logger.info("Starting benchmark execution");
 
-        // Show progress dialog
+        // Show simple progress dialog (benchmark doesn't have granular progress updates)
         Platform.runLater(() -> {
-            DualProgressDialog progressDialog = new DualProgressDialog(
-                    "Autofocus Parameter Benchmark",
-                    "Running benchmark...",
-                    "This may take 10-60 minutes depending on parameter space"
-            );
+            // Create simple progress window
+            Stage progressStage = new Stage();
+            progressStage.initModality(Modality.NONE);
+            progressStage.setTitle("Autofocus Parameter Benchmark");
+            progressStage.setAlwaysOnTop(true);
+            progressStage.setResizable(false);
 
-            progressDialog.show();
+            ProgressIndicator progressIndicator = new ProgressIndicator();
+            progressIndicator.setProgress(-1); // Indeterminate
+
+            Label titleLabel = new Label("Running Benchmark...");
+            titleLabel.setStyle("-fx-font-size: 14px; -fx-font-weight: bold;");
+
+            Label statusLabel = new Label("Testing autofocus parameters");
+            statusLabel.setStyle("-fx-font-size: 12px;");
+
+            Label timeLabel = new Label("This may take 10-60 minutes");
+            timeLabel.setStyle("-fx-font-size: 11px; -fx-text-fill: gray;");
+
+            VBox layout = new VBox(15);
+            layout.setAlignment(Pos.CENTER);
+            layout.setPadding(new Insets(20));
+            layout.getChildren().addAll(titleLabel, progressIndicator, statusLabel, timeLabel);
+
+            Scene scene = new Scene(layout, 300, 180);
+            progressStage.setScene(scene);
+            progressStage.show();
 
             // Run benchmark in background thread
             Thread benchmarkThread = new Thread(() -> {
                 try {
                     logger.info("Sending benchmark command to server");
 
-                    // Update progress
-                    Platform.runLater(() -> {
-                        progressDialog.updateMainProgress(0.1, "Initializing benchmark...");
-                        progressDialog.updateSecondaryProgress(0.0, "Starting autofocus tests");
-                    });
+                    // Update status
+                    Platform.runLater(() -> statusLabel.setText("Initializing benchmark..."));
 
                     // Execute benchmark
                     Map<String, Object> results = client.runAutofocusBenchmark(
@@ -207,7 +231,7 @@ public class AutofocusBenchmarkWorkflow {
                     logger.info("Results: {}", results);
 
                     // Close progress dialog
-                    Platform.runLater(progressDialog::close);
+                    Platform.runLater(progressStage::close);
 
                     // Show results
                     Platform.runLater(() -> showResults(results, params));
@@ -216,7 +240,7 @@ public class AutofocusBenchmarkWorkflow {
                     logger.error("Benchmark execution failed", e);
 
                     Platform.runLater(() -> {
-                        progressDialog.close();
+                        progressStage.close();
 
                         Alert alert = new Alert(Alert.AlertType.ERROR);
                         alert.setTitle("Benchmark Failed");
