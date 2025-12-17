@@ -602,13 +602,21 @@ public class ExistingImageWorkflowV2 {
          * Handles errors during workflow execution.
          */
         private Void handleError(Throwable ex) {
-            if (ex instanceof CancellationException) {
+            // Unwrap CompletionException to get the actual cause
+            // This handles cases where cancel() is used instead of completeExceptionally()
+            Throwable cause = ex;
+            while (cause instanceof CompletionException && cause.getCause() != null) {
+                cause = cause.getCause();
+            }
+
+            if (cause instanceof CancellationException) {
                 logger.info("Workflow cancelled by user");
             } else {
-                logger.error("Workflow error", ex);
+                logger.error("Workflow error", cause);
+                final Throwable displayCause = cause;
                 Platform.runLater(() -> {
                     Dialogs.showErrorMessage("Workflow Error",
-                            "An error occurred: " + ex.getMessage());
+                            "An error occurred: " + displayCause.getMessage());
                 });
             }
             cleanup();

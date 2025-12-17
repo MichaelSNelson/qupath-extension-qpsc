@@ -128,7 +128,11 @@ public class ExistingImageAcquisitionController {
                 if (result.isPresent()) {
                     future.complete(result.get());
                 } else {
-                    future.cancel(true);
+                    // Use completeExceptionally instead of cancel() so that the
+                    // CancellationException propagates directly to exceptionally() handlers
+                    // without being wrapped in a CompletionException
+                    future.completeExceptionally(
+                            new java.util.concurrent.CancellationException("Dialog cancelled by user"));
                 }
             } catch (Exception e) {
                 logger.error("Error showing consolidated acquisition dialog", e);
