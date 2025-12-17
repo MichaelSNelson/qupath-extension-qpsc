@@ -21,6 +21,7 @@ import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -202,7 +203,7 @@ public class ManualAlignmentPath {
                 state.pixelSize, invertedX, invertedY
         ).thenApply(transform -> {
             if (transform == null) {
-                throw new RuntimeException("Manual alignment cancelled");
+                throw new CancellationException("Manual alignment cancelled by user");
             }
 
             logger.info("Manual transform created successfully");

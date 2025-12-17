@@ -24,6 +24,7 @@ import java.awt.geom.Point2D;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -193,7 +194,7 @@ public class ExistingAlignmentPath {
         return GreenBoxPreviewController.showPreviewDialog(macroContext.displayImage, params)
                 .thenApply(result -> {
                     if (result == null) {
-                        throw new RuntimeException("Green box detection cancelled");
+                        throw new CancellationException("Green box detection cancelled by user");
                     }
 
                     logger.info("Green box detected with confidence {}", result.getConfidence());

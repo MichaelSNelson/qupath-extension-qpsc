@@ -502,8 +502,9 @@ public class AcquisitionManager {
             if (progressDialog != null) {
                 if (error != null) {
                     Platform.runLater(() -> progressDialog.showError("Workflow failed: " + error.getMessage()));
-                } else if (!result) {
-                    Platform.runLater(() -> progressDialog.showError("Workflow was cancelled"));
+                } else if (!result && !progressDialog.isCancelled()) {
+                    // Only show error if not user-initiated cancellation
+                    Platform.runLater(() -> progressDialog.showError("Workflow stopped unexpectedly"));
                 }
                 // Dialog will auto-close after completion or error display
             }
@@ -818,9 +819,8 @@ public class AcquisitionManager {
                     return true;
 
                 case CANCELLED:
-                    logger.warn("Acquisition was cancelled for {}", annotation.getName());
-                    showCancellationNotification();
-                    // Check if cancellation came from dual progress dialog
+                    logger.info("Acquisition was cancelled for {}", annotation.getName());
+                    // User clicked cancel - no error notification needed, dialog already shows state
                     if (progressDialog != null && progressDialog.isCancelled()) {
                         logger.info("Cancellation was initiated via dual progress dialog");
                     }
@@ -1088,14 +1088,13 @@ public class AcquisitionManager {
 
     /**
      * Shows notification that acquisition was cancelled.
+     * Note: This method is kept for potential future use but is no longer called
+     * for user-initiated cancellations since the dialog already shows cancellation state.
      */
     private void showCancellationNotification() {
-        Platform.runLater(() ->
-                UIFunctions.notifyUserOfError(
-                        "Acquisition was cancelled by user request",
-                        "Acquisition Cancelled"
-                )
-        );
+        // User initiated cancellation - no error notification needed
+        // Dual progress dialog already displays cancellation state
+        logger.info("Acquisition cancelled by user request");
     }
 
     /**

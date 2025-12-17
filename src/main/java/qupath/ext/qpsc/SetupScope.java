@@ -229,6 +229,8 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 
 		// Add items to utilities submenu
 		utilitiesMenu.getItems().addAll(
+				alignmentOption,
+				new SeparatorMenuItem(),
 				backgroundCollectionOption,
 				polarizerCalibrationOption,
 				autofocusEditorOption,
@@ -240,7 +242,6 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 		extensionMenu.getItems().addAll(
 				boundedAcquisitionOption,
 				existingImageOption,
-				alignmentOption,
 				new SeparatorMenuItem(),
 				stageControlOption,
 				new SeparatorMenuItem(),
