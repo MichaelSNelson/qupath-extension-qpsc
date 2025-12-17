@@ -30,6 +30,7 @@ import qupath.ext.qpsc.ui.StageMovementController;
  *   <li><strong>microscopeAlignment</strong> - Semi-automated alignment between QuPath and microscope coordinates</li>
  *   <li><strong>backgroundCollection</strong> - Simplified workflow for acquiring flat field correction backgrounds</li>
  *   <li><strong>polarizerCalibration</strong> - PPM rotation stage calibration workflow</li>
+ *   <li><strong>birefringenceOptimization</strong> - PPM birefringence angle optimization test</li>
  *   <li><strong>autofocusEditor</strong> - Per-objective autofocus settings editor</li>
  *   <li><strong>basicStageInterface</strong> - Manual stage movement and testing interface</li>
  *   <li><strong>serverConnection</strong> - Connection testing and server communication diagnostics</li>
@@ -158,9 +159,21 @@ public class QPScopeController {
                 logger.debug("Launching polarizer calibration workflow");
                 PolarizerCalibrationWorkflow.run();
             }
+            case "birefringenceOptimization" -> {
+                logger.debug("Launching birefringence optimization workflow");
+                BirefringenceOptimizationWorkflow.run();
+            }
             case "autofocusEditor" -> {
                 logger.debug("Launching autofocus settings editor");
                 AutofocusEditorWorkflow.run();
+            }
+            case "autofocusBenchmark" -> {
+                logger.debug("Launching autofocus parameter benchmark");
+                AutofocusBenchmarkWorkflow.run();
+            }
+            case "ppmSensitivityTest" -> {
+                logger.debug("Launching PPM rotation sensitivity test");
+                PPMSensitivityTestWorkflow.run();
             }
             case "serverConnection" -> {
                 logger.debug("Launching server connection dialog");

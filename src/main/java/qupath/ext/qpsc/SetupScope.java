@@ -227,6 +227,37 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 			}
 		});
 
+		// PPM Rotation Sensitivity Test
+		MenuItem ppmSensitivityTestOption = new MenuItem(res.getString("menu.ppmSensitivityTest"));
+		ppmSensitivityTestOption.setDisable(!configValid);
+		setMenuItemTooltip(ppmSensitivityTestOption,
+				"Test PPM rotation stage sensitivity by acquiring images at precise angles. " +
+				"Analyzes the impact of angular deviations on image quality and birefringence calculations. " +
+				"Provides comprehensive analysis reports for validation and optimization.");
+		ppmSensitivityTestOption.setOnAction(e -> {
+			try {
+				QPScopeController.getInstance().startWorkflow("ppmSensitivityTest");
+			} catch (IOException ex) {
+				throw new RuntimeException(ex);
+			}
+		});
+
+		// PPM Birefringence Optimization
+		MenuItem birefringenceOptimizationOption = new MenuItem(res.getString("menu.birefringenceOptimization"));
+		birefringenceOptimizationOption.setDisable(!configValid);
+		setMenuItemTooltip(birefringenceOptimizationOption,
+				"Find the optimal polarizer angle for maximum birefringence signal contrast. " +
+				"Systematically tests angles by acquiring paired images (+theta, -theta) and " +
+				"computing their difference. Results include optimal angles, signal metrics, and " +
+				"visualization plots. Supports multiple exposure modes (interpolate, calibrate, fixed).");
+		birefringenceOptimizationOption.setOnAction(e -> {
+			try {
+				QPScopeController.getInstance().startWorkflow("birefringenceOptimization");
+			} catch (IOException ex) {
+				throw new RuntimeException(ex);
+			}
+		});
+
 		// Autofocus settings editor
 		MenuItem autofocusEditorOption = new MenuItem(res.getString("menu.autofocusEditor"));
 		autofocusEditorOption.setDisable(!configValid);
@@ -254,13 +285,32 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 			}
 		});
 
+		// Autofocus parameter benchmark
+		MenuItem autofocusBenchmarkOption = new MenuItem(res.getString("menu.autofocusBenchmark"));
+		autofocusBenchmarkOption.setDisable(!configValid);
+		setMenuItemTooltip(autofocusBenchmarkOption,
+				"Run systematic testing of autofocus parameters to find optimal settings. " +
+				"Tests multiple combinations of n_steps, search_range, interpolation methods, and " +
+				"score metrics at various distances from focus. Results include timing and accuracy " +
+				"measurements. Quick mode: 10-15 min, Full benchmark: 30-60 min.");
+		autofocusBenchmarkOption.setOnAction(e -> {
+			try {
+				QPScopeController.getInstance().startWorkflow("autofocusBenchmark");
+			} catch (IOException ex) {
+				throw new RuntimeException(ex);
+			}
+		});
+
 		// Add items to utilities submenu
 		utilitiesMenu.getItems().addAll(
 				alignmentOption,
 				new SeparatorMenuItem(),
 				backgroundCollectionOption,
 				polarizerCalibrationOption,
+				ppmSensitivityTestOption,
+				birefringenceOptimizationOption,
 				autofocusEditorOption,
+				autofocusBenchmarkOption,
 				new SeparatorMenuItem(),
 				serverConnectionOption
 		);

@@ -133,7 +133,11 @@ public class MicroscopeSocketClient implements AutoCloseable {
         /** Acknowledge manual focus - retry autofocus */
         ACKMF("ackmf___"),
         /** Skip autofocus retry - use current focus */
-        SKIPAF("skipaf__");
+        SKIPAF("skipaf__"),
+        /** Run autofocus parameter benchmark */
+        AFBENCH("afbench_"),
+        /** PPM birefringence maximization test */
+        PPMBIREF("ppmbiref");
 
         private final byte[] value;
 
@@ -935,6 +939,345 @@ public class MicroscopeSocketClient implements AutoCloseable {
     }
 
     /**
+     * Runs PPM rotation sensitivity test on the server.
+     * This method systematically tests PPM rotation sensitivity by acquiring images
+     * at precise angles and analyzing the impact of angular deviations.
+     *
+     * @param params Parameters for the sensitivity test
+     * @return Path to the output directory containing test results
+     * @throws IOException if communication fails
+     */
+    public String runPPMSensitivityTest(PPMSensitivityParams params) throws IOException {
+        // Build PPMSENS-specific command message
+        StringBuilder messageBuilder = new StringBuilder();
+        messageBuilder.append("--yaml ").append(params.configYaml());
+        messageBuilder.append(" --output ").append(params.outputDir());
+        messageBuilder.append(" --test-type ").append(params.testType());
+        messageBuilder.append(" --base-angle ").append(params.baseAngle());
+        messageBuilder.append(" --repeats ").append(params.nRepeats());
+        messageBuilder.append(" ").append(END_MARKER);
+
+        String message = messageBuilder.toString();
+        byte[] messageBytes = message.getBytes(StandardCharsets.UTF_8);
+
+        logger.info("Sending PPM sensitivity test command:");
+        logger.info("  Message length: {} bytes", messageBytes.length);
+        logger.info("  Message content: {}", message);
+
+        synchronized (socketLock) {
+            ensureConnected();
+
+            // Store original timeout
+            int originalTimeout = 0;
+            try {
+                originalTimeout = socket.getSoTimeout();
+                // Increase timeout for sensitivity test (can take 10-30 minutes depending on test type)
+                socket.setSoTimeout(1800000); // 30 minutes
+                logger.debug("Increased socket timeout to 30 minutes for PPM sensitivity test");
+            } catch (IOException e) {
+                logger.warn("Failed to adjust socket timeout", e);
+            }
+
+            try {
+                OutputStream output = socket.getOutputStream();
+                InputStream input = socket.getInputStream();
+
+                // Send command (8 bytes: "ppmsens_")
+                output.write("ppmsens_".getBytes(StandardCharsets.UTF_8));
+                output.write(messageBytes);
+                output.flush();
+
+                logger.info("Command sent, waiting for server response...");
+
+                // Read initial response (STARTED or FAILED)
+                byte[] buffer = new byte[8192];
+                int bytesRead = input.read(buffer);
+                if (bytesRead > 0) {
+                    String response = new String(buffer, 0, bytesRead, StandardCharsets.UTF_8);
+                    logger.info("Received initial server response: {}", response);
+
+                    if (response.startsWith("FAILED:")) {
+                        throw new IOException("Server rejected PPM sensitivity test: " + response);
+                    } else if (!response.startsWith("STARTED:")) {
+                        logger.warn("Unexpected initial server response: {}", response);
+                    }
+                }
+
+                // Wait for final SUCCESS/FAILED response
+                logger.info("Waiting for PPM sensitivity test to complete...");
+                bytesRead = input.read(buffer);
+                if (bytesRead > 0) {
+                    String finalResponse = new String(buffer, 0, bytesRead, StandardCharsets.UTF_8);
+                    logger.info("Received final server response: {}", finalResponse);
+
+                    if (finalResponse.startsWith("FAILED:")) {
+                        throw new IOException("PPM sensitivity test failed: " + finalResponse.substring(7));
+                    } else if (finalResponse.startsWith("SUCCESS:")) {
+                        // Extract output directory path from SUCCESS response
+                        String outputDir = finalResponse.substring(8).trim();
+                        logger.info("PPM sensitivity test successful. Output: {}", outputDir);
+                        return outputDir;
+                    } else {
+                        throw new IOException("Unexpected final response: " + finalResponse);
+                    }
+                }
+
+                throw new IOException("No response received from server");
+
+            } catch (IOException e) {
+                logger.error("Error during PPM sensitivity test", e);
+                handleIOException(new IOException("PPM sensitivity test error", e));
+                throw new IOException("PPM sensitivity test error: " + e.getMessage(), e);
+            } finally {
+                // Restore original timeout
+                if (socket != null) {
+                    try {
+                        socket.setSoTimeout(originalTimeout);
+                        logger.debug("Restored socket timeout to {}ms", originalTimeout);
+                    } catch (IOException e) {
+                        logger.warn("Failed to restore original socket timeout", e);
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Parameters for PPM rotation sensitivity test.
+     *
+     * @param configYaml Path to microscope configuration YAML file
+     * @param outputDir Output directory for test results (required)
+     * @param testType Type of test: comprehensive, standard, deviation, repeatability, calibration
+     * @param baseAngle Base angle for deviation/repeatability tests (degrees)
+     * @param nRepeats Number of repetitions for repeatability test
+     */
+    public record PPMSensitivityParams(
+            String configYaml,
+            String outputDir,
+            String testType,
+            double baseAngle,
+            int nRepeats
+    ) {}
+
+    /**
+     * Run autofocus parameter benchmark to find optimal settings.
+     *
+     * This command performs systematic testing of autofocus parameters to determine
+     * the best configuration for speed and accuracy. The benchmark tests:
+     * - Multiple n_steps values (number of Z positions sampled)
+     * - Multiple search ranges (how far from current Z to search)
+     * - Different interpolation methods (linear, quadratic, cubic)
+     * - Different focus score metrics (laplacian, sobel, brenner)
+     * - Both standard and adaptive autofocus algorithms
+     *
+     * Results are saved as CSV and JSON files for analysis.
+     *
+     * @param referenceZ Known good focus Z position (must be manually verified in focus)
+     * @param outputPath Output directory for benchmark results
+     * @param testDistances List of distances (um) from focus to test, or null for defaults
+     * @param quickMode If true, run reduced parameter space for faster results
+     * @param objective Objective identifier for safety limits (e.g., "20X")
+     * @return Map with summary results including success_rate, timing_stats, and fastest configs
+     * @throws IOException if communication fails or benchmark encounters errors
+     */
+    public Map<String, Object> runAutofocusBenchmark(
+            double referenceZ,
+            String outputPath,
+            List<Double> testDistances,
+            boolean quickMode,
+            String objective) throws IOException {
+
+        // Build AFBENCH command message
+        StringBuilder message = new StringBuilder();
+        message.append("--reference_z ").append(referenceZ);
+        message.append(" --output ").append(outputPath);
+
+        if (testDistances != null && !testDistances.isEmpty()) {
+            message.append(" --distances ");
+            for (int i = 0; i < testDistances.size(); i++) {
+                if (i > 0) message.append(",");
+                message.append(testDistances.get(i));
+            }
+        }
+
+        if (quickMode) {
+            message.append(" --quick true");
+        }
+
+        if (objective != null && !objective.isEmpty()) {
+            message.append(" --objective ").append(objective);
+        }
+
+        message.append(" ").append(END_MARKER);
+
+        byte[] messageBytes = message.toString().getBytes(StandardCharsets.UTF_8);
+
+        logger.info("Sending autofocus benchmark command:");
+        logger.info("  Reference Z: {} um", referenceZ);
+        logger.info("  Output path: {}", outputPath);
+        logger.info("  Test distances: {}", testDistances);
+        logger.info("  Quick mode: {}", quickMode);
+        logger.info("  Objective: {}", objective);
+
+        synchronized (socketLock) {
+            ensureConnected();
+
+            // Benchmark can take a long time - set generous timeout
+            // With full parameter grid, could take 30-60 minutes
+            int originalTimeout = readTimeout;
+            try {
+                if (socket != null) {
+                    socket.setSoTimeout(3600000); // 60 minutes for full benchmark
+                    logger.debug("Increased socket timeout to 60 minutes for benchmark");
+                }
+
+                // Send AFBENCH command (8 bytes)
+                output.write(Command.AFBENCH.getValue());
+                output.flush();
+                logger.debug("Sent AFBENCH command (8 bytes)");
+
+                // Small delay to ensure command is processed
+                Thread.sleep(50);
+
+                // Send message
+                output.write(messageBytes);
+                output.flush();
+                logger.debug("Sent benchmark message ({} bytes)", messageBytes.length);
+
+                // Ensure all data is sent
+                output.flush();
+
+                lastActivityTime.set(System.currentTimeMillis());
+                logger.info("Autofocus benchmark command sent successfully");
+
+                // Read the STARTED acknowledgment
+                byte[] buffer = new byte[8192];
+                int bytesRead = input.read(buffer);
+                if (bytesRead > 0) {
+                    String response = new String(buffer, 0, bytesRead, StandardCharsets.UTF_8);
+                    logger.info("Received initial server response: {}", response);
+
+                    if (response.startsWith("FAILED:")) {
+                        throw new IOException("Server rejected autofocus benchmark: " + response);
+                    } else if (!response.startsWith("STARTED:")) {
+                        logger.warn("Unexpected initial server response: {}", response);
+                    }
+                }
+
+                // Wait for final SUCCESS/FAILED response
+                logger.info("Waiting for autofocus benchmark to complete...");
+                logger.info("This may take 10-60 minutes depending on parameter space...");
+
+                bytesRead = input.read(buffer);
+                if (bytesRead > 0) {
+                    String finalResponse = new String(buffer, 0, bytesRead, StandardCharsets.UTF_8);
+                    logger.info("Received final server response: {}", finalResponse);
+
+                    // Check for safety violation
+                    if (finalResponse.startsWith("FAILED:SAFETY:")) {
+                        String safetyMsg = finalResponse.substring("FAILED:SAFETY:".length());
+                        throw new IOException("SAFETY VIOLATION: " + safetyMsg);
+                    } else if (finalResponse.startsWith("FAILED:")) {
+                        throw new IOException("Benchmark failed: " + finalResponse.substring(7));
+                    } else if (!finalResponse.startsWith("SUCCESS:")) {
+                        logger.warn("Unexpected final response: {}", finalResponse);
+                    }
+
+                    // Parse JSON results from SUCCESS response
+                    // Format: SUCCESS:{"success_rate": 0.95, "total_trials": 100, ...}
+                    Map<String, Object> results = new HashMap<>();
+                    if (finalResponse.startsWith("SUCCESS:")) {
+                        String jsonData = finalResponse.substring(8).trim();
+                        logger.info("Parsing benchmark results JSON");
+
+                        try {
+                            // Simple JSON parsing for common types
+                            // Note: This is a basic parser - production code should use a JSON library
+                            results = parseSimpleJson(jsonData);
+                            logger.info("Parsed {} result keys", results.size());
+                        } catch (Exception e) {
+                            logger.warn("Could not parse JSON results: {}", e.getMessage());
+                            results.put("raw_response", jsonData);
+                        }
+
+                        lastActivityTime.set(System.currentTimeMillis());
+                        return results;
+                    }
+                } else {
+                    throw new IOException("No final response received from benchmark");
+                }
+
+                // Fallback - shouldn't reach here
+                lastActivityTime.set(System.currentTimeMillis());
+                return new HashMap<>();
+
+            } catch (IOException | InterruptedException e) {
+                handleIOException(new IOException("Autofocus benchmark error", e));
+                throw new IOException("Autofocus benchmark error: " + e.getMessage(), e);
+            } finally {
+                // Restore original timeout
+                if (socket != null) {
+                    try {
+                        socket.setSoTimeout(originalTimeout);
+                        logger.debug("Restored socket timeout to {}ms", originalTimeout);
+                    } catch (IOException e) {
+                        logger.warn("Failed to restore original socket timeout", e);
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Simple JSON parser for benchmark results.
+     * Handles basic types: strings, numbers, booleans, and nested objects.
+     *
+     * Note: This is a minimal parser for the specific benchmark response format.
+     * For general JSON parsing, use a proper JSON library.
+     */
+    private Map<String, Object> parseSimpleJson(String json) {
+        Map<String, Object> result = new HashMap<>();
+
+        // Remove outer braces
+        String content = json.trim();
+        if (content.startsWith("{")) content = content.substring(1);
+        if (content.endsWith("}")) content = content.substring(0, content.length() - 1);
+
+        // Split by commas (simple approach - doesn't handle nested objects properly)
+        // For benchmark results, we just need top-level keys
+        String[] pairs = content.split(",(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)");
+
+        for (String pair : pairs) {
+            String[] keyValue = pair.split(":", 2);
+            if (keyValue.length == 2) {
+                String key = keyValue[0].trim().replace("\"", "");
+                String value = keyValue[1].trim();
+
+                // Parse value type
+                if (value.equals("true") || value.equals("false")) {
+                    result.put(key, Boolean.parseBoolean(value));
+                } else if (value.equals("null")) {
+                    result.put(key, null);
+                } else if (value.startsWith("\"") && value.endsWith("\"")) {
+                    result.put(key, value.substring(1, value.length() - 1));
+                } else {
+                    try {
+                        if (value.contains(".")) {
+                            result.put(key, Double.parseDouble(value));
+                        } else {
+                            result.put(key, Integer.parseInt(value));
+                        }
+                    } catch (NumberFormatException e) {
+                        result.put(key, value); // Store as string if parsing fails
+                    }
+                }
+            }
+        }
+
+        return result;
+    }
+
+    /**
      * Starts a polarizer calibration workflow on the server for PPM rotation stage.
      * This method uses the POLCAL command with parameters for angle sweep configuration.
      *
@@ -1025,6 +1368,130 @@ public class MicroscopeSocketClient implements AutoCloseable {
                 logger.error("Error during polarizer calibration", e);
                 handleIOException(new IOException("Polarizer calibration error", e));
                 throw new IOException("Polarizer calibration error: " + e.getMessage(), e);
+            } finally {
+                // Restore original timeout
+                if (socket != null) {
+                    try {
+                        socket.setSoTimeout(originalTimeout);
+                        logger.debug("Restored socket timeout to {}ms", originalTimeout);
+                    } catch (IOException e) {
+                        logger.warn("Failed to restore original socket timeout", e);
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Runs PPM birefringence optimization test to find optimal polarizer angle.
+     * This method uses the PPMBIREF command to systematically test angles and
+     * identify the optimal angle for maximum birefringence signal contrast.
+     *
+     * @param yamlPath Path to microscope configuration YAML file
+     * @param outputPath Output directory for test results and plots
+     * @param minAngle Minimum angle to test (degrees)
+     * @param maxAngle Maximum angle to test (degrees)
+     * @param angleStep Step size for angle sweep (degrees)
+     * @param exposureMode Exposure mode: "interpolate", "calibrate", or "fixed"
+     * @param fixedExposureMs Fixed exposure in ms (required if mode="fixed", null otherwise)
+     * @param targetIntensity Target intensity for calibrate mode (0-255)
+     * @return Path to the results directory
+     * @throws IOException if communication fails
+     */
+    public String runBirefringenceOptimization(String yamlPath, String outputPath,
+                                               double minAngle, double maxAngle, double angleStep,
+                                               String exposureMode, Double fixedExposureMs,
+                                               int targetIntensity) throws IOException {
+
+        // Build PPMBIREF-specific command message
+        StringBuilder messageBuilder = new StringBuilder();
+        messageBuilder.append("--yaml ").append(yamlPath)
+                     .append(" --output ").append(outputPath)
+                     .append(" --mode ").append(exposureMode)
+                     .append(" --min-angle ").append(minAngle)
+                     .append(" --max-angle ").append(maxAngle)
+                     .append(" --step ").append(angleStep);
+
+        if ("fixed".equals(exposureMode) && fixedExposureMs != null) {
+            messageBuilder.append(" --exposure ").append(fixedExposureMs);
+        }
+
+        messageBuilder.append(" --target-intensity ").append(targetIntensity)
+                     .append(" ").append(END_MARKER);
+
+        String message = messageBuilder.toString();
+        byte[] messageBytes = message.getBytes(StandardCharsets.UTF_8);
+
+        logger.info("Sending PPM birefringence optimization command:");
+        logger.info("  Message length: {} bytes", messageBytes.length);
+        logger.info("  Message content: {}", message);
+
+        synchronized (socketLock) {
+            ensureConnected();
+
+            // Store original timeout
+            int originalTimeout = 0;
+            try {
+                originalTimeout = socket.getSoTimeout();
+                // Increase timeout for birefringence test (can take many minutes)
+                // With 201 angle pairs (-10 to +10, step 0.1), ~400 images total
+                // At ~1-2s per image = 400-800s = 6-13 minutes. Allow 30 minutes to be safe.
+                socket.setSoTimeout(1800000); // 30 minutes
+                logger.debug("Increased socket timeout to 30 minutes for birefringence optimization");
+            } catch (IOException e) {
+                logger.warn("Failed to adjust socket timeout", e);
+            }
+
+            try {
+                OutputStream output = socket.getOutputStream();
+                InputStream input = socket.getInputStream();
+
+                // Send command
+                output.write(Command.PPMBIREF.getValue());
+                output.write(messageBytes);
+                output.flush();
+
+                logger.info("Command sent, waiting for server response...");
+
+                // Read initial response (STARTED or FAILED)
+                byte[] buffer = new byte[8192];
+                int bytesRead = input.read(buffer);
+                if (bytesRead > 0) {
+                    String response = new String(buffer, 0, bytesRead, StandardCharsets.UTF_8);
+                    logger.info("Received initial server response: {}", response);
+
+                    if (response.startsWith("FAILED:")) {
+                        throw new IOException("Server rejected birefringence optimization: " + response);
+                    } else if (!response.startsWith("STARTED:")) {
+                        logger.warn("Unexpected initial server response: {}", response);
+                    }
+                }
+
+                // Wait for final SUCCESS/FAILED response
+                logger.info("Waiting for birefringence optimization to complete...");
+                bytesRead = input.read(buffer);
+                if (bytesRead > 0) {
+                    String finalResponse = new String(buffer, 0, bytesRead, StandardCharsets.UTF_8);
+                    logger.info("Received final server response: {}", finalResponse);
+
+                    if (finalResponse.startsWith("FAILED:")) {
+                        throw new IOException("Birefringence optimization failed: " + finalResponse.substring(7));
+                    } else if (finalResponse.startsWith("SUCCESS:")) {
+                        // Extract results directory path from SUCCESS response
+                        String resultPath = finalResponse.substring(8).trim();
+                        logger.info("Birefringence optimization successful. Results: {}", resultPath);
+                        return resultPath;
+                    } else {
+                        throw new IOException("Unexpected final response: " + finalResponse);
+                    }
+                }
+
+                throw new IOException("No response received from server");
+
+            } catch (IOException e) {
+                logger.error("Error during birefringence optimization", e);
+                handleIOException(new IOException("Birefringence optimization error", e));
+                throw new IOException("Birefringence optimization error: " + e.getMessage(), e);
             } finally {
                 // Restore original timeout
                 if (socket != null) {
