@@ -6,7 +6,6 @@ import javafx.geometry.Pos;
 import javafx.scene.control.*;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
-import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,7 +19,6 @@ import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.*;
 
 /**
@@ -270,11 +268,100 @@ public class AutofocusEditorWorkflow {
         objectiveCombo.getItems().addAll(objectives);
         objectiveCombo.setValue(objectives.get(0));
 
-        // Parameter inputs
-        GridPane paramGrid = new GridPane();
-        paramGrid.setHgap(10);
-        paramGrid.setVgap(10);
-        paramGrid.setPadding(new Insets(10));
+        // ===== ACQUISITION FREQUENCY SECTION =====
+        GridPane acquisitionGrid = new GridPane();
+        acquisitionGrid.setHgap(10);
+        acquisitionGrid.setVgap(8);
+        acquisitionGrid.setPadding(new Insets(5));
+
+        Label nTilesLabel = new Label("n_tiles:");
+        Spinner<Integer> nTilesSpinner = new Spinner<>(1, 50, 5, 1);
+        nTilesSpinner.setEditable(true);
+        nTilesSpinner.setPrefWidth(100);
+        nTilesSpinner.setTooltip(new Tooltip(
+            "Spatial frequency: Autofocus runs every N tiles.\n\n" +
+            "Lower values (1-3):\n" +
+            "  + More frequent autofocus\n" +
+            "  + Better tracking of uneven samples\n" +
+            "  - Significantly slower acquisition\n" +
+            "  - More wear on Z motor\n\n" +
+            "Higher values (5-10):\n" +
+            "  + Faster acquisition\n" +
+            "  + Less mechanical wear\n" +
+            "  - May lose focus on tilted samples\n\n" +
+            "Typical: 5 tiles (good balance)\n" +
+            "Use 1-3 for tilted or curved samples"
+        ));
+        Label nTilesDesc = new Label("(Autofocus every N tiles during acquisition)");
+        nTilesDesc.setStyle("-fx-font-size: 10px; -fx-text-fill: gray;");
+
+        acquisitionGrid.add(nTilesLabel, 0, 0);
+        acquisitionGrid.add(nTilesSpinner, 1, 0);
+        acquisitionGrid.add(nTilesDesc, 2, 0);
+
+        TitledPane acquisitionPane = new TitledPane("Acquisition Frequency", acquisitionGrid);
+        acquisitionPane.setCollapsible(false);
+
+        // ===== TISSUE DETECTION SECTION =====
+        GridPane tissueGrid = new GridPane();
+        tissueGrid.setHgap(10);
+        tissueGrid.setVgap(8);
+        tissueGrid.setPadding(new Insets(5));
+
+        Label textureThresholdLabel = new Label("texture_threshold:");
+        TextField textureThresholdField = new TextField("0.005");
+        textureThresholdField.setPrefWidth(100);
+        textureThresholdField.setTooltip(new Tooltip(
+            "Minimum texture variance required for tissue detection.\n" +
+            "Controls whether autofocus runs at a position.\n\n" +
+            "Lower values (0.005-0.010):\n" +
+            "  + More sensitive - detects smooth tissue\n" +
+            "  + Accepts homogeneous samples\n" +
+            "  - May accept out-of-focus areas\n\n" +
+            "Higher values (0.015-0.030):\n" +
+            "  + More selective - requires textured tissue\n" +
+            "  + Rejects blurry or empty areas\n" +
+            "  - May skip smooth but valid tissue\n\n" +
+            "Typical: 0.005 for smooth tissue, 0.010-0.015 for textured"
+        ));
+        Label textureThresholdDesc = new Label("(Min texture variance, typical: 0.005-0.030)");
+        textureThresholdDesc.setStyle("-fx-font-size: 10px; -fx-text-fill: gray;");
+
+        Label tissueAreaThresholdLabel = new Label("tissue_area_threshold:");
+        TextField tissueAreaThresholdField = new TextField("0.2");
+        tissueAreaThresholdField.setPrefWidth(100);
+        tissueAreaThresholdField.setTooltip(new Tooltip(
+            "Minimum fraction of image that must contain tissue.\n" +
+            "Determines if enough tissue is present for autofocus.\n\n" +
+            "Lower values (0.05-0.15):\n" +
+            "  + Accepts sparse tissue coverage\n" +
+            "  + Better for small or fragmented samples\n" +
+            "  - May autofocus on debris\n\n" +
+            "Higher values (0.20-0.30):\n" +
+            "  + Requires substantial tissue presence\n" +
+            "  + More reliable autofocus targets\n" +
+            "  - May skip valid tissue at edges\n\n" +
+            "Typical: 0.2 (20% coverage)"
+        ));
+        Label tissueAreaThresholdDesc = new Label("(Min tissue coverage fraction, typical: 0.05-0.30)");
+        tissueAreaThresholdDesc.setStyle("-fx-font-size: 10px; -fx-text-fill: gray;");
+
+        tissueGrid.add(textureThresholdLabel, 0, 0);
+        tissueGrid.add(textureThresholdField, 1, 0);
+        tissueGrid.add(textureThresholdDesc, 2, 0);
+
+        tissueGrid.add(tissueAreaThresholdLabel, 0, 1);
+        tissueGrid.add(tissueAreaThresholdField, 1, 1);
+        tissueGrid.add(tissueAreaThresholdDesc, 2, 1);
+
+        TitledPane tissuePane = new TitledPane("Tissue Detection (Shared)", tissueGrid);
+        tissuePane.setCollapsible(false);
+
+        // ===== STANDARD AUTOFOCUS SECTION =====
+        GridPane standardGrid = new GridPane();
+        standardGrid.setHgap(10);
+        standardGrid.setVgap(8);
+        standardGrid.setPadding(new Insets(5));
 
         Label nStepsLabel = new Label("n_steps:");
         Spinner<Integer> nStepsSpinner = new Spinner<>(1, 100, 9, 1);
@@ -312,27 +399,6 @@ public class AutofocusEditorWorkflow {
         ));
         Label searchRangeDesc = new Label("(Total Z range in micrometers)");
         searchRangeDesc.setStyle("-fx-font-size: 10px; -fx-text-fill: gray;");
-
-        Label nTilesLabel = new Label("n_tiles:");
-        Spinner<Integer> nTilesSpinner = new Spinner<>(1, 50, 5, 1);
-        nTilesSpinner.setEditable(true);
-        nTilesSpinner.setPrefWidth(100);
-        nTilesSpinner.setTooltip(new Tooltip(
-            "Spatial frequency: Autofocus runs every N tiles.\n\n" +
-            "Lower values (1-3):\n" +
-            "  + More frequent autofocus\n" +
-            "  + Better tracking of uneven samples\n" +
-            "  - Significantly slower acquisition\n" +
-            "  - More wear on Z motor\n\n" +
-            "Higher values (5-10):\n" +
-            "  + Faster acquisition\n" +
-            "  + Less mechanical wear\n" +
-            "  - May lose focus on tilted samples\n\n" +
-            "Typical: 5 tiles (good balance)\n" +
-            "Use 1-3 for tilted or curved samples"
-        ));
-        Label nTilesDesc = new Label("(Autofocus every N tiles)");
-        nTilesDesc.setStyle("-fx-font-size: 10px; -fx-text-fill: gray;");
 
         Label interpStrengthLabel = new Label("interp_strength:");
         Spinner<Integer> interpStrengthSpinner = new Spinner<>(10, 1000, 100, 10);
@@ -409,56 +475,34 @@ public class AutofocusEditorWorkflow {
         Label scoreMetricDesc = new Label("(Focus sharpness metric)");
         scoreMetricDesc.setStyle("-fx-font-size: 10px; -fx-text-fill: gray;");
 
-        Label textureThresholdLabel = new Label("texture_threshold:");
-        TextField textureThresholdField = new TextField("0.005");
-        textureThresholdField.setPrefWidth(100);
-        textureThresholdField.setTooltip(new Tooltip(
-            "Minimum texture variance required for tissue detection.\n" +
-            "Controls whether autofocus runs at a position.\n\n" +
-            "Lower values (0.005-0.010):\n" +
-            "  + More sensitive - detects smooth tissue\n" +
-            "  + Accepts homogeneous samples\n" +
-            "  + Better for uniform staining\n" +
-            "  - May accept out-of-focus areas\n" +
-            "  - Risk of autofocus on background\n\n" +
-            "Higher values (0.015-0.030):\n" +
-            "  + More selective - requires textured tissue\n" +
-            "  + Rejects blurry or empty areas\n" +
-            "  - May skip smooth but valid tissue\n" +
-            "  - Can cause missed autofocus points\n\n" +
-            "Typical: 0.005 for smooth tissue, 0.010-0.015 for textured\n" +
-            "Tune if seeing 'Insufficient tissue' warnings"
-        ));
-        Label textureThresholdDesc = new Label("(Min texture for tissue detection, typical: 0.005-0.030)");
-        textureThresholdDesc.setStyle("-fx-font-size: 10px; -fx-text-fill: gray;");
+        // Add standard autofocus fields to grid
+        standardGrid.add(nStepsLabel, 0, 0);
+        standardGrid.add(nStepsSpinner, 1, 0);
+        standardGrid.add(nStepsDesc, 2, 0);
 
-        Label tissueAreaThresholdLabel = new Label("tissue_area_threshold:");
-        TextField tissueAreaThresholdField = new TextField("0.2");
-        tissueAreaThresholdField.setPrefWidth(100);
-        tissueAreaThresholdField.setTooltip(new Tooltip(
-            "Minimum fraction of image that must contain tissue.\n" +
-            "Determines if enough tissue is present for autofocus.\n\n" +
-            "Lower values (0.05-0.15):\n" +
-            "  + Accepts sparse tissue coverage\n" +
-            "  + Runs autofocus at edges of sample\n" +
-            "  + Better for small or fragmented samples\n" +
-            "  - May autofocus on debris or artifacts\n" +
-            "  - Less reliable on mostly-empty tiles\n\n" +
-            "Higher values (0.20-0.30):\n" +
-            "  + Requires substantial tissue presence\n" +
-            "  + More reliable autofocus targets\n" +
-            "  + Rejects edge tiles with partial coverage\n" +
-            "  - May skip valid tissue at sample edges\n" +
-            "  - Can defer too many autofocus points\n\n" +
-            "Typical: 0.2 (20% coverage)\n" +
-            "Lower to 0.1-0.15 for sparse or small samples\n" +
-            "Raise to 0.25-0.3 if autofocus on background/debris"
-        ));
-        Label tissueAreaThresholdDesc = new Label("(Min tissue coverage fraction, typical: 0.05-0.30)");
-        tissueAreaThresholdDesc.setStyle("-fx-font-size: 10px; -fx-text-fill: gray;");
+        standardGrid.add(searchRangeLabel, 0, 1);
+        standardGrid.add(searchRangeField, 1, 1);
+        standardGrid.add(searchRangeDesc, 2, 1);
 
-        // Adaptive autofocus parameters
-        Label adaptiveInitialStepLabel = new Label("adaptive_initial_step_um:");
+        standardGrid.add(interpStrengthLabel, 0, 2);
+        standardGrid.add(interpStrengthSpinner, 1, 2);
+        standardGrid.add(interpStrengthDesc, 2, 2);
+
+        standardGrid.add(interpKindLabel, 0, 3);
+        standardGrid.add(interpKindCombo, 1, 3);
+        standardGrid.add(interpKindDesc, 2, 3);
+
+        standardGrid.add(scoreMetricLabel, 0, 4);
+        standardGrid.add(scoreMetricCombo, 1, 4);
+        standardGrid.add(scoreMetricDesc, 2, 4);
+
+        // ===== ADAPTIVE AUTOFOCUS SECTION =====
+        GridPane adaptiveGrid = new GridPane();
+        adaptiveGrid.setHgap(10);
+        adaptiveGrid.setVgap(8);
+        adaptiveGrid.setPadding(new Insets(5));
+
+        Label adaptiveInitialStepLabel = new Label("initial_step_um:");
         TextField adaptiveInitialStepField = new TextField("10.0");
         adaptiveInitialStepField.setPrefWidth(100);
         adaptiveInitialStepField.setTooltip(new Tooltip(
@@ -474,10 +518,10 @@ public class AutofocusEditorWorkflow {
             "  - Slower if far from focus\n\n" +
             "Typical: 10um for balanced performance"
         ));
-        Label adaptiveInitialStepDesc = new Label("(Initial step size for adaptive search)");
+        Label adaptiveInitialStepDesc = new Label("(Initial step size for bidirectional search)");
         adaptiveInitialStepDesc.setStyle("-fx-font-size: 10px; -fx-text-fill: gray;");
 
-        Label adaptiveMinStepLabel = new Label("adaptive_min_step_um:");
+        Label adaptiveMinStepLabel = new Label("min_step_um:");
         TextField adaptiveMinStepField = new TextField("2.0");
         adaptiveMinStepField.setPrefWidth(100);
         adaptiveMinStepField.setTooltip(new Tooltip(
@@ -496,7 +540,7 @@ public class AutofocusEditorWorkflow {
         Label adaptiveMinStepDesc = new Label("(Minimum step size before termination)");
         adaptiveMinStepDesc.setStyle("-fx-font-size: 10px; -fx-text-fill: gray;");
 
-        Label adaptiveMaxStepsLabel = new Label("adaptive_max_steps:");
+        Label adaptiveMaxStepsLabel = new Label("max_steps:");
         Spinner<Integer> adaptiveMaxStepsSpinner = new Spinner<>(5, 100, 25, 1);
         adaptiveMaxStepsSpinner.setEditable(true);
         adaptiveMaxStepsSpinner.setPrefWidth(100);
@@ -516,7 +560,7 @@ public class AutofocusEditorWorkflow {
         Label adaptiveMaxStepsDesc = new Label("(Maximum steps before timeout)");
         adaptiveMaxStepsDesc.setStyle("-fx-font-size: 10px; -fx-text-fill: gray;");
 
-        Label adaptiveFocusThresholdLabel = new Label("adaptive_focus_threshold:");
+        Label adaptiveFocusThresholdLabel = new Label("focus_threshold:");
         TextField adaptiveFocusThresholdField = new TextField("0.95");
         adaptiveFocusThresholdField.setPrefWidth(100);
         adaptiveFocusThresholdField.setTooltip(new Tooltip(
@@ -535,53 +579,22 @@ public class AutofocusEditorWorkflow {
         Label adaptiveFocusThresholdDesc = new Label("(Focus quality threshold for termination, 0-1)");
         adaptiveFocusThresholdDesc.setStyle("-fx-font-size: 10px; -fx-text-fill: gray;");
 
-        paramGrid.add(nStepsLabel, 0, 0);
-        paramGrid.add(nStepsSpinner, 1, 0);
-        paramGrid.add(nStepsDesc, 2, 0);
+        // Add adaptive autofocus fields to grid
+        adaptiveGrid.add(adaptiveInitialStepLabel, 0, 0);
+        adaptiveGrid.add(adaptiveInitialStepField, 1, 0);
+        adaptiveGrid.add(adaptiveInitialStepDesc, 2, 0);
 
-        paramGrid.add(searchRangeLabel, 0, 1);
-        paramGrid.add(searchRangeField, 1, 1);
-        paramGrid.add(searchRangeDesc, 2, 1);
+        adaptiveGrid.add(adaptiveMinStepLabel, 0, 1);
+        adaptiveGrid.add(adaptiveMinStepField, 1, 1);
+        adaptiveGrid.add(adaptiveMinStepDesc, 2, 1);
 
-        paramGrid.add(nTilesLabel, 0, 2);
-        paramGrid.add(nTilesSpinner, 1, 2);
-        paramGrid.add(nTilesDesc, 2, 2);
+        adaptiveGrid.add(adaptiveMaxStepsLabel, 0, 2);
+        adaptiveGrid.add(adaptiveMaxStepsSpinner, 1, 2);
+        adaptiveGrid.add(adaptiveMaxStepsDesc, 2, 2);
 
-        paramGrid.add(interpStrengthLabel, 0, 3);
-        paramGrid.add(interpStrengthSpinner, 1, 3);
-        paramGrid.add(interpStrengthDesc, 2, 3);
-
-        paramGrid.add(interpKindLabel, 0, 4);
-        paramGrid.add(interpKindCombo, 1, 4);
-        paramGrid.add(interpKindDesc, 2, 4);
-
-        paramGrid.add(scoreMetricLabel, 0, 5);
-        paramGrid.add(scoreMetricCombo, 1, 5);
-        paramGrid.add(scoreMetricDesc, 2, 5);
-
-        paramGrid.add(textureThresholdLabel, 0, 6);
-        paramGrid.add(textureThresholdField, 1, 6);
-        paramGrid.add(textureThresholdDesc, 2, 6);
-
-        paramGrid.add(tissueAreaThresholdLabel, 0, 7);
-        paramGrid.add(tissueAreaThresholdField, 1, 7);
-        paramGrid.add(tissueAreaThresholdDesc, 2, 7);
-
-        paramGrid.add(adaptiveInitialStepLabel, 0, 8);
-        paramGrid.add(adaptiveInitialStepField, 1, 8);
-        paramGrid.add(adaptiveInitialStepDesc, 2, 8);
-
-        paramGrid.add(adaptiveMinStepLabel, 0, 9);
-        paramGrid.add(adaptiveMinStepField, 1, 9);
-        paramGrid.add(adaptiveMinStepDesc, 2, 9);
-
-        paramGrid.add(adaptiveMaxStepsLabel, 0, 10);
-        paramGrid.add(adaptiveMaxStepsSpinner, 1, 10);
-        paramGrid.add(adaptiveMaxStepsDesc, 2, 10);
-
-        paramGrid.add(adaptiveFocusThresholdLabel, 0, 11);
-        paramGrid.add(adaptiveFocusThresholdField, 1, 11);
-        paramGrid.add(adaptiveFocusThresholdDesc, 2, 11);
+        adaptiveGrid.add(adaptiveFocusThresholdLabel, 0, 3);
+        adaptiveGrid.add(adaptiveFocusThresholdField, 1, 3);
+        adaptiveGrid.add(adaptiveFocusThresholdDesc, 2, 3);
 
         // Status label for validation feedback
         Label statusLabel = new Label();
@@ -709,7 +722,7 @@ public class AutofocusEditorWorkflow {
             }
         });
 
-        // "Test Standard Autofocus" button
+        // "Test Standard Autofocus" button - will be placed inside standard section
         Button testStandardButton = new Button("Test Standard Autofocus");
         testStandardButton.setOnAction(e -> {
             try {
@@ -735,12 +748,10 @@ public class AutofocusEditorWorkflow {
                 logger.info("Autofocus settings saved before standard test");
 
                 // Determine output path for test results (same directory as config file)
-                // Note: configDir is already defined earlier in this method (line 173)
                 String testOutputPath = new File(configDir, "autofocus_tests").getAbsolutePath();
                 logger.info("Using autofocus test output path: {}", testOutputPath);
 
                 // Run the STANDARD test workflow with selected objective
-                // Note: TestAutofocusWorkflow will run async and show its own dialogs
                 TestAutofocusWorkflow.runStandard(testOutputPath, currentObj);
 
                 // Update status after launching test
@@ -762,7 +773,7 @@ public class AutofocusEditorWorkflow {
             }
         });
 
-        // "Test Adaptive Autofocus" button
+        // "Test Adaptive Autofocus" button - will be placed inside adaptive section
         Button testAdaptiveButton = new Button("Test Adaptive Autofocus");
         testAdaptiveButton.setOnAction(e -> {
             try {
@@ -792,7 +803,6 @@ public class AutofocusEditorWorkflow {
                 logger.info("Using autofocus test output path: {}", testOutputPath);
 
                 // Run the ADAPTIVE test workflow with selected objective
-                // Note: TestAutofocusWorkflow will run async and show its own dialogs
                 TestAutofocusWorkflow.runAdaptive(testOutputPath, currentObj);
 
                 // Update status after launching test
@@ -814,18 +824,39 @@ public class AutofocusEditorWorkflow {
             }
         });
 
-        // Button row with write and both test buttons
-        HBox buttonRow = new HBox(10, writeButton, testStandardButton, testAdaptiveButton);
+        // Create Standard Autofocus TitledPane with test button inside
+        VBox standardContent = new VBox(8);
+        standardContent.getChildren().addAll(standardGrid, testStandardButton);
+        TitledPane standardPane = new TitledPane("Standard Autofocus (Symmetric Z-Sweep)", standardContent);
+        standardPane.setCollapsible(false);
+
+        // Create Adaptive Autofocus TitledPane with test button inside
+        VBox adaptiveContent = new VBox(8);
+        adaptiveContent.getChildren().addAll(adaptiveGrid, testAdaptiveButton);
+        TitledPane adaptivePane = new TitledPane("Adaptive Autofocus (Bidirectional Search)", adaptiveContent);
+        adaptivePane.setCollapsible(false);
+
+        // Write button row (only write button now - test buttons are in sections)
+        HBox buttonRow = new HBox(10, writeButton);
         buttonRow.setAlignment(Pos.CENTER_LEFT);
 
         // Layout
         HBox objectiveRow = new HBox(10, objectiveLabel, objectiveCombo);
         objectiveRow.setAlignment(Pos.CENTER_LEFT);
 
+        // Use ScrollPane to handle potentially tall content
+        VBox sectionsBox = new VBox(10);
+        sectionsBox.getChildren().addAll(
+            acquisitionPane,
+            tissuePane,
+            standardPane,
+            adaptivePane
+        );
+
         mainLayout.getChildren().addAll(
             objectiveRow,
             new Separator(),
-            paramGrid,
+            sectionsBox,
             statusLabel,
             new Separator(),
             buttonRow
