@@ -830,7 +830,7 @@ public class ExistingAlignmentPath {
      * @return List of annotations with correct coordinates for the current image state
      */
     @SuppressWarnings("unchecked")
-    private List<PathObject> getAnnotationsFromCorrectSource() {
+    private java.util.List<PathObject> getAnnotationsFromCorrectSource() {
         boolean requiresFlipX = QPPreferenceDialog.getFlipMacroXProperty();
         boolean requiresFlipY = QPPreferenceDialog.getFlipMacroYProperty();
 
@@ -872,7 +872,7 @@ public class ExistingAlignmentPath {
             var allAnnotations = hierarchy.getAnnotationObjects();
 
             // Filter by selected classes
-            var annotations = allAnnotations.stream()
+            java.util.List<PathObject> annotations = allAnnotations.stream()
                     .filter(ann -> ann.getROI() != null && !ann.getROI().isEmpty())
                     .filter(ann -> ann.getPathClass() != null &&
                             state.selectedAnnotationClasses.contains(ann.getPathClass().getName()))
