@@ -2,9 +2,12 @@ package qupath.ext.qpsc;
 
 import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
+import javafx.scene.control.Label;
 import javafx.scene.control.Menu;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.SeparatorMenuItem;
+import javafx.scene.control.Tooltip;
+import javafx.util.Duration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qupath.ext.qpsc.controller.QPScopeController;
@@ -103,6 +106,9 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 		// 1) Bounded Acquisition - acquire tiles from a defined bounding box region
 		MenuItem boundedAcquisitionOption = new MenuItem(res.getString("menu.boundedAcquisition"));
 		boundedAcquisitionOption.setDisable(!configValid);
+		setMenuItemTooltip(boundedAcquisitionOption,
+				"Start a new acquisition by defining a rectangular region using stage coordinates. " +
+				"Use this when you want to scan a specific area without a pre-existing image.");
 		boundedAcquisitionOption.setOnAction(e -> {
 			try {
 				QPScopeController.getInstance().startWorkflow("boundedAcquisition");
@@ -125,6 +131,9 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 						)
 				)
 		);
+		setMenuItemTooltip(existingImageOption,
+				"Acquire high-resolution images of annotated regions in the currently open image. " +
+				"Draw annotations on a macro or overview image, then use this to scan those specific areas.");
 		existingImageOption.setOnAction(e -> {
 			try {
 				QPScopeController.getInstance().startWorkflow("existingImage");
@@ -163,6 +172,9 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 						qupath.imageDataProperty()
 				)
 		);
+		setMenuItemTooltip(alignmentOption,
+				"Create or refine the coordinate alignment between a slide scanner's macro image and the microscope stage. " +
+				"Run this once per scanner to enable accurate targeting in future acquisitions.");
 		alignmentOption.setOnAction(e -> {
 			try {
 				QPScopeController.getInstance().startWorkflow("microscopeAlignment");
@@ -173,6 +185,9 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 
 		// 4) Stage Control - manual stage movement interface
 		MenuItem stageControlOption = new MenuItem(res.getString("menu.stagecontrol"));
+		setMenuItemTooltip(stageControlOption,
+				"Open a simple interface to manually move the microscope stage to specific X, Y, Z positions. " +
+				"Useful for testing connectivity and exploring the slide.");
 		stageControlOption.setOnAction(e -> {
 			try {
 				QPScopeController.getInstance().startWorkflow("basicStageInterface");
@@ -187,6 +202,9 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 		// Background collection (for flat field correction)
 		MenuItem backgroundCollectionOption = new MenuItem(res.getString("menu.backgroundCollection"));
 		backgroundCollectionOption.setDisable(!configValid);
+		setMenuItemTooltip(backgroundCollectionOption,
+				"Capture background images for flat-field correction. " +
+				"Move to a blank area of the slide and acquire reference images to correct uneven illumination.");
 		backgroundCollectionOption.setOnAction(e -> {
 			try {
 				QPScopeController.getInstance().startWorkflow("backgroundCollection");
@@ -198,6 +216,9 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 		// Polarizer calibration (PPM only)
 		MenuItem polarizerCalibrationOption = new MenuItem(res.getString("menu.polarizerCalibration"));
 		polarizerCalibrationOption.setDisable(!configValid);
+		setMenuItemTooltip(polarizerCalibrationOption,
+				"Calibrate the polarizer rotation stage for polarized light microscopy (PPM). " +
+				"Determines the correct rotation angles for optimal birefringence imaging.");
 		polarizerCalibrationOption.setOnAction(e -> {
 			try {
 				QPScopeController.getInstance().startWorkflow("polarizerCalibration");
@@ -209,6 +230,9 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 		// Autofocus settings editor
 		MenuItem autofocusEditorOption = new MenuItem(res.getString("menu.autofocusEditor"));
 		autofocusEditorOption.setDisable(!configValid);
+		setMenuItemTooltip(autofocusEditorOption,
+				"Configure autofocus parameters for each objective lens. " +
+				"Adjust search range, step size, and scoring method to optimize focus quality.");
 		autofocusEditorOption.setOnAction(e -> {
 			try {
 				QPScopeController.getInstance().startWorkflow("autofocusEditor");
@@ -219,6 +243,9 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 
 		// Server Connection Settings
 		MenuItem serverConnectionOption = new MenuItem(res.getString("menu.serverConnection"));
+		setMenuItemTooltip(serverConnectionOption,
+				"Configure and test the connection to the microscope control server. " +
+				"Set the server address, port, and verify communication with the microscope hardware.");
 		serverConnectionOption.setOnAction(e -> {
 			try {
 				QPScopeController.getInstance().startWorkflow("serverConnection");
@@ -249,5 +276,34 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 		);
 
 		logger.info("Menu items added for extension: " + EXTENSION_NAME);
+	}
+
+	/**
+	 * Sets a tooltip on a MenuItem by using a Label as the graphic.
+	 * Since JavaFX MenuItem doesn't directly support tooltips, we install
+	 * the tooltip on the menu item's internal label node when it's shown.
+	 *
+	 * @param menuItem the menu item to add tooltip to
+	 * @param tooltipText the tooltip text to display
+	 */
+	private void setMenuItemTooltip(MenuItem menuItem, String tooltipText) {
+		Tooltip tooltip = new Tooltip(tooltipText);
+		tooltip.setShowDelay(Duration.millis(500));
+		tooltip.setShowDuration(Duration.seconds(30));
+		tooltip.setWrapText(true);
+		tooltip.setMaxWidth(350);
+
+		// Install tooltip when the menu item's parent menu is shown
+		menuItem.parentPopupProperty().addListener((obs, oldPopup, newPopup) -> {
+			if (newPopup != null) {
+				newPopup.setOnShown(e -> {
+					// Find the label node for this menu item and install tooltip
+					var node = menuItem.getStyleableNode();
+					if (node != null) {
+						Tooltip.install(node, tooltip);
+					}
+				});
+			}
+		});
 	}
 }
