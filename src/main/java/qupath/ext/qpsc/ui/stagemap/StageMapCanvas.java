@@ -1,44 +1,58 @@
 package qupath.ext.qpsc.ui.stagemap;
 
 import javafx.application.Platform;
-import javafx.scene.canvas.Canvas;
-import javafx.scene.canvas.GraphicsContext;
+import javafx.scene.image.ImageView;
+import javafx.scene.image.PixelWriter;
+import javafx.scene.image.WritableImage;
+import javafx.scene.layout.Pane;
+import javafx.scene.layout.StackPane;
 import javafx.scene.paint.Color;
+import javafx.scene.shape.Circle;
+import javafx.scene.shape.Line;
+import javafx.scene.shape.Rectangle;
+import javafx.scene.shape.StrokeLineCap;
 import javafx.scene.text.Font;
+import javafx.scene.text.Text;
 import javafx.scene.text.TextAlignment;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.function.BiConsumer;
 
 /**
- * Custom Canvas for rendering the stage map visualization.
+ * Stage map visualization using WritableImage + Shape nodes.
+ * <p>
+ * This implementation avoids the hardware texture corruption issues that affect
+ * Canvas-based rendering when MicroManager's Live Mode is toggled. It uses:
+ * <ul>
+ *   <li>WritableImage for static background elements (painted via PixelWriter)</li>
+ *   <li>JavaFX Shape nodes for dynamic overlays (crosshair, FOV, target)</li>
+ * </ul>
+ * <p>
+ * This design also supports future "live preview scan" functionality where
+ * RGB color data can be progressively painted into the WritableImage.
  * <p>
  * Displays:
  * <ul>
  *   <li>Stage insert outline (dark gray rectangle)</li>
  *   <li>Slide positions (light blue rectangles)</li>
  *   <li>Legal/illegal zone overlay (green/red tint)</li>
- *   <li>Current objective position (red crosshair)</li>
+ *   <li>Current objective position (cyan crosshair)</li>
  *   <li>Camera field of view (orange rectangle)</li>
- *   <li>Target position on hover (dashed crosshair)</li>
- * </ul>
- * <p>
- * Coordinate system:
- * <ul>
- *   <li>Stage coordinates: microns (um), from microscope</li>
- *   <li>Insert coordinates: relative to insert origin</li>
- *   <li>Screen coordinates: pixels, for JavaFX rendering</li>
+ *   <li>Target position on hover (blue dashed crosshair)</li>
  * </ul>
  */
-public class StageMapCanvas extends Canvas {
+public class StageMapCanvas extends StackPane {
 
     private static final Logger logger = LoggerFactory.getLogger(StageMapCanvas.class);
 
     // ========== Colors ==========
+    private static final Color BACKGROUND_COLOR = Color.rgb(40, 40, 40);
     private static final Color INSERT_BACKGROUND = Color.rgb(60, 60, 60);
     private static final Color INSERT_BORDER = Color.rgb(100, 100, 100);
-    private static final Color SLIDE_FILL = Color.rgb(200, 220, 255, 0.8);
+    private static final Color SLIDE_FILL = Color.rgb(200, 220, 255);
     private static final Color SLIDE_BORDER = Color.rgb(100, 140, 200);
     private static final Color SLIDE_LABEL = Color.rgb(60, 80, 120);
     private static final Color LEGAL_ZONE = Color.rgb(100, 200, 100, 0.15);
@@ -49,10 +63,25 @@ public class StageMapCanvas extends Canvas {
     private static final Color OUT_OF_BOUNDS_COLOR = Color.rgb(255, 100, 100, 0.8);
 
     // ========== Rendering Constants ==========
-    private static final double CROSSHAIR_SIZE = 12;  // pixels (radius of filled circle)
-    private static final double CROSSHAIR_LINE_LENGTH = 20;  // pixels (line extending from circle)
+    private static final double CROSSHAIR_RADIUS = 6;  // pixels
+    private static final double CROSSHAIR_LINE_LENGTH = 20;  // pixels
+    private static final double CROSSHAIR_GAP = 2;  // pixels gap between circle and lines
     private static final double INSERT_PADDING = 20;  // pixels padding around insert
-    private static final double SLIDE_CORNER_RADIUS = 3;  // pixels
+
+    // ========== Image Layer ==========
+    private WritableImage backgroundImage;
+    private ImageView backgroundView;
+    private PixelWriter pixelWriter;
+
+    // ========== Shape Overlay Layer ==========
+    private Pane overlayPane;
+    private Circle crosshairCircle;
+    private Line crosshairLineH1, crosshairLineH2, crosshairLineV1, crosshairLineV2;
+    private Rectangle fovRect;
+    private Line targetLineH, targetLineV;
+    private List<Rectangle> slideRects = new ArrayList<>();
+    private List<Text> slideLabels = new ArrayList<>();
+    private Rectangle insertBorderRect;
 
     // ========== State ==========
     private StageInsert currentInsert;
@@ -68,51 +97,98 @@ public class StageMapCanvas extends Canvas {
     private boolean showLegalZones = true;
     private boolean showTarget = false;
 
-    // Track previous size to avoid unnecessary recalculations
-    private double lastCalculatedWidth = 0;
-    private double lastCalculatedHeight = 0;
+    // Track size for recalculation
+    private double lastWidth = 0;
+    private double lastHeight = 0;
     private boolean isRecalculating = false;
 
-    // Error suppression to prevent log spam when canvas is in bad state
-    private boolean renderErrorLogged = false;
-    private int renderErrorCount = 0;
-
-    // Flag to completely disable rendering (used during dispose)
+    // Rendering control
     private volatile boolean renderingEnabled = true;
-
-    // Track if canvas texture appears corrupted (continuous render failures)
-    private volatile boolean textureCorrupted = false;
 
     // ========== Callback ==========
     private BiConsumer<Double, Double> clickHandler;
+
+    // Initial size preferences
+    private double initialWidth = 400;
+    private double initialHeight = 300;
 
     public StageMapCanvas() {
         this(400, 300);
     }
 
     public StageMapCanvas(double width, double height) {
-        super(width, height);
+        this.initialWidth = width;
+        this.initialHeight = height;
+        setPrefSize(width, height);
 
-        // Handle mouse movement for target preview
-        setOnMouseMoved(e -> {
+        // Create background image layer
+        backgroundImage = new WritableImage((int) width, (int) height);
+        pixelWriter = backgroundImage.getPixelWriter();
+        backgroundView = new ImageView(backgroundImage);
+        backgroundView.setPreserveRatio(false);
+
+        // Create overlay pane for shapes
+        overlayPane = new Pane();
+        overlayPane.setMouseTransparent(false);
+
+        // Create crosshair shapes
+        crosshairCircle = new Circle(CROSSHAIR_RADIUS);
+        crosshairCircle.setFill(CROSSHAIR_COLOR);
+        crosshairCircle.setVisible(false);
+
+        crosshairLineH1 = createCrosshairLine();
+        crosshairLineH2 = createCrosshairLine();
+        crosshairLineV1 = createCrosshairLine();
+        crosshairLineV2 = createCrosshairLine();
+
+        // Create FOV rectangle
+        fovRect = new Rectangle();
+        fovRect.setFill(Color.TRANSPARENT);
+        fovRect.setStroke(FOV_COLOR);
+        fovRect.setStrokeWidth(1.5);
+        fovRect.setVisible(false);
+
+        // Create target crosshair (dashed)
+        targetLineH = createTargetLine();
+        targetLineV = createTargetLine();
+
+        // Create insert border rectangle
+        insertBorderRect = new Rectangle();
+        insertBorderRect.setFill(Color.TRANSPARENT);
+        insertBorderRect.setStroke(INSERT_BORDER);
+        insertBorderRect.setStrokeWidth(2);
+        insertBorderRect.setVisible(false);
+
+        // Add all shapes to overlay
+        overlayPane.getChildren().addAll(
+                insertBorderRect,
+                crosshairCircle, crosshairLineH1, crosshairLineH2, crosshairLineV1, crosshairLineV2,
+                fovRect,
+                targetLineH, targetLineV
+        );
+
+        // Stack layers
+        getChildren().addAll(backgroundView, overlayPane);
+
+        // Handle mouse events on the overlay pane
+        overlayPane.setOnMouseMoved(e -> {
             if (currentInsert != null) {
                 double[] stageCoords = screenToStage(e.getX(), e.getY());
                 if (stageCoords != null) {
                     targetStageX = stageCoords[0];
                     targetStageY = stageCoords[1];
                     showTarget = true;
-                    render();
+                    updateTargetOverlay();
                 }
             }
         });
 
-        setOnMouseExited(e -> {
+        overlayPane.setOnMouseExited(e -> {
             showTarget = false;
-            render();
+            updateTargetOverlay();
         });
 
-        // Handle double-click for movement
-        setOnMouseClicked(e -> {
+        overlayPane.setOnMouseClicked(e -> {
             if (e.getClickCount() == 2 && clickHandler != null && currentInsert != null) {
                 double[] stageCoords = screenToStage(e.getX(), e.getY());
                 if (stageCoords != null) {
@@ -120,7 +196,34 @@ public class StageMapCanvas extends Canvas {
                 }
             }
         });
+
+        // Handle size changes
+        widthProperty().addListener((obs, oldVal, newVal) -> onSizeChanged());
+        heightProperty().addListener((obs, oldVal, newVal) -> onSizeChanged());
+
+        // Initial render
+        renderBackground();
     }
+
+    private Line createCrosshairLine() {
+        Line line = new Line();
+        line.setStroke(CROSSHAIR_COLOR);
+        line.setStrokeWidth(2);
+        line.setStrokeLineCap(StrokeLineCap.ROUND);
+        line.setVisible(false);
+        return line;
+    }
+
+    private Line createTargetLine() {
+        Line line = new Line();
+        line.setStroke(TARGET_COLOR);
+        line.setStrokeWidth(1);
+        line.getStrokeDashArray().addAll(4.0, 4.0);
+        line.setVisible(false);
+        return line;
+    }
+
+    // ========== Public API ==========
 
     /**
      * Sets the insert configuration to display.
@@ -128,7 +231,8 @@ public class StageMapCanvas extends Canvas {
     public void setInsert(StageInsert insert) {
         this.currentInsert = insert;
         calculateScale();
-        render();
+        renderBackground();
+        updateOverlays();
     }
 
     /**
@@ -137,7 +241,8 @@ public class StageMapCanvas extends Canvas {
     public void updatePosition(double stageX, double stageY) {
         this.currentStageX = stageX;
         this.currentStageY = stageY;
-        render();
+        updateCrosshairOverlay();
+        updateFOVOverlay();
     }
 
     /**
@@ -146,7 +251,7 @@ public class StageMapCanvas extends Canvas {
     public void updateFOV(double widthUm, double heightUm) {
         this.fovWidthUm = widthUm;
         this.fovHeightUm = heightUm;
-        render();
+        updateFOVOverlay();
     }
 
     /**
@@ -162,18 +267,16 @@ public class StageMapCanvas extends Canvas {
      */
     public void setShowLegalZones(boolean show) {
         this.showLegalZones = show;
-        render();
+        renderBackground();
     }
 
     /**
-     * Enables or disables canvas rendering.
-     * When disabled, all render() calls are ignored. Used during window disposal
-     * to prevent texture corruption from stale render requests.
+     * Enables or disables rendering.
      */
     public void setRenderingEnabled(boolean enabled) {
         this.renderingEnabled = enabled;
         if (!enabled) {
-            logger.debug("Canvas rendering disabled");
+            logger.debug("Rendering disabled");
         }
     }
 
@@ -188,8 +291,50 @@ public class StageMapCanvas extends Canvas {
     }
 
     /**
+     * Paints a color block at the specified stage position.
+     * Used for live preview scan feature.
+     *
+     * @param stageX   Stage X coordinate in microns
+     * @param stageY   Stage Y coordinate in microns
+     * @param r        Red component (0-255)
+     * @param g        Green component (0-255)
+     * @param b        Blue component (0-255)
+     * @param blockSize Size of the color block in pixels
+     */
+    public void paintColorBlock(double stageX, double stageY, int r, int g, int b, int blockSize) {
+        if (!renderingEnabled || currentInsert == null) {
+            return;
+        }
+
+        double[] screenPos = stageToScreen(stageX, stageY);
+        if (screenPos == null) {
+            return;
+        }
+
+        int sx = (int) screenPos[0];
+        int sy = (int) screenPos[1];
+        Color color = Color.rgb(r, g, b);
+
+        // Paint a small block centered on the position
+        int halfSize = blockSize / 2;
+        int imgWidth = (int) backgroundImage.getWidth();
+        int imgHeight = (int) backgroundImage.getHeight();
+
+        for (int dx = -halfSize; dx <= halfSize; dx++) {
+            for (int dy = -halfSize; dy <= halfSize; dy++) {
+                int px = sx + dx;
+                int py = sy + dy;
+                if (px >= 0 && px < imgWidth && py >= 0 && py < imgHeight) {
+                    pixelWriter.setColor(px, py, color);
+                }
+            }
+        }
+    }
+
+    // ========== Coordinate Conversion ==========
+
+    /**
      * Converts screen coordinates to stage coordinates.
-     * Handles axis inversion when optics flip the coordinate system.
      */
     public double[] screenToStage(double screenX, double screenY) {
         if (currentInsert == null || scale == 0) {
@@ -199,7 +344,6 @@ public class StageMapCanvas extends Canvas {
         double insertX = (screenX - offsetX) / scale;
         double insertY = (screenY - offsetY) / scale;
 
-        // Handle axis inversion: when inverted, screen right = decreasing stage value
         double stageX, stageY;
         if (currentInsert.isXAxisInverted()) {
             stageX = currentInsert.getOriginXUm() - insertX;
@@ -218,14 +362,12 @@ public class StageMapCanvas extends Canvas {
 
     /**
      * Converts stage coordinates to screen coordinates.
-     * Handles axis inversion when optics flip the coordinate system.
      */
     public double[] stageToScreen(double stageX, double stageY) {
         if (currentInsert == null) {
             return null;
         }
 
-        // Handle axis inversion: when inverted, decreasing stage value = screen right
         double insertX, insertY;
         if (currentInsert.isXAxisInverted()) {
             insertX = currentInsert.getOriginXUm() - stageX;
@@ -245,9 +387,8 @@ public class StageMapCanvas extends Canvas {
         return new double[]{screenX, screenY};
     }
 
-    /**
-     * Calculates the scale factor to fit the insert in the canvas with padding.
-     */
+    // ========== Internal Rendering ==========
+
     private void calculateScale() {
         if (currentInsert == null) {
             scale = 1.0;
@@ -255,171 +396,201 @@ public class StageMapCanvas extends Canvas {
             return;
         }
 
-        double availableWidth = getWidth() - 2 * INSERT_PADDING;
-        double availableHeight = getHeight() - 2 * INSERT_PADDING;
+        double w = getWidth();
+        double h = getHeight();
+        if (w <= 0 || h <= 0) {
+            return;
+        }
+
+        double availableWidth = w - 2 * INSERT_PADDING;
+        double availableHeight = h - 2 * INSERT_PADDING;
 
         double scaleX = availableWidth / currentInsert.getWidthUm();
         double scaleY = availableHeight / currentInsert.getHeightUm();
 
         scale = Math.min(scaleX, scaleY);
 
-        // Center the insert
         double renderedWidth = currentInsert.getWidthUm() * scale;
         double renderedHeight = currentInsert.getHeightUm() * scale;
 
-        offsetX = (getWidth() - renderedWidth) / 2.0;
-        offsetY = (getHeight() - renderedHeight) / 2.0;
+        offsetX = (w - renderedWidth) / 2.0;
+        offsetY = (h - renderedHeight) / 2.0;
     }
 
     /**
-     * Renders the complete stage map visualization.
+     * Renders the static background elements to the WritableImage.
      */
-    public void render() {
-        // Skip if rendering has been disabled (during dispose)
+    private void renderBackground() {
         if (!renderingEnabled) {
             return;
         }
 
-        // Ensure we're on the FX Application Thread
         if (!Platform.isFxApplicationThread()) {
-            // Check again before queueing to avoid stale requests
-            if (!renderingEnabled) {
-                return;
-            }
-            Platform.runLater(this::render);
+            Platform.runLater(this::renderBackground);
             return;
         }
 
-        // Guard against rendering with invalid dimensions (causes NPE in JavaFX)
         double w = getWidth();
         double h = getHeight();
-        if (w <= 0 || h <= 0 || !Double.isFinite(w) || !Double.isFinite(h)) {
+        if (w <= 0 || h <= 0) {
             return;
         }
 
-        try {
-            GraphicsContext gc = getGraphicsContext2D();
+        // Recreate image if size changed
+        int iw = (int) w;
+        int ih = (int) h;
+        if (backgroundImage.getWidth() != iw || backgroundImage.getHeight() != ih) {
+            backgroundImage = new WritableImage(iw, ih);
+            pixelWriter = backgroundImage.getPixelWriter();
+            backgroundView.setImage(backgroundImage);
+        }
 
-            // Clear canvas
-            gc.setFill(Color.rgb(40, 40, 40));
-            gc.fillRect(0, 0, w, h);
+        // Fill background
+        fillRect(0, 0, iw, ih, BACKGROUND_COLOR);
 
-            if (currentInsert == null) {
-                gc.setFill(Color.GRAY);
-                gc.setTextAlign(TextAlignment.CENTER);
-                gc.fillText("No insert configuration", w / 2, h / 2);
-                return;
-            }
+        if (currentInsert == null) {
+            // Show message when no insert configured
+            return;
+        }
 
-            // Render layers from back to front
-            renderInsertBackground(gc);
-            if (showLegalZones) {
-                renderLegalZones(gc);
-            }
-            renderSlides(gc);
-            renderInsertBorder(gc);
-            renderFOV(gc);
-            renderCrosshair(gc);
-            if (showTarget) {
-                renderTarget(gc);
-            }
+        // Draw insert background
+        int insertX = (int) offsetX;
+        int insertY = (int) offsetY;
+        int insertW = (int) (currentInsert.getWidthUm() * scale);
+        int insertH = (int) (currentInsert.getHeightUm() * scale);
+        fillRect(insertX, insertY, insertW, insertH, INSERT_BACKGROUND);
 
-            // Reset error state on successful render
-            if (renderErrorLogged) {
-                logger.info("Canvas rendering recovered after {} errors", renderErrorCount);
-                renderErrorLogged = false;
-                renderErrorCount = 0;
-            }
-        } catch (Exception e) {
-            // Suppress repeated error logging - only log first occurrence
-            renderErrorCount++;
-            if (!renderErrorLogged) {
-                logger.warn("Canvas render error (suppressing further): {}", e.getMessage());
-                renderErrorLogged = true;
-            }
+        // Draw legal/illegal zones
+        if (showLegalZones) {
+            // First fill with illegal zone color
+            fillRectBlend(insertX, insertY, insertW, insertH, ILLEGAL_ZONE);
 
-            // If we hit many render errors quickly, the texture is likely corrupted
-            // Hide ourselves to stop JavaFX's internal render loop from spamming
-            if (renderErrorCount >= 5 && !textureCorrupted) {
-                textureCorrupted = true;
-                logger.warn("Canvas texture appears corrupted - hiding canvas to stop render errors");
-                setVisible(false);
+            // Then overlay legal zones around slides
+            double marginPx = currentInsert.getSlideMarginUm() * scale;
+            for (StageInsert.SlidePosition slide : currentInsert.getSlides()) {
+                int zx = (int) (offsetX + slide.getXOffsetUm() * scale - marginPx);
+                int zy = (int) (offsetY + slide.getYOffsetUm() * scale - marginPx);
+                int zw = (int) (slide.getWidthUm() * scale + 2 * marginPx);
+                int zh = (int) (slide.getHeightUm() * scale + 2 * marginPx);
+                fillRectBlend(zx, zy, zw, zh, LEGAL_ZONE);
             }
         }
+
+        // Draw slides
+        for (StageInsert.SlidePosition slide : currentInsert.getSlides()) {
+            int sx = (int) (offsetX + slide.getXOffsetUm() * scale);
+            int sy = (int) (offsetY + slide.getYOffsetUm() * scale);
+            int sw = (int) (slide.getWidthUm() * scale);
+            int sh = (int) (slide.getHeightUm() * scale);
+
+            fillRect(sx, sy, sw, sh, SLIDE_FILL);
+            drawRectBorder(sx, sy, sw, sh, SLIDE_BORDER, 2);
+        }
+
+        // Update insert border shape
+        insertBorderRect.setX(offsetX);
+        insertBorderRect.setY(offsetY);
+        insertBorderRect.setWidth(currentInsert.getWidthUm() * scale);
+        insertBorderRect.setHeight(currentInsert.getHeightUm() * scale);
+        insertBorderRect.setVisible(true);
+
+        // Update slide labels (using Text shapes)
+        updateSlideLabels();
     }
 
-    /**
-     * Returns true if the canvas texture appears to be corrupted.
-     * This happens when MicroManager's Live Mode is toggled off, corrupting
-     * shared graphics resources.
-     */
-    public boolean isTextureCorrupted() {
-        return textureCorrupted;
-    }
+    private void updateSlideLabels() {
+        // Remove old labels
+        overlayPane.getChildren().removeAll(slideLabels);
+        slideLabels.clear();
 
-    private void renderInsertBackground(GraphicsContext gc) {
-        gc.setFill(INSERT_BACKGROUND);
-        gc.fillRect(offsetX, offsetY,
-                currentInsert.getWidthUm() * scale,
-                currentInsert.getHeightUm() * scale);
-    }
-
-    private void renderInsertBorder(GraphicsContext gc) {
-        gc.setStroke(INSERT_BORDER);
-        gc.setLineWidth(2);
-        gc.strokeRect(offsetX, offsetY,
-                currentInsert.getWidthUm() * scale,
-                currentInsert.getHeightUm() * scale);
-    }
-
-    private void renderSlides(GraphicsContext gc) {
-        gc.setFont(Font.font(10));
+        if (currentInsert == null) {
+            return;
+        }
 
         for (StageInsert.SlidePosition slide : currentInsert.getSlides()) {
-            double x = offsetX + slide.getXOffsetUm() * scale;
-            double y = offsetY + slide.getYOffsetUm() * scale;
-            double w = slide.getWidthUm() * scale;
-            double h = slide.getHeightUm() * scale;
+            double sx = offsetX + slide.getXOffsetUm() * scale;
+            double sy = offsetY + slide.getYOffsetUm() * scale;
+            double sw = slide.getWidthUm() * scale;
+            double sh = slide.getHeightUm() * scale;
 
-            // Fill
-            gc.setFill(SLIDE_FILL);
-            gc.fillRoundRect(x, y, w, h, SLIDE_CORNER_RADIUS, SLIDE_CORNER_RADIUS);
+            Text label = new Text(slide.getName());
+            label.setFont(Font.font(10));
+            label.setFill(SLIDE_LABEL);
+            label.setTextAlignment(TextAlignment.CENTER);
 
-            // Border
-            gc.setStroke(SLIDE_BORDER);
-            gc.setLineWidth(1.5);
-            gc.strokeRoundRect(x, y, w, h, SLIDE_CORNER_RADIUS, SLIDE_CORNER_RADIUS);
+            // Center the label
+            double textWidth = label.getLayoutBounds().getWidth();
+            double textHeight = label.getLayoutBounds().getHeight();
+            label.setX(sx + (sw - textWidth) / 2);
+            label.setY(sy + (sh + textHeight) / 2 - 2);
 
-            // Label
-            gc.setFill(SLIDE_LABEL);
-            gc.setTextAlign(TextAlignment.CENTER);
-            gc.fillText(slide.getName(), x + w / 2, y + h / 2 + 4);
+            slideLabels.add(label);
+        }
+
+        overlayPane.getChildren().addAll(slideLabels);
+    }
+
+    private void fillRect(int x, int y, int w, int h, Color color) {
+        int imgW = (int) backgroundImage.getWidth();
+        int imgH = (int) backgroundImage.getHeight();
+
+        for (int px = Math.max(0, x); px < Math.min(imgW, x + w); px++) {
+            for (int py = Math.max(0, y); py < Math.min(imgH, y + h); py++) {
+                pixelWriter.setColor(px, py, color);
+            }
         }
     }
 
-    private void renderLegalZones(GraphicsContext gc) {
-        // First, fill the entire insert with "illegal" zone color
-        gc.setFill(ILLEGAL_ZONE);
-        gc.fillRect(offsetX, offsetY,
-                currentInsert.getWidthUm() * scale,
-                currentInsert.getHeightUm() * scale);
+    private void fillRectBlend(int x, int y, int w, int h, Color color) {
+        int imgW = (int) backgroundImage.getWidth();
+        int imgH = (int) backgroundImage.getHeight();
 
-        // Then overlay "legal" zones around each slide
-        gc.setFill(LEGAL_ZONE);
-        double marginPx = currentInsert.getSlideMarginUm() * scale;
-
-        for (StageInsert.SlidePosition slide : currentInsert.getSlides()) {
-            double x = offsetX + slide.getXOffsetUm() * scale - marginPx;
-            double y = offsetY + slide.getYOffsetUm() * scale - marginPx;
-            double w = slide.getWidthUm() * scale + 2 * marginPx;
-            double h = slide.getHeightUm() * scale + 2 * marginPx;
-
-            gc.fillRect(x, y, w, h);
+        for (int px = Math.max(0, x); px < Math.min(imgW, x + w); px++) {
+            for (int py = Math.max(0, y); py < Math.min(imgH, y + h); py++) {
+                Color existing = backgroundImage.getPixelReader().getColor(px, py);
+                Color blended = blendColors(existing, color);
+                pixelWriter.setColor(px, py, blended);
+            }
         }
     }
 
-    private void renderCrosshair(GraphicsContext gc) {
-        if (Double.isNaN(currentStageX) || Double.isNaN(currentStageY)) {
+    private Color blendColors(Color base, Color overlay) {
+        double alpha = overlay.getOpacity();
+        double r = base.getRed() * (1 - alpha) + overlay.getRed() * alpha;
+        double g = base.getGreen() * (1 - alpha) + overlay.getGreen() * alpha;
+        double b = base.getBlue() * (1 - alpha) + overlay.getBlue() * alpha;
+        return Color.color(r, g, b);
+    }
+
+    private void drawRectBorder(int x, int y, int w, int h, Color color, int thickness) {
+        // Top and bottom
+        fillRect(x, y, w, thickness, color);
+        fillRect(x, y + h - thickness, w, thickness, color);
+        // Left and right
+        fillRect(x, y, thickness, h, color);
+        fillRect(x + w - thickness, y, thickness, h, color);
+    }
+
+    // ========== Overlay Updates ==========
+
+    private void updateOverlays() {
+        updateCrosshairOverlay();
+        updateFOVOverlay();
+        updateTargetOverlay();
+    }
+
+    private void updateCrosshairOverlay() {
+        if (!Platform.isFxApplicationThread()) {
+            Platform.runLater(this::updateCrosshairOverlay);
+            return;
+        }
+
+        if (Double.isNaN(currentStageX) || Double.isNaN(currentStageY) || currentInsert == null) {
+            crosshairCircle.setVisible(false);
+            crosshairLineH1.setVisible(false);
+            crosshairLineH2.setVisible(false);
+            crosshairLineV1.setVisible(false);
+            crosshairLineV2.setVisible(false);
             return;
         }
 
@@ -431,39 +602,64 @@ public class StageMapCanvas extends Canvas {
         double sx = screenPos[0];
         double sy = screenPos[1];
 
-        // Check if position is within insert bounds
+        // Check if in bounds
         boolean inInsert = currentInsert.isPositionInInsert(currentStageX, currentStageY);
         Color color = inInsert ? CROSSHAIR_COLOR : OUT_OF_BOUNDS_COLOR;
 
-        // Draw filled circle at center
-        gc.setFill(color);
-        gc.fillOval(sx - CROSSHAIR_SIZE / 2, sy - CROSSHAIR_SIZE / 2,
-                    CROSSHAIR_SIZE, CROSSHAIR_SIZE);
+        // Update circle
+        crosshairCircle.setCenterX(sx);
+        crosshairCircle.setCenterY(sy);
+        crosshairCircle.setFill(color);
+        crosshairCircle.setVisible(true);
 
-        // Draw crosshair lines extending from circle
-        gc.setStroke(color);
-        gc.setLineWidth(2);
-
-        double lineStart = CROSSHAIR_SIZE / 2 + 2;  // Start just outside the circle
+        // Update lines
+        double lineStart = CROSSHAIR_RADIUS + CROSSHAIR_GAP;
         double lineEnd = lineStart + CROSSHAIR_LINE_LENGTH;
 
-        // Horizontal lines
-        gc.strokeLine(sx - lineEnd, sy, sx - lineStart, sy);
-        gc.strokeLine(sx + lineStart, sy, sx + lineEnd, sy);
+        crosshairLineH1.setStartX(sx - lineEnd);
+        crosshairLineH1.setStartY(sy);
+        crosshairLineH1.setEndX(sx - lineStart);
+        crosshairLineH1.setEndY(sy);
+        crosshairLineH1.setStroke(color);
+        crosshairLineH1.setVisible(true);
 
-        // Vertical lines
-        gc.strokeLine(sx, sy - lineEnd, sx, sy - lineStart);
-        gc.strokeLine(sx, sy + lineStart, sx, sy + lineEnd);
+        crosshairLineH2.setStartX(sx + lineStart);
+        crosshairLineH2.setStartY(sy);
+        crosshairLineH2.setEndX(sx + lineEnd);
+        crosshairLineH2.setEndY(sy);
+        crosshairLineH2.setStroke(color);
+        crosshairLineH2.setVisible(true);
+
+        crosshairLineV1.setStartX(sx);
+        crosshairLineV1.setStartY(sy - lineEnd);
+        crosshairLineV1.setEndX(sx);
+        crosshairLineV1.setEndY(sy - lineStart);
+        crosshairLineV1.setStroke(color);
+        crosshairLineV1.setVisible(true);
+
+        crosshairLineV2.setStartX(sx);
+        crosshairLineV2.setStartY(sy + lineStart);
+        crosshairLineV2.setEndX(sx);
+        crosshairLineV2.setEndY(sy + lineEnd);
+        crosshairLineV2.setStroke(color);
+        crosshairLineV2.setVisible(true);
     }
 
-    private void renderFOV(GraphicsContext gc) {
+    private void updateFOVOverlay() {
+        if (!Platform.isFxApplicationThread()) {
+            Platform.runLater(this::updateFOVOverlay);
+            return;
+        }
+
         if (Double.isNaN(currentStageX) || Double.isNaN(currentStageY) ||
-            fovWidthUm <= 0 || fovHeightUm <= 0) {
+            fovWidthUm <= 0 || fovHeightUm <= 0 || currentInsert == null) {
+            fovRect.setVisible(false);
             return;
         }
 
         double[] screenPos = stageToScreen(currentStageX, currentStageY);
         if (screenPos == null) {
+            fovRect.setVisible(false);
             return;
         }
 
@@ -472,38 +668,78 @@ public class StageMapCanvas extends Canvas {
         double fovW = fovWidthUm * scale;
         double fovH = fovHeightUm * scale;
 
-        // Draw FOV rectangle centered on crosshair
-        gc.setStroke(FOV_COLOR);
-        gc.setLineWidth(1.5);
-        gc.strokeRect(sx - fovW / 2, sy - fovH / 2, fovW, fovH);
+        fovRect.setX(sx - fovW / 2);
+        fovRect.setY(sy - fovH / 2);
+        fovRect.setWidth(fovW);
+        fovRect.setHeight(fovH);
+        fovRect.setVisible(true);
     }
 
-    private void renderTarget(GraphicsContext gc) {
-        if (Double.isNaN(targetStageX) || Double.isNaN(targetStageY)) {
+    private void updateTargetOverlay() {
+        if (!Platform.isFxApplicationThread()) {
+            Platform.runLater(this::updateTargetOverlay);
+            return;
+        }
+
+        if (!showTarget || Double.isNaN(targetStageX) || Double.isNaN(targetStageY) || currentInsert == null) {
+            targetLineH.setVisible(false);
+            targetLineV.setVisible(false);
             return;
         }
 
         double[] screenPos = stageToScreen(targetStageX, targetStageY);
         if (screenPos == null) {
+            targetLineH.setVisible(false);
+            targetLineV.setVisible(false);
             return;
         }
 
         double sx = screenPos[0];
         double sy = screenPos[1];
 
-        // Check if target is legal
         boolean isLegal = currentInsert.isPositionLegal(targetStageX, targetStageY);
         Color color = isLegal ? TARGET_COLOR : OUT_OF_BOUNDS_COLOR;
 
-        gc.setStroke(color);
-        gc.setLineWidth(1);
-        gc.setLineDashes(4, 4);
+        targetLineH.setStartX(sx - CROSSHAIR_LINE_LENGTH);
+        targetLineH.setStartY(sy);
+        targetLineH.setEndX(sx + CROSSHAIR_LINE_LENGTH);
+        targetLineH.setEndY(sy);
+        targetLineH.setStroke(color);
+        targetLineH.setVisible(true);
 
-        // Dashed crosshair for target
-        gc.strokeLine(sx - CROSSHAIR_SIZE, sy, sx + CROSSHAIR_SIZE, sy);
-        gc.strokeLine(sx, sy - CROSSHAIR_SIZE, sx, sy + CROSSHAIR_SIZE);
+        targetLineV.setStartX(sx);
+        targetLineV.setStartY(sy - CROSSHAIR_LINE_LENGTH);
+        targetLineV.setEndX(sx);
+        targetLineV.setEndY(sy + CROSSHAIR_LINE_LENGTH);
+        targetLineV.setStroke(color);
+        targetLineV.setVisible(true);
+    }
 
-        gc.setLineDashes(null);  // Reset to solid
+    // ========== Size Handling ==========
+
+    public void onSizeChanged() {
+        if (isRecalculating) {
+            return;
+        }
+
+        double currentWidth = getWidth();
+        double currentHeight = getHeight();
+        if (Math.abs(currentWidth - lastWidth) < 2 && Math.abs(currentHeight - lastHeight) < 2) {
+            return;
+        }
+
+        isRecalculating = true;
+        try {
+            lastWidth = currentWidth;
+            lastHeight = currentHeight;
+            backgroundView.setFitWidth(currentWidth);
+            backgroundView.setFitHeight(currentHeight);
+            calculateScale();
+            renderBackground();
+            updateOverlays();
+        } finally {
+            isRecalculating = false;
+        }
     }
 
     @Override
@@ -512,42 +748,28 @@ public class StageMapCanvas extends Canvas {
     }
 
     @Override
-    public double prefWidth(double height) {
-        return getWidth();
+    protected double computePrefWidth(double height) {
+        return initialWidth;
     }
 
     @Override
-    public double prefHeight(double width) {
-        return getHeight();
+    protected double computePrefHeight(double width) {
+        return initialHeight;
     }
 
     /**
-     * Called when the canvas size changes (via property binding).
-     * Recalculates scale and re-renders.
-     * Includes guards against feedback loops and unnecessary recalculations.
+     * Convenience method for API compatibility with legacy canvas.
+     * Triggers a full re-render.
      */
-    public void onSizeChanged() {
-        // Prevent re-entry during recalculation
-        if (isRecalculating) {
-            return;
-        }
+    public void render() {
+        renderBackground();
+        updateOverlays();
+    }
 
-        // Only recalculate if size actually changed meaningfully
-        double currentWidth = getWidth();
-        double currentHeight = getHeight();
-        if (Math.abs(currentWidth - lastCalculatedWidth) < 2 &&
-            Math.abs(currentHeight - lastCalculatedHeight) < 2) {
-            return;
-        }
-
-        isRecalculating = true;
-        try {
-            lastCalculatedWidth = currentWidth;
-            lastCalculatedHeight = currentHeight;
-            calculateScale();
-            render();
-        } finally {
-            isRecalculating = false;
-        }
+    /**
+     * Returns false - this implementation does not have texture corruption issues.
+     */
+    public boolean isTextureCorrupted() {
+        return false;
     }
 }

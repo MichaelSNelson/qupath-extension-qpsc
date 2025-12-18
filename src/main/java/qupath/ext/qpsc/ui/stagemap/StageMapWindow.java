@@ -156,21 +156,17 @@ public class StageMapWindow {
         // Top controls: Insert selector
         HBox topBar = buildTopBar();
 
-        // Canvas for stage visualization
+        // Canvas for stage visualization (new WritableImage + Shapes implementation)
         canvas = new StageMapCanvas(CANVAS_WIDTH, CANVAS_HEIGHT);
         canvas.setClickHandler(this::handleCanvasClick);
 
-        // Make canvas resize with window
+        // The canvas is now a StackPane that resizes with its container
+        // Just place it in a container that grows with the window
         StackPane canvasContainer = new StackPane(canvas);
         canvasContainer.setStyle("-fx-background-color: #1a1a1a; -fx-border-color: #555; -fx-border-width: 1;");
         VBox.setVgrow(canvasContainer, Priority.ALWAYS);
 
-        // Bind canvas size to container
-        canvas.widthProperty().bind(canvasContainer.widthProperty().subtract(2));
-        canvas.heightProperty().bind(canvasContainer.heightProperty().subtract(2));
-
-        // Re-render canvas when its size changes (from binding)
-        // Use a single combined listener to avoid double-firing
+        // Notify canvas when container size changes
         canvasContainer.widthProperty().addListener((obs, oldVal, newVal) -> {
             if (Math.abs(newVal.doubleValue() - oldVal.doubleValue()) > 1) {
                 canvas.onSizeChanged();
