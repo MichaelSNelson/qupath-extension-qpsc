@@ -1,5 +1,6 @@
 package qupath.ext.qpsc.ui.stagemap;
 
+import javafx.application.Platform;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.paint.Color;
@@ -252,16 +253,29 @@ public class StageMapCanvas extends Canvas {
      * Renders the complete stage map visualization.
      */
     public void render() {
+        // Ensure we're on the FX Application Thread
+        if (!Platform.isFxApplicationThread()) {
+            Platform.runLater(this::render);
+            return;
+        }
+
+        // Guard against rendering with invalid dimensions (causes NPE in JavaFX)
+        double w = getWidth();
+        double h = getHeight();
+        if (w <= 0 || h <= 0 || !Double.isFinite(w) || !Double.isFinite(h)) {
+            return;
+        }
+
         GraphicsContext gc = getGraphicsContext2D();
 
         // Clear canvas
         gc.setFill(Color.rgb(40, 40, 40));
-        gc.fillRect(0, 0, getWidth(), getHeight());
+        gc.fillRect(0, 0, w, h);
 
         if (currentInsert == null) {
             gc.setFill(Color.GRAY);
             gc.setTextAlign(TextAlignment.CENTER);
-            gc.fillText("No insert configuration", getWidth() / 2, getHeight() / 2);
+            gc.fillText("No insert configuration", w / 2, h / 2);
             return;
         }
 
