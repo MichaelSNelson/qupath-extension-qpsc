@@ -73,6 +73,10 @@ public class StageMapCanvas extends Canvas {
     private double lastCalculatedHeight = 0;
     private boolean isRecalculating = false;
 
+    // Error suppression to prevent log spam when canvas is in bad state
+    private boolean renderErrorLogged = false;
+    private int renderErrorCount = 0;
+
     // ========== Callback ==========
     private BiConsumer<Double, Double> clickHandler;
 
@@ -266,30 +270,46 @@ public class StageMapCanvas extends Canvas {
             return;
         }
 
-        GraphicsContext gc = getGraphicsContext2D();
+        try {
+            GraphicsContext gc = getGraphicsContext2D();
 
-        // Clear canvas
-        gc.setFill(Color.rgb(40, 40, 40));
-        gc.fillRect(0, 0, w, h);
+            // Clear canvas
+            gc.setFill(Color.rgb(40, 40, 40));
+            gc.fillRect(0, 0, w, h);
 
-        if (currentInsert == null) {
-            gc.setFill(Color.GRAY);
-            gc.setTextAlign(TextAlignment.CENTER);
-            gc.fillText("No insert configuration", w / 2, h / 2);
-            return;
-        }
+            if (currentInsert == null) {
+                gc.setFill(Color.GRAY);
+                gc.setTextAlign(TextAlignment.CENTER);
+                gc.fillText("No insert configuration", w / 2, h / 2);
+                return;
+            }
 
-        // Render layers from back to front
-        renderInsertBackground(gc);
-        if (showLegalZones) {
-            renderLegalZones(gc);
-        }
-        renderSlides(gc);
-        renderInsertBorder(gc);
-        renderFOV(gc);
-        renderCrosshair(gc);
-        if (showTarget) {
-            renderTarget(gc);
+            // Render layers from back to front
+            renderInsertBackground(gc);
+            if (showLegalZones) {
+                renderLegalZones(gc);
+            }
+            renderSlides(gc);
+            renderInsertBorder(gc);
+            renderFOV(gc);
+            renderCrosshair(gc);
+            if (showTarget) {
+                renderTarget(gc);
+            }
+
+            // Reset error state on successful render
+            if (renderErrorLogged) {
+                logger.info("Canvas rendering recovered after {} errors", renderErrorCount);
+                renderErrorLogged = false;
+                renderErrorCount = 0;
+            }
+        } catch (Exception e) {
+            // Suppress repeated error logging - only log first occurrence
+            renderErrorCount++;
+            if (!renderErrorLogged) {
+                logger.warn("Canvas render error (suppressing further): {}", e.getMessage());
+                renderErrorLogged = true;
+            }
         }
     }
 
