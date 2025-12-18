@@ -56,6 +56,8 @@ public class StageMapWindow {
     private ScheduledExecutorService positionPoller;
     private volatile boolean isPolling = false;
     private volatile boolean dialogShowing = false;  // Pause updates while dialogs are shown
+    private volatile int consecutiveErrors = 0;  // Track polling failures
+    private static final int MAX_CONSECUTIVE_ERRORS = 10;  // Pause polling after this many errors
     private static boolean movementWarningShownThisSession = false;
 
     // ========== Configuration ==========
@@ -96,9 +98,8 @@ public class StageMapWindow {
      */
     public static void hide() {
         Platform.runLater(() -> {
-            if (instance != null && instance.stage.isShowing()) {
-                instance.stopPositionPolling();
-                instance.stage.hide();
+            if (instance != null) {
+                instance.dispose();
             }
         });
     }
@@ -107,7 +108,35 @@ public class StageMapWindow {
      * Checks if the Stage Map window is currently visible.
      */
     public static boolean isVisible() {
-        return instance != null && instance.stage.isShowing();
+        return instance != null && instance.stage != null && instance.stage.isShowing();
+    }
+
+    /**
+     * Disposes of the window and resets the singleton for a clean re-open.
+     * This prevents stale state issues when reopening after the microscope
+     * disconnects or Live Mode is toggled.
+     */
+    private void dispose() {
+        logger.debug("Disposing Stage Map window");
+
+        // Stop polling first
+        stopPositionPolling();
+
+        // Disable canvas rendering to prevent further texture operations
+        if (canvas != null) {
+            canvas.setRenderingEnabled(false);
+        }
+
+        // Hide and close the stage
+        if (stage != null) {
+            stage.hide();
+            stage.close();
+        }
+
+        // Reset singleton so next show() creates a fresh instance
+        instance = null;
+
+        logger.info("Stage Map window disposed - will create fresh instance on next open");
     }
 
     private void buildUI() {
@@ -166,7 +195,7 @@ public class StageMapWindow {
         stage.setScene(scene);
 
         // Stop polling when window is closed
-        stage.setOnCloseRequest(e -> stopPositionPolling());
+        stage.setOnCloseRequest(e -> dispose());
     }
 
     private HBox buildTopBar() {
@@ -339,8 +368,13 @@ public class StageMapWindow {
     }
 
     private void pollPosition() {
-        // Skip updates while dialogs are showing to prevent canvas corruption
-        if (dialogShowing) {
+        // Skip updates if window is not visible or dialogs are showing
+        if (dialogShowing || stage == null || !stage.isShowing()) {
+            return;
+        }
+
+        // Skip if too many consecutive errors (microscope likely disconnected)
+        if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
             return;
         }
 
@@ -349,9 +383,12 @@ public class StageMapWindow {
             double[] pos = controller.getStagePositionXY();
 
             if (pos != null && pos.length >= 2) {
+                // Reset error counter on success
+                consecutiveErrors = 0;
+
                 Platform.runLater(() -> {
-                    // Double-check dialog state on FX thread
-                    if (dialogShowing) {
+                    // Double-check state on FX thread
+                    if (dialogShowing || stage == null || !stage.isShowing()) {
                         return;
                     }
                     canvas.updatePosition(pos[0], pos[1]);
@@ -372,21 +409,43 @@ public class StageMapWindow {
                 });
 
                 // Update FOV if available
-                if (!dialogShowing) {
+                if (!dialogShowing && stage != null && stage.isShowing()) {
                     updateFOV();
                 }
+            } else {
+                // null position is also an error
+                handlePollingError();
             }
 
         } catch (Exception e) {
+            handlePollingError();
+        }
+    }
+
+    private void handlePollingError() {
+        consecutiveErrors++;
+
+        // Only update UI once when we hit the error threshold
+        if (consecutiveErrors == MAX_CONSECUTIVE_ERRORS) {
+            logger.warn("Stage Map polling paused after {} consecutive errors - microscope may be disconnected",
+                    MAX_CONSECUTIVE_ERRORS);
             Platform.runLater(() -> {
-                if (dialogShowing) {
-                    return;
+                if (stage != null && stage.isShowing() && !dialogShowing) {
+                    statusLabel.setText("Polling paused (disconnected)");
+                    statusLabel.setStyle("-fx-text-fill: #f66;");
+                    // Don't update canvas position to avoid triggering render
                 }
-                statusLabel.setText("Disconnected");
-                statusLabel.setStyle("-fx-text-fill: #f66;");
-                canvas.updatePosition(Double.NaN, Double.NaN);
             });
         }
+    }
+
+    /**
+     * Resets the error counter and resumes polling.
+     * Call this when reconnecting to the microscope.
+     */
+    public void resetPollingErrors() {
+        consecutiveErrors = 0;
+        logger.info("Stage Map polling errors reset");
     }
 
     private void updateFOV() {

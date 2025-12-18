@@ -77,6 +77,9 @@ public class StageMapCanvas extends Canvas {
     private boolean renderErrorLogged = false;
     private int renderErrorCount = 0;
 
+    // Flag to completely disable rendering (used during dispose)
+    private volatile boolean renderingEnabled = true;
+
     // ========== Callback ==========
     private BiConsumer<Double, Double> clickHandler;
 
@@ -157,6 +160,18 @@ public class StageMapCanvas extends Canvas {
     public void setShowLegalZones(boolean show) {
         this.showLegalZones = show;
         render();
+    }
+
+    /**
+     * Enables or disables canvas rendering.
+     * When disabled, all render() calls are ignored. Used during window disposal
+     * to prevent texture corruption from stale render requests.
+     */
+    public void setRenderingEnabled(boolean enabled) {
+        this.renderingEnabled = enabled;
+        if (!enabled) {
+            logger.debug("Canvas rendering disabled");
+        }
     }
 
     /**
@@ -257,8 +272,17 @@ public class StageMapCanvas extends Canvas {
      * Renders the complete stage map visualization.
      */
     public void render() {
+        // Skip if rendering has been disabled (during dispose)
+        if (!renderingEnabled) {
+            return;
+        }
+
         // Ensure we're on the FX Application Thread
         if (!Platform.isFxApplicationThread()) {
+            // Check again before queueing to avoid stale requests
+            if (!renderingEnabled) {
+                return;
+            }
             Platform.runLater(this::render);
             return;
         }
