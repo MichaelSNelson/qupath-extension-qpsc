@@ -30,6 +30,11 @@ public class StageInsert {
     private final double slideMarginUm;
     private final List<SlidePosition> slides;
 
+    // Axis inversion flags (detected from calibration points)
+    // When true, larger stage values correspond to visually "left" or "top"
+    private boolean xAxisInverted = false;
+    private boolean yAxisInverted = false;
+
     /**
      * Creates a new StageInsert with the specified parameters.
      *
@@ -68,6 +73,9 @@ public class StageInsert {
      * <p>
      * The aperture width is calculated from the X coordinates.
      * The slide is assumed to be centered vertically within the aperture.
+     * <p>
+     * Note: Due to optical inversion, "left" may have a larger X value than "right",
+     * and "top" may have a larger Y value than "bottom". The code handles both orientations.
      *
      * @param id            Insert identifier
      * @param configMap     Configuration map from YAML
@@ -85,7 +93,12 @@ public class StageInsert {
         double slideTopY = getDoubleValue(configMap, "slide_top_y_um", 0.0);
         double slideBottomY = getDoubleValue(configMap, "slide_bottom_y_um", 25000.0);
 
-        // Calculate aperture dimensions from reference points
+        // Detect axis orientation (optics may invert the coordinate system)
+        // "Left" visually may correspond to larger X values if optics flip the image
+        boolean xInverted = apertureLeftX > apertureRightX;
+        boolean yInverted = slideTopY > slideBottomY;
+
+        // Calculate aperture dimensions from reference points (always positive)
         double apertureWidthUm = Math.abs(apertureRightX - apertureLeftX);
         double apertureHeightMm = getDoubleValue(configMap, "aperture_height_mm", 60.0);
         double apertureHeightUm = apertureHeightMm * MM_TO_UM;
@@ -94,17 +107,22 @@ public class StageInsert {
         double slideWidthMm = getDoubleValue(configMap, "slide_width_mm", 75.0);
         double slideHeightMm = getDoubleValue(configMap, "slide_height_mm", 25.0);
         double slideWidthUm = slideWidthMm * MM_TO_UM;
-        double slideHeightUm = slideHeightMm * MM_TO_UM;
+        double slideHeightUm = Math.abs(slideBottomY - slideTopY);  // Use measured height
 
-        // Origin is the top-left corner of the aperture
-        double originXUm = Math.min(apertureLeftX, apertureRightX);
+        // Origin is the top-left corner in VISUAL space (which maps to stage coordinates)
+        // For inverted X: visual left = larger stage X, so origin = max X
+        // For inverted Y: visual top = larger stage Y, so origin = max Y
+        double originXUm = xInverted ? Math.max(apertureLeftX, apertureRightX)
+                                     : Math.min(apertureLeftX, apertureRightX);
 
         // Calculate slide's vertical position within aperture
         // The slide is assumed centered vertically in the aperture
         double slideYOffsetUm = (apertureHeightUm - slideHeightUm) / 2.0;
 
-        // Calculate origin Y: aperture top = slide top - slide offset from aperture top
-        double originYUm = Math.min(slideTopY, slideBottomY) - slideYOffsetUm;
+        // Calculate origin Y based on slide position and centering assumption
+        double slideTopStageY = yInverted ? Math.max(slideTopY, slideBottomY)
+                                          : Math.min(slideTopY, slideBottomY);
+        double originYUm = slideTopStageY - (yInverted ? -slideYOffsetUm : slideYOffsetUm);
 
         // Build slide positions
         List<SlidePosition> slides = new ArrayList<>();
@@ -126,7 +144,7 @@ public class StageInsert {
                         xOffset / MM_TO_UM,
                         slideYOffsetUm / MM_TO_UM,
                         slideWidthMm,
-                        slideHeightMm,
+                        slideHeightUm / MM_TO_UM,  // Use measured height
                         slideHeightMm > slideWidthMm ? 90 : 0));
             }
         } else {
@@ -139,15 +157,19 @@ public class StageInsert {
                     slideXOffsetUm / MM_TO_UM,
                     slideYOffsetUm / MM_TO_UM,
                     slideWidthMm,
-                    slideHeightMm,
+                    slideHeightUm / MM_TO_UM,  // Use measured height
                     0));
         }
 
         // Convert aperture width back to mm for constructor
         double apertureWidthMm = apertureWidthUm / MM_TO_UM;
 
-        return new StageInsert(id, name, apertureWidthMm, apertureHeightMm,
+        // Store axis inversion flags in the insert for rendering
+        StageInsert insert = new StageInsert(id, name, apertureWidthMm, apertureHeightMm,
                                originXUm, originYUm, slideMarginUm, slides);
+        insert.xAxisInverted = xInverted;
+        insert.yAxisInverted = yInverted;
+        return insert;
     }
 
     private static double getDoubleValue(Map<String, Object> map, String key, double defaultValue) {
@@ -196,6 +218,16 @@ public class StageInsert {
     /** Returns an unmodifiable list of slide positions */
     public List<SlidePosition> getSlides() {
         return Collections.unmodifiableList(slides);
+    }
+
+    /** Returns true if X axis is inverted (larger X = visual left) */
+    public boolean isXAxisInverted() {
+        return xAxisInverted;
+    }
+
+    /** Returns true if Y axis is inverted (larger Y = visual top) */
+    public boolean isYAxisInverted() {
+        return yAxisInverted;
     }
 
     // ========== Coordinate Bounds ==========

@@ -161,6 +161,7 @@ public class StageMapCanvas extends Canvas {
 
     /**
      * Converts screen coordinates to stage coordinates.
+     * Handles axis inversion when optics flip the coordinate system.
      */
     public double[] screenToStage(double screenX, double screenY) {
         if (currentInsert == null || scale == 0) {
@@ -170,22 +171,45 @@ public class StageMapCanvas extends Canvas {
         double insertX = (screenX - offsetX) / scale;
         double insertY = (screenY - offsetY) / scale;
 
-        double stageX = currentInsert.getOriginXUm() + insertX;
-        double stageY = currentInsert.getOriginYUm() + insertY;
+        // Handle axis inversion: when inverted, screen right = decreasing stage value
+        double stageX, stageY;
+        if (currentInsert.isXAxisInverted()) {
+            stageX = currentInsert.getOriginXUm() - insertX;
+        } else {
+            stageX = currentInsert.getOriginXUm() + insertX;
+        }
+
+        if (currentInsert.isYAxisInverted()) {
+            stageY = currentInsert.getOriginYUm() - insertY;
+        } else {
+            stageY = currentInsert.getOriginYUm() + insertY;
+        }
 
         return new double[]{stageX, stageY};
     }
 
     /**
      * Converts stage coordinates to screen coordinates.
+     * Handles axis inversion when optics flip the coordinate system.
      */
     public double[] stageToScreen(double stageX, double stageY) {
         if (currentInsert == null) {
             return null;
         }
 
-        double insertX = stageX - currentInsert.getOriginXUm();
-        double insertY = stageY - currentInsert.getOriginYUm();
+        // Handle axis inversion: when inverted, decreasing stage value = screen right
+        double insertX, insertY;
+        if (currentInsert.isXAxisInverted()) {
+            insertX = currentInsert.getOriginXUm() - stageX;
+        } else {
+            insertX = stageX - currentInsert.getOriginXUm();
+        }
+
+        if (currentInsert.isYAxisInverted()) {
+            insertY = currentInsert.getOriginYUm() - stageY;
+        } else {
+            insertY = stageY - currentInsert.getOriginYUm();
+        }
 
         double screenX = offsetX + insertX * scale;
         double screenY = offsetY + insertY * scale;
