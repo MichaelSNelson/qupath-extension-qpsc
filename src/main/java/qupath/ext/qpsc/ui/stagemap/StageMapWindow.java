@@ -420,6 +420,8 @@ public class StageMapWindow {
         }
 
         // Check if position is within the aperture/insert bounds
+        // Note: The aperture calibration points define the valid clickable area.
+        // The stage.limits values in config are NOT accurate hardware limits.
         if (!insert.isPositionInInsert(stageX, stageY)) {
             logger.warn("Invalid position clicked: ({}, {}) - outside aperture for insert '{}'",
                     String.format("%.1f", stageX), String.format("%.1f", stageY), insert.getId());
@@ -427,33 +429,6 @@ public class StageMapWindow {
                     "The selected position is outside the visible aperture.\n" +
                     "Please select a position within the stage insert area.");
             return;
-        }
-
-        // Check if position is within hardware stage limits
-        try {
-            MicroscopeConfigManager config = MicroscopeConfigManager.getInstance(
-                    QPPreferenceDialog.getMicroscopeConfigFileProperty());
-            if (config != null) {
-                double xLow = config.getDouble("stage", "limits", "x_um", "low");
-                double xHigh = config.getDouble("stage", "limits", "x_um", "high");
-                double yLow = config.getDouble("stage", "limits", "y_um", "low");
-                double yHigh = config.getDouble("stage", "limits", "y_um", "high");
-
-                if (stageX < xLow || stageX > xHigh || stageY < yLow || stageY > yHigh) {
-                    logger.warn("Position ({}, {}) outside hardware stage limits: X[{}, {}], Y[{}, {}]",
-                            String.format("%.1f", stageX), String.format("%.1f", stageY),
-                            xLow, xHigh, yLow, yHigh);
-                    showWarning("Outside Stage Limits",
-                            String.format("The selected position (%.1f, %.1f) is outside hardware stage limits.\n\n" +
-                                    "Stage limits: X[%.0f, %.0f], Y[%.0f, %.0f]\n\n" +
-                                    "Please select a position within the stage travel range.",
-                                    stageX, stageY, xLow, xHigh, yLow, yHigh));
-                    return;
-                }
-            }
-        } catch (Exception e) {
-            logger.debug("Could not check stage limits: {}", e.getMessage());
-            // Continue anyway - let the controller handle limit checking
         }
 
         // First movement warning
