@@ -139,6 +139,10 @@ public class StageMapWindow {
         canvas.widthProperty().bind(canvasContainer.widthProperty().subtract(2));
         canvas.heightProperty().bind(canvasContainer.heightProperty().subtract(2));
 
+        // Re-render canvas when its size changes (from binding)
+        canvas.widthProperty().addListener((obs, oldVal, newVal) -> canvas.onSizeChanged());
+        canvas.heightProperty().addListener((obs, oldVal, newVal) -> canvas.onSizeChanged());
+
         // Bottom status bar
         HBox bottomBar = buildBottomBar();
 
@@ -153,10 +157,6 @@ public class StageMapWindow {
 
         // Stop polling when window is closed
         stage.setOnCloseRequest(e -> stopPositionPolling());
-
-        // Re-render canvas when window is resized
-        stage.widthProperty().addListener((obs, oldVal, newVal) -> canvas.render());
-        stage.heightProperty().addListener((obs, oldVal, newVal) -> canvas.render());
     }
 
     private HBox buildTopBar() {

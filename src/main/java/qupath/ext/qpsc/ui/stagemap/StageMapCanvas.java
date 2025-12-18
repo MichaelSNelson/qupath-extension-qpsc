@@ -429,10 +429,11 @@ public class StageMapCanvas extends Canvas {
         return getHeight();
     }
 
-    @Override
-    public void resize(double width, double height) {
-        setWidth(width);
-        setHeight(height);
+    /**
+     * Called when the canvas size changes (via property binding).
+     * Recalculates scale and re-renders.
+     */
+    public void onSizeChanged() {
         calculateScale();
         render();
     }
