@@ -23,6 +23,7 @@ import java.io.IOException;
 import java.util.Set;
 import java.util.ResourceBundle;
 import qupath.ext.qpsc.utilities.MicroscopeConfigManager;
+import qupath.ext.qpsc.ui.stagemap.StageMapWindow;
 
 /**
  * Entry point for the QP Scope extension.
@@ -196,6 +197,14 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 			}
 		});
 
+		// 5) Stage Map - visual stage position display
+		MenuItem stageMapOption = new MenuItem(res.getString("menu.stageMap"));
+		setMenuItemTooltip(stageMapOption,
+				"Open a visual map showing the stage insert with slide positions and current objective location. " +
+				"The map updates in real-time and allows double-click navigation to move the objective. " +
+				"Use the dropdown to switch between different insert configurations (single slide, multi-slide).");
+		stageMapOption.setOnAction(e -> StageMapWindow.show());
+
 		// === UTILITIES SUBMENU ===
 		Menu utilitiesMenu = new Menu("Utilities");
 
@@ -304,6 +313,7 @@ public class SetupScope implements QuPathExtension, GitHubProject {
 		// Add items to utilities submenu
 		utilitiesMenu.getItems().addAll(
 				alignmentOption,
+				stageMapOption,
 				new SeparatorMenuItem(),
 				backgroundCollectionOption,
 				polarizerCalibrationOption,

@@ -1,0 +1,463 @@
+package qupath.ext.qpsc.ui.stagemap;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Data model representing a stage insert configuration with its physical dimensions
+ * and slide positions.
+ * <p>
+ * Stage inserts hold slides in specific positions. Different insert types support
+ * different numbers of slides in various orientations (e.g., single slide horizontal,
+ * four slides vertical).
+ * <p>
+ * All dimensions are stored internally in microns (um) for consistency with
+ * microscope stage coordinates.
+ */
+public class StageInsert {
+
+    /** Conversion factor from millimeters to microns */
+    private static final double MM_TO_UM = 1000.0;
+
+    private final String id;
+    private final String name;
+    private final double widthUm;
+    private final double heightUm;
+    private final double originXUm;
+    private final double originYUm;
+    private final double slideMarginUm;
+    private final List<SlidePosition> slides;
+
+    /**
+     * Creates a new StageInsert with the specified parameters.
+     *
+     * @param id            Unique identifier (e.g., "single_h", "quad_v")
+     * @param name          Display name (e.g., "Single Slide (Horizontal)")
+     * @param widthMm       Insert width in millimeters
+     * @param heightMm      Insert height in millimeters
+     * @param originXUm     X coordinate of insert corner in stage coordinates (um)
+     * @param originYUm     Y coordinate of insert corner in stage coordinates (um)
+     * @param slideMarginUm Safety margin around slides for legal zone (um)
+     * @param slides        List of slide positions within the insert
+     */
+    public StageInsert(String id, String name, double widthMm, double heightMm,
+                       double originXUm, double originYUm, double slideMarginUm,
+                       List<SlidePosition> slides) {
+        this.id = id;
+        this.name = name;
+        this.widthUm = widthMm * MM_TO_UM;
+        this.heightUm = heightMm * MM_TO_UM;
+        this.originXUm = originXUm;
+        this.originYUm = originYUm;
+        this.slideMarginUm = slideMarginUm;
+        this.slides = slides != null ? new ArrayList<>(slides) : new ArrayList<>();
+    }
+
+    /**
+     * Creates a StageInsert from a YAML configuration map using reference point calibration.
+     * <p>
+     * The configuration uses 4 calibration reference points:
+     * <ul>
+     *   <li>aperture_left_x_um: Stage X when left aperture edge is centered in FOV</li>
+     *   <li>aperture_right_x_um: Stage X when right aperture edge is centered in FOV</li>
+     *   <li>slide_top_y_um: Stage Y when top edge of slide is centered in FOV</li>
+     *   <li>slide_bottom_y_um: Stage Y when bottom edge of slide is centered in FOV</li>
+     * </ul>
+     * <p>
+     * The aperture width is calculated from the X coordinates.
+     * The slide is assumed to be centered vertically within the aperture.
+     *
+     * @param id            Insert identifier
+     * @param configMap     Configuration map from YAML
+     * @param slideMarginUm Safety margin around slides (from parent config)
+     * @return A new StageInsert instance
+     */
+    @SuppressWarnings("unchecked")
+    public static StageInsert fromConfigMap(String id, Map<String, Object> configMap,
+                                            double slideMarginUm) {
+        String name = (String) configMap.getOrDefault("name", id);
+
+        // Read calibration reference points
+        double apertureLeftX = getDoubleValue(configMap, "aperture_left_x_um", 0.0);
+        double apertureRightX = getDoubleValue(configMap, "aperture_right_x_um", 55000.0);
+        double slideTopY = getDoubleValue(configMap, "slide_top_y_um", 0.0);
+        double slideBottomY = getDoubleValue(configMap, "slide_bottom_y_um", 25000.0);
+
+        // Calculate aperture dimensions from reference points
+        double apertureWidthUm = Math.abs(apertureRightX - apertureLeftX);
+        double apertureHeightMm = getDoubleValue(configMap, "aperture_height_mm", 60.0);
+        double apertureHeightUm = apertureHeightMm * MM_TO_UM;
+
+        // Read slide dimensions
+        double slideWidthMm = getDoubleValue(configMap, "slide_width_mm", 75.0);
+        double slideHeightMm = getDoubleValue(configMap, "slide_height_mm", 25.0);
+        double slideWidthUm = slideWidthMm * MM_TO_UM;
+        double slideHeightUm = slideHeightMm * MM_TO_UM;
+
+        // Origin is the top-left corner of the aperture
+        double originXUm = Math.min(apertureLeftX, apertureRightX);
+
+        // Calculate slide's vertical position within aperture
+        // The slide is assumed centered vertically in the aperture
+        double slideYOffsetUm = (apertureHeightUm - slideHeightUm) / 2.0;
+
+        // Calculate origin Y: aperture top = slide top - slide offset from aperture top
+        double originYUm = Math.min(slideTopY, slideBottomY) - slideYOffsetUm;
+
+        // Build slide positions
+        List<SlidePosition> slides = new ArrayList<>();
+
+        // Check for multi-slide configuration (quad_v style)
+        int numSlides = ((Number) configMap.getOrDefault("num_slides", 1)).intValue();
+        double slideSpacingMm = getDoubleValue(configMap, "slide_spacing_mm", 0.0);
+
+        if (numSlides > 1 && slideSpacingMm > 0) {
+            // Multi-slide configuration
+            double slideSpacingUm = slideSpacingMm * MM_TO_UM;
+            double totalWidth = (numSlides - 1) * slideSpacingUm + slideWidthUm;
+            double startX = (apertureWidthUm - totalWidth) / 2.0;  // Center the group
+
+            for (int i = 0; i < numSlides; i++) {
+                double xOffset = startX + i * slideSpacingUm;
+                slides.add(new SlidePosition(
+                        "Slide " + (i + 1),
+                        xOffset / MM_TO_UM,
+                        slideYOffsetUm / MM_TO_UM,
+                        slideWidthMm,
+                        slideHeightMm,
+                        slideHeightMm > slideWidthMm ? 90 : 0));
+            }
+        } else {
+            // Single slide configuration
+            // Slide extends beyond aperture horizontally (slide is wider than aperture)
+            double slideXOffsetUm = (apertureWidthUm - slideWidthUm) / 2.0;  // Can be negative
+
+            slides.add(new SlidePosition(
+                    "Slide 1",
+                    slideXOffsetUm / MM_TO_UM,
+                    slideYOffsetUm / MM_TO_UM,
+                    slideWidthMm,
+                    slideHeightMm,
+                    0));
+        }
+
+        // Convert aperture width back to mm for constructor
+        double apertureWidthMm = apertureWidthUm / MM_TO_UM;
+
+        return new StageInsert(id, name, apertureWidthMm, apertureHeightMm,
+                               originXUm, originYUm, slideMarginUm, slides);
+    }
+
+    private static double getDoubleValue(Map<String, Object> map, String key, double defaultValue) {
+        Object value = map.get(key);
+        if (value instanceof Number) {
+            return ((Number) value).doubleValue();
+        }
+        return defaultValue;
+    }
+
+    // ========== Getters ==========
+
+    public String getId() {
+        return id;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    /** Returns insert width in microns */
+    public double getWidthUm() {
+        return widthUm;
+    }
+
+    /** Returns insert height in microns */
+    public double getHeightUm() {
+        return heightUm;
+    }
+
+    /** Returns the X coordinate of the insert's top-left corner in stage coordinates (um) */
+    public double getOriginXUm() {
+        return originXUm;
+    }
+
+    /** Returns the Y coordinate of the insert's top-left corner in stage coordinates (um) */
+    public double getOriginYUm() {
+        return originYUm;
+    }
+
+    /** Returns the safety margin around slides in microns */
+    public double getSlideMarginUm() {
+        return slideMarginUm;
+    }
+
+    /** Returns an unmodifiable list of slide positions */
+    public List<SlidePosition> getSlides() {
+        return Collections.unmodifiableList(slides);
+    }
+
+    // ========== Coordinate Bounds ==========
+
+    /**
+     * Returns the minimum X coordinate of the insert in stage coordinates.
+     */
+    public double getMinStageX() {
+        return originXUm;
+    }
+
+    /**
+     * Returns the maximum X coordinate of the insert in stage coordinates.
+     */
+    public double getMaxStageX() {
+        return originXUm + widthUm;
+    }
+
+    /**
+     * Returns the minimum Y coordinate of the insert in stage coordinates.
+     */
+    public double getMinStageY() {
+        return originYUm;
+    }
+
+    /**
+     * Returns the maximum Y coordinate of the insert in stage coordinates.
+     */
+    public double getMaxStageY() {
+        return originYUm + heightUm;
+    }
+
+    // ========== Position Validation ==========
+
+    /**
+     * Checks if a stage position is within the insert boundaries.
+     *
+     * @param stageX X coordinate in stage coordinates (um)
+     * @param stageY Y coordinate in stage coordinates (um)
+     * @return true if the position is within the insert
+     */
+    public boolean isPositionInInsert(double stageX, double stageY) {
+        return stageX >= getMinStageX() && stageX <= getMaxStageX() &&
+               stageY >= getMinStageY() && stageY <= getMaxStageY();
+    }
+
+    /**
+     * Checks if a stage position is on any slide (within the slide boundaries).
+     *
+     * @param stageX X coordinate in stage coordinates (um)
+     * @param stageY Y coordinate in stage coordinates (um)
+     * @return true if the position is on a slide
+     */
+    public boolean isPositionOnSlide(double stageX, double stageY) {
+        for (SlidePosition slide : slides) {
+            if (slide.containsStagePosition(stageX, stageY, originXUm, originYUm)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Checks if a stage position is in a "legal" zone (on or near a slide).
+     * The legal zone includes the slide area plus the configured safety margin.
+     *
+     * @param stageX X coordinate in stage coordinates (um)
+     * @param stageY Y coordinate in stage coordinates (um)
+     * @return true if the position is in a legal movement zone
+     */
+    public boolean isPositionLegal(double stageX, double stageY) {
+        for (SlidePosition slide : slides) {
+            if (slide.containsStagePositionWithMargin(stageX, stageY, originXUm, originYUm, slideMarginUm)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Gets the slide at the specified stage position, or null if not on a slide.
+     *
+     * @param stageX X coordinate in stage coordinates (um)
+     * @param stageY Y coordinate in stage coordinates (um)
+     * @return The SlidePosition at this location, or null
+     */
+    public SlidePosition getSlideAtPosition(double stageX, double stageY) {
+        for (SlidePosition slide : slides) {
+            if (slide.containsStagePosition(stageX, stageY, originXUm, originYUm)) {
+                return slide;
+            }
+        }
+        return null;
+    }
+
+    @Override
+    public String toString() {
+        return name;
+    }
+
+    // ========== Inner Class: SlidePosition ==========
+
+    /**
+     * Represents a single slide position within a stage insert.
+     * <p>
+     * Coordinates are relative to the insert's top-left corner, not stage coordinates.
+     * Standard microscope slides are 25mm x 75mm (1" x 3").
+     */
+    public static class SlidePosition {
+
+        private final String name;
+        private final double xOffsetUm;
+        private final double yOffsetUm;
+        private final double widthUm;
+        private final double heightUm;
+        private final double rotationDeg;
+
+        /**
+         * Creates a new slide position.
+         *
+         * @param name        Display name (e.g., "Slide 1")
+         * @param xOffsetMm   X offset from insert origin in millimeters
+         * @param yOffsetMm   Y offset from insert origin in millimeters
+         * @param widthMm     Slide width in millimeters
+         * @param heightMm    Slide height in millimeters
+         * @param rotationDeg Rotation angle in degrees (0 = horizontal, 90 = vertical)
+         */
+        public SlidePosition(String name, double xOffsetMm, double yOffsetMm,
+                             double widthMm, double heightMm, double rotationDeg) {
+            this.name = name;
+            this.xOffsetUm = xOffsetMm * MM_TO_UM;
+            this.yOffsetUm = yOffsetMm * MM_TO_UM;
+            this.widthUm = widthMm * MM_TO_UM;
+            this.heightUm = heightMm * MM_TO_UM;
+            this.rotationDeg = rotationDeg;
+        }
+
+        /**
+         * Creates a SlidePosition from a YAML configuration map.
+         *
+         * @param configMap Configuration map from YAML
+         * @return A new SlidePosition instance
+         */
+        public static SlidePosition fromConfigMap(Map<String, Object> configMap) {
+            String name = (String) configMap.getOrDefault("name", "Slide");
+            double xOffsetMm = getDoubleValue(configMap, "x_offset_mm", 0.0);
+            double yOffsetMm = getDoubleValue(configMap, "y_offset_mm", 0.0);
+            double widthMm = getDoubleValue(configMap, "width_mm", 75.0);
+            double heightMm = getDoubleValue(configMap, "height_mm", 25.0);
+            double rotationDeg = getDoubleValue(configMap, "rotation_deg", 0.0);
+
+            return new SlidePosition(name, xOffsetMm, yOffsetMm, widthMm, heightMm, rotationDeg);
+        }
+
+        private static double getDoubleValue(Map<String, Object> map, String key, double defaultValue) {
+            Object value = map.get(key);
+            if (value instanceof Number) {
+                return ((Number) value).doubleValue();
+            }
+            return defaultValue;
+        }
+
+        // ========== Getters ==========
+
+        public String getName() {
+            return name;
+        }
+
+        /** Returns X offset from insert origin in microns */
+        public double getXOffsetUm() {
+            return xOffsetUm;
+        }
+
+        /** Returns Y offset from insert origin in microns */
+        public double getYOffsetUm() {
+            return yOffsetUm;
+        }
+
+        /** Returns slide width in microns */
+        public double getWidthUm() {
+            return widthUm;
+        }
+
+        /** Returns slide height in microns */
+        public double getHeightUm() {
+            return heightUm;
+        }
+
+        /** Returns rotation in degrees (0 = horizontal, 90 = vertical) */
+        public double getRotationDeg() {
+            return rotationDeg;
+        }
+
+        // ========== Position Checking ==========
+
+        /**
+         * Checks if a stage position is within this slide's boundaries.
+         *
+         * @param stageX        Stage X coordinate (um)
+         * @param stageY        Stage Y coordinate (um)
+         * @param insertOriginX Insert origin X in stage coordinates (um)
+         * @param insertOriginY Insert origin Y in stage coordinates (um)
+         * @return true if the position is on this slide
+         */
+        public boolean containsStagePosition(double stageX, double stageY,
+                                             double insertOriginX, double insertOriginY) {
+            return containsStagePositionWithMargin(stageX, stageY, insertOriginX, insertOriginY, 0);
+        }
+
+        /**
+         * Checks if a stage position is within this slide's boundaries plus a margin.
+         *
+         * @param stageX        Stage X coordinate (um)
+         * @param stageY        Stage Y coordinate (um)
+         * @param insertOriginX Insert origin X in stage coordinates (um)
+         * @param insertOriginY Insert origin Y in stage coordinates (um)
+         * @param marginUm      Additional margin around the slide (um)
+         * @return true if the position is within the slide plus margin
+         */
+        public boolean containsStagePositionWithMargin(double stageX, double stageY,
+                                                       double insertOriginX, double insertOriginY,
+                                                       double marginUm) {
+            double slideMinX = insertOriginX + xOffsetUm - marginUm;
+            double slideMaxX = insertOriginX + xOffsetUm + widthUm + marginUm;
+            double slideMinY = insertOriginY + yOffsetUm - marginUm;
+            double slideMaxY = insertOriginY + yOffsetUm + heightUm + marginUm;
+
+            return stageX >= slideMinX && stageX <= slideMaxX &&
+                   stageY >= slideMinY && stageY <= slideMaxY;
+        }
+
+        /**
+         * Returns the stage X coordinate of this slide's left edge.
+         */
+        public double getMinStageX(double insertOriginX) {
+            return insertOriginX + xOffsetUm;
+        }
+
+        /**
+         * Returns the stage X coordinate of this slide's right edge.
+         */
+        public double getMaxStageX(double insertOriginX) {
+            return insertOriginX + xOffsetUm + widthUm;
+        }
+
+        /**
+         * Returns the stage Y coordinate of this slide's top edge.
+         */
+        public double getMinStageY(double insertOriginY) {
+            return insertOriginY + yOffsetUm;
+        }
+
+        /**
+         * Returns the stage Y coordinate of this slide's bottom edge.
+         */
+        public double getMaxStageY(double insertOriginY) {
+            return insertOriginY + yOffsetUm + heightUm;
+        }
+
+        @Override
+        public String toString() {
+            return name;
+        }
+    }
+}
