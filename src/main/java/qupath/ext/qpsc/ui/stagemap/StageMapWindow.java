@@ -404,13 +404,13 @@ public class StageMapWindow {
             return;
         }
 
-        // Check if position is legal
-        if (!insert.isPositionLegal(stageX, stageY)) {
-            logger.warn("Invalid position clicked: ({}, {}) - outside legal zone for insert '{}'",
+        // Check if position is within the aperture/insert bounds
+        if (!insert.isPositionInInsert(stageX, stageY)) {
+            logger.warn("Invalid position clicked: ({}, {}) - outside aperture for insert '{}'",
                     String.format("%.1f", stageX), String.format("%.1f", stageY), insert.getId());
             showWarning("Invalid Position",
-                    "The selected position is outside the safe movement zone.\n" +
-                    "Please select a position on or near a slide.");
+                    "The selected position is outside the visible aperture.\n" +
+                    "Please select a position within the stage insert area.");
             return;
         }
 

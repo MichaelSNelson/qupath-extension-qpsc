@@ -234,29 +234,45 @@ public class StageInsert {
 
     /**
      * Returns the minimum X coordinate of the insert in stage coordinates.
+     * Accounts for axis inversion.
      */
     public double getMinStageX() {
+        if (xAxisInverted) {
+            return originXUm - widthUm;
+        }
         return originXUm;
     }
 
     /**
      * Returns the maximum X coordinate of the insert in stage coordinates.
+     * Accounts for axis inversion.
      */
     public double getMaxStageX() {
+        if (xAxisInverted) {
+            return originXUm;
+        }
         return originXUm + widthUm;
     }
 
     /**
      * Returns the minimum Y coordinate of the insert in stage coordinates.
+     * Accounts for axis inversion.
      */
     public double getMinStageY() {
+        if (yAxisInverted) {
+            return originYUm - heightUm;
+        }
         return originYUm;
     }
 
     /**
      * Returns the maximum Y coordinate of the insert in stage coordinates.
+     * Accounts for axis inversion.
      */
     public double getMaxStageY() {
+        if (yAxisInverted) {
+            return originYUm;
+        }
         return originYUm + heightUm;
     }
 
@@ -264,6 +280,7 @@ public class StageInsert {
 
     /**
      * Checks if a stage position is within the insert boundaries.
+     * Accounts for axis inversion.
      *
      * @param stageX X coordinate in stage coordinates (um)
      * @param stageY Y coordinate in stage coordinates (um)
