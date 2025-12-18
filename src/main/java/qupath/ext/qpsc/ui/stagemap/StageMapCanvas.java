@@ -67,6 +67,11 @@ public class StageMapCanvas extends Canvas {
     private boolean showLegalZones = true;
     private boolean showTarget = false;
 
+    // Track previous size to avoid unnecessary recalculations
+    private double lastCalculatedWidth = 0;
+    private double lastCalculatedHeight = 0;
+    private boolean isRecalculating = false;
+
     // ========== Callback ==========
     private BiConsumer<Double, Double> clickHandler;
 
@@ -441,9 +446,30 @@ public class StageMapCanvas extends Canvas {
     /**
      * Called when the canvas size changes (via property binding).
      * Recalculates scale and re-renders.
+     * Includes guards against feedback loops and unnecessary recalculations.
      */
     public void onSizeChanged() {
-        calculateScale();
-        render();
+        // Prevent re-entry during recalculation
+        if (isRecalculating) {
+            return;
+        }
+
+        // Only recalculate if size actually changed meaningfully
+        double currentWidth = getWidth();
+        double currentHeight = getHeight();
+        if (Math.abs(currentWidth - lastCalculatedWidth) < 2 &&
+            Math.abs(currentHeight - lastCalculatedHeight) < 2) {
+            return;
+        }
+
+        isRecalculating = true;
+        try {
+            lastCalculatedWidth = currentWidth;
+            lastCalculatedHeight = currentHeight;
+            calculateScale();
+            render();
+        } finally {
+            isRecalculating = false;
+        }
     }
 }

@@ -140,8 +140,17 @@ public class StageMapWindow {
         canvas.heightProperty().bind(canvasContainer.heightProperty().subtract(2));
 
         // Re-render canvas when its size changes (from binding)
-        canvas.widthProperty().addListener((obs, oldVal, newVal) -> canvas.onSizeChanged());
-        canvas.heightProperty().addListener((obs, oldVal, newVal) -> canvas.onSizeChanged());
+        // Use a single combined listener to avoid double-firing
+        canvasContainer.widthProperty().addListener((obs, oldVal, newVal) -> {
+            if (Math.abs(newVal.doubleValue() - oldVal.doubleValue()) > 1) {
+                canvas.onSizeChanged();
+            }
+        });
+        canvasContainer.heightProperty().addListener((obs, oldVal, newVal) -> {
+            if (Math.abs(newVal.doubleValue() - oldVal.doubleValue()) > 1) {
+                canvas.onSizeChanged();
+            }
+        });
 
         // Bottom status bar
         HBox bottomBar = buildBottomBar();
