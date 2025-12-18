@@ -414,6 +414,33 @@ public class StageMapWindow {
             return;
         }
 
+        // Check if position is within hardware stage limits
+        try {
+            MicroscopeConfigManager config = MicroscopeConfigManager.getInstance(
+                    QPPreferenceDialog.getMicroscopeConfigFileProperty());
+            if (config != null) {
+                double xLow = config.getDouble("stage", "limits", "x_um", "low");
+                double xHigh = config.getDouble("stage", "limits", "x_um", "high");
+                double yLow = config.getDouble("stage", "limits", "y_um", "low");
+                double yHigh = config.getDouble("stage", "limits", "y_um", "high");
+
+                if (stageX < xLow || stageX > xHigh || stageY < yLow || stageY > yHigh) {
+                    logger.warn("Position ({}, {}) outside hardware stage limits: X[{}, {}], Y[{}, {}]",
+                            String.format("%.1f", stageX), String.format("%.1f", stageY),
+                            xLow, xHigh, yLow, yHigh);
+                    showWarning("Outside Stage Limits",
+                            String.format("The selected position (%.1f, %.1f) is outside hardware stage limits.\n\n" +
+                                    "Stage limits: X[%.0f, %.0f], Y[%.0f, %.0f]\n\n" +
+                                    "Please select a position within the stage travel range.",
+                                    stageX, stageY, xLow, xHigh, yLow, yHigh));
+                    return;
+                }
+            }
+        } catch (Exception e) {
+            logger.debug("Could not check stage limits: {}", e.getMessage());
+            // Continue anyway - let the controller handle limit checking
+        }
+
         // First movement warning
         if (!movementWarningShownThisSession) {
             boolean confirmed = showFirstMovementWarning(stageX, stageY);
