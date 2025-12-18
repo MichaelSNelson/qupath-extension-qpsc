@@ -42,14 +42,14 @@ public class StageMapCanvas extends Canvas {
     private static final Color SLIDE_LABEL = Color.rgb(60, 80, 120);
     private static final Color LEGAL_ZONE = Color.rgb(100, 200, 100, 0.15);
     private static final Color ILLEGAL_ZONE = Color.rgb(200, 100, 100, 0.15);
-    private static final Color CROSSHAIR_COLOR = Color.RED;
+    private static final Color CROSSHAIR_COLOR = Color.CYAN;
     private static final Color FOV_COLOR = Color.ORANGE;
     private static final Color TARGET_COLOR = Color.rgb(0, 150, 255, 0.7);
-    private static final Color OUT_OF_BOUNDS_COLOR = Color.rgb(255, 100, 100, 0.5);
+    private static final Color OUT_OF_BOUNDS_COLOR = Color.rgb(255, 100, 100, 0.8);
 
     // ========== Rendering Constants ==========
-    private static final double CROSSHAIR_SIZE = 15;  // pixels
-    private static final double CROSSHAIR_GAP = 5;    // pixels (gap in center)
+    private static final double CROSSHAIR_SIZE = 12;  // pixels (radius of filled circle)
+    private static final double CROSSHAIR_LINE_LENGTH = 20;  // pixels (line extending from circle)
     private static final double INSERT_PADDING = 20;  // pixels padding around insert
     private static final double SLIDE_CORNER_RADIUS = 3;  // pixels
 
@@ -352,16 +352,25 @@ public class StageMapCanvas extends Canvas {
         boolean inInsert = currentInsert.isPositionInInsert(currentStageX, currentStageY);
         Color color = inInsert ? CROSSHAIR_COLOR : OUT_OF_BOUNDS_COLOR;
 
+        // Draw filled circle at center
+        gc.setFill(color);
+        gc.fillOval(sx - CROSSHAIR_SIZE / 2, sy - CROSSHAIR_SIZE / 2,
+                    CROSSHAIR_SIZE, CROSSHAIR_SIZE);
+
+        // Draw crosshair lines extending from circle
         gc.setStroke(color);
         gc.setLineWidth(2);
 
-        // Horizontal line with gap
-        gc.strokeLine(sx - CROSSHAIR_SIZE, sy, sx - CROSSHAIR_GAP, sy);
-        gc.strokeLine(sx + CROSSHAIR_GAP, sy, sx + CROSSHAIR_SIZE, sy);
+        double lineStart = CROSSHAIR_SIZE / 2 + 2;  // Start just outside the circle
+        double lineEnd = lineStart + CROSSHAIR_LINE_LENGTH;
 
-        // Vertical line with gap
-        gc.strokeLine(sx, sy - CROSSHAIR_SIZE, sx, sy - CROSSHAIR_GAP);
-        gc.strokeLine(sx, sy + CROSSHAIR_GAP, sx, sy + CROSSHAIR_SIZE);
+        // Horizontal lines
+        gc.strokeLine(sx - lineEnd, sy, sx - lineStart, sy);
+        gc.strokeLine(sx + lineStart, sy, sx + lineEnd, sy);
+
+        // Vertical lines
+        gc.strokeLine(sx, sy - lineEnd, sx, sy - lineStart);
+        gc.strokeLine(sx, sy + lineStart, sx, sy + lineEnd);
     }
 
     private void renderFOV(GraphicsContext gc) {

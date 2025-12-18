@@ -341,7 +341,7 @@ public class MicroscopeSocketClient implements AutoCloseable {
         float x = buffer.getFloat();
         float y = buffer.getFloat();
 
-        logger.info("Stage XY position: ({}, {})", x, y);
+        logger.trace("Stage XY position: ({}, {})", x, y);
         return new double[] { x, y };
     }
 
@@ -367,7 +367,7 @@ public class MicroscopeSocketClient implements AutoCloseable {
         buffer.order(ByteOrder.BIG_ENDIAN);
 
         float z = buffer.getFloat();
-        logger.info("Stage Z position: {}", z);
+        logger.trace("Stage Z position: {}", z);
         return z;
     }
 

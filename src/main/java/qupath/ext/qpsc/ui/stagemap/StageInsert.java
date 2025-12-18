@@ -300,7 +300,8 @@ public class StageInsert {
      */
     public boolean isPositionLegal(double stageX, double stageY) {
         for (SlidePosition slide : slides) {
-            if (slide.containsStagePositionWithMargin(stageX, stageY, originXUm, originYUm, slideMarginUm)) {
+            if (slide.containsStagePositionWithMargin(stageX, stageY, originXUm, originYUm,
+                    slideMarginUm, xAxisInverted, yAxisInverted)) {
                 return true;
             }
         }
@@ -434,26 +435,49 @@ public class StageInsert {
          */
         public boolean containsStagePosition(double stageX, double stageY,
                                              double insertOriginX, double insertOriginY) {
-            return containsStagePositionWithMargin(stageX, stageY, insertOriginX, insertOriginY, 0);
+            // Default to non-inverted for backward compatibility
+            return containsStagePositionWithMargin(stageX, stageY, insertOriginX, insertOriginY,
+                    0, false, false);
         }
 
         /**
          * Checks if a stage position is within this slide's boundaries plus a margin.
+         * Handles axis inversion when optics flip the coordinate system.
          *
          * @param stageX        Stage X coordinate (um)
          * @param stageY        Stage Y coordinate (um)
          * @param insertOriginX Insert origin X in stage coordinates (um)
          * @param insertOriginY Insert origin Y in stage coordinates (um)
          * @param marginUm      Additional margin around the slide (um)
+         * @param xInverted     True if X axis is inverted (origin is max X)
+         * @param yInverted     True if Y axis is inverted (origin is max Y)
          * @return true if the position is within the slide plus margin
          */
         public boolean containsStagePositionWithMargin(double stageX, double stageY,
                                                        double insertOriginX, double insertOriginY,
-                                                       double marginUm) {
-            double slideMinX = insertOriginX + xOffsetUm - marginUm;
-            double slideMaxX = insertOriginX + xOffsetUm + widthUm + marginUm;
-            double slideMinY = insertOriginY + yOffsetUm - marginUm;
-            double slideMaxY = insertOriginY + yOffsetUm + heightUm + marginUm;
+                                                       double marginUm,
+                                                       boolean xInverted, boolean yInverted) {
+            double slideMinX, slideMaxX, slideMinY, slideMaxY;
+
+            if (xInverted) {
+                // Origin is at max X, slide extends in negative direction
+                slideMaxX = insertOriginX - xOffsetUm + marginUm;
+                slideMinX = insertOriginX - xOffsetUm - widthUm - marginUm;
+            } else {
+                // Origin is at min X, slide extends in positive direction
+                slideMinX = insertOriginX + xOffsetUm - marginUm;
+                slideMaxX = insertOriginX + xOffsetUm + widthUm + marginUm;
+            }
+
+            if (yInverted) {
+                // Origin is at max Y, slide extends in negative direction
+                slideMaxY = insertOriginY - yOffsetUm + marginUm;
+                slideMinY = insertOriginY - yOffsetUm - heightUm - marginUm;
+            } else {
+                // Origin is at min Y, slide extends in positive direction
+                slideMinY = insertOriginY + yOffsetUm - marginUm;
+                slideMaxY = insertOriginY + yOffsetUm + heightUm + marginUm;
+            }
 
             return stageX >= slideMinX && stageX <= slideMaxX &&
                    stageY >= slideMinY && stageY <= slideMaxY;

@@ -1,7 +1,5 @@
 package qupath.ext.qpsc.ui.stagemap;
 
-import javafx.animation.KeyFrame;
-import javafx.animation.Timeline;
 import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.geometry.Insets;
@@ -11,7 +9,6 @@ import javafx.scene.control.*;
 import javafx.scene.layout.*;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
-import javafx.util.Duration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qupath.ext.qpsc.controller.MicroscopeController;
@@ -22,6 +19,9 @@ import java.awt.Desktop;
 import java.io.File;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Floating window displaying a visual map of the microscope stage.
@@ -53,8 +53,8 @@ public class StageMapWindow {
     private Label statusLabel;
 
     // ========== State ==========
-    private Timeline positionPoller;
-    private boolean isPolling = false;
+    private ScheduledExecutorService positionPoller;
+    private volatile boolean isPolling = false;
     private static boolean movementWarningShownThisSession = false;
 
     // ========== Configuration ==========
@@ -304,19 +304,25 @@ public class StageMapWindow {
             return;
         }
 
-        positionPoller = new Timeline(new KeyFrame(
-                Duration.millis(POLL_INTERVAL_MS),
-                e -> pollPosition()));
-        positionPoller.setCycleCount(Timeline.INDEFINITE);
-        positionPoller.play();
+        // Use a daemon thread so it won't prevent JVM shutdown
+        positionPoller = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "StageMap-PositionPoller");
+            t.setDaemon(true);
+            return t;
+        });
+        positionPoller.scheduleAtFixedRate(
+                this::pollPosition,
+                0,
+                POLL_INTERVAL_MS,
+                TimeUnit.MILLISECONDS);
         isPolling = true;
 
         logger.debug("Started position polling ({}ms interval)", POLL_INTERVAL_MS);
     }
 
     private void stopPositionPolling() {
-        if (positionPoller != null) {
-            positionPoller.stop();
+        if (positionPoller != null && !positionPoller.isShutdown()) {
+            positionPoller.shutdownNow();
             isPolling = false;
             logger.debug("Stopped position polling");
         }
@@ -385,11 +391,14 @@ public class StageMapWindow {
     private void handleCanvasClick(double stageX, double stageY) {
         StageInsert insert = insertComboBox.getValue();
         if (insert == null) {
+            logger.warn("No insert selected for stage movement");
             return;
         }
 
         // Check if position is legal
         if (!insert.isPositionLegal(stageX, stageY)) {
+            logger.warn("Invalid position clicked: ({}, {}) - outside legal zone for insert '{}'",
+                    String.format("%.1f", stageX), String.format("%.1f", stageY), insert.getId());
             showWarning("Invalid Position",
                     "The selected position is outside the safe movement zone.\n" +
                     "Please select a position on or near a slide.");

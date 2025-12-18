@@ -123,7 +123,7 @@ public class MicroscopeController {
     public double[] getStagePositionXY() throws IOException {
         try {
             double[] position = socketClient.getStageXY();
-            logger.info("Stage XY position: ({}, {})", position[0], position[1]);
+            logger.trace("Stage XY position: ({}, {})", position[0], position[1]);
             return position;
         } catch (IOException e) {
             logger.error("Failed to get stage XY position: {}", e.getMessage());
@@ -140,7 +140,7 @@ public class MicroscopeController {
     public double getStagePositionZ() throws IOException {
         try {
             double z = socketClient.getStageZ();
-            logger.info("Stage Z position: {}", z);
+            logger.trace("Stage Z position: {}", z);
             return z;
         } catch (IOException e) {
             logger.error("Failed to get stage Z position: {}", e.getMessage());
