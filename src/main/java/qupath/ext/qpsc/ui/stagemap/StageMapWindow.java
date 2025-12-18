@@ -55,6 +55,7 @@ public class StageMapWindow {
     // ========== State ==========
     private ScheduledExecutorService positionPoller;
     private volatile boolean isPolling = false;
+    private volatile boolean dialogShowing = false;  // Pause updates while dialogs are shown
     private static boolean movementWarningShownThisSession = false;
 
     // ========== Configuration ==========
@@ -338,12 +339,21 @@ public class StageMapWindow {
     }
 
     private void pollPosition() {
+        // Skip updates while dialogs are showing to prevent canvas corruption
+        if (dialogShowing) {
+            return;
+        }
+
         try {
             MicroscopeController controller = MicroscopeController.getInstance();
             double[] pos = controller.getStagePositionXY();
 
             if (pos != null && pos.length >= 2) {
                 Platform.runLater(() -> {
+                    // Double-check dialog state on FX thread
+                    if (dialogShowing) {
+                        return;
+                    }
                     canvas.updatePosition(pos[0], pos[1]);
                     positionLabel.setText(String.format("Pos: %.1f, %.1f um", pos[0], pos[1]));
                     statusLabel.setText("");
@@ -362,11 +372,16 @@ public class StageMapWindow {
                 });
 
                 // Update FOV if available
-                updateFOV();
+                if (!dialogShowing) {
+                    updateFOV();
+                }
             }
 
         } catch (Exception e) {
             Platform.runLater(() -> {
+                if (dialogShowing) {
+                    return;
+                }
                 statusLabel.setText("Disconnected");
                 statusLabel.setStyle("-fx-text-fill: #f66;");
                 canvas.updatePosition(Double.NaN, Double.NaN);
@@ -455,27 +470,32 @@ public class StageMapWindow {
     }
 
     private boolean showFirstMovementWarning(double targetX, double targetY) {
-        Alert alert = new Alert(Alert.AlertType.WARNING);
-        alert.setTitle("Confirm Stage Movement");
-        alert.setHeaderText("First Stage Movement This Session");
-        alert.setContentText(String.format(
-                "You are about to move the microscope stage.\n\n" +
-                "Target position: (%.1f, %.1f) um\n\n" +
-                "IMPORTANT: Before moving, ensure:\n" +
-                "- The objective turret has adequate clearance\n" +
-                "- Lower-power objectives won't collide with the sample\n" +
-                "- The slide is properly secured in the insert\n\n" +
-                "This warning will not appear again this session.",
-                targetX, targetY));
+        dialogShowing = true;
+        try {
+            Alert alert = new Alert(Alert.AlertType.WARNING);
+            alert.setTitle("Confirm Stage Movement");
+            alert.setHeaderText("First Stage Movement This Session");
+            alert.setContentText(String.format(
+                    "You are about to move the microscope stage.\n\n" +
+                    "Target position: (%.1f, %.1f) um\n\n" +
+                    "IMPORTANT: Before moving, ensure:\n" +
+                    "- The objective turret has adequate clearance\n" +
+                    "- Lower-power objectives won't collide with the sample\n" +
+                    "- The slide is properly secured in the insert\n\n" +
+                    "This warning will not appear again this session.",
+                    targetX, targetY));
 
-        alert.initOwner(stage);
+            alert.initOwner(stage);
 
-        ButtonType moveButton = new ButtonType("Move Stage", ButtonBar.ButtonData.OK_DONE);
-        ButtonType cancelButton = new ButtonType("Cancel", ButtonBar.ButtonData.CANCEL_CLOSE);
-        alert.getButtonTypes().setAll(moveButton, cancelButton);
+            ButtonType moveButton = new ButtonType("Move Stage", ButtonBar.ButtonData.OK_DONE);
+            ButtonType cancelButton = new ButtonType("Cancel", ButtonBar.ButtonData.CANCEL_CLOSE);
+            alert.getButtonTypes().setAll(moveButton, cancelButton);
 
-        Optional<ButtonType> result = alert.showAndWait();
-        return result.isPresent() && result.get() == moveButton;
+            Optional<ButtonType> result = alert.showAndWait();
+            return result.isPresent() && result.get() == moveButton;
+        } finally {
+            dialogShowing = false;
+        }
     }
 
     private void executeMove(double targetX, double targetY) {
@@ -500,23 +520,33 @@ public class StageMapWindow {
 
     private void showWarning(String title, String message) {
         Platform.runLater(() -> {
-            Alert alert = new Alert(Alert.AlertType.WARNING);
-            alert.setTitle(title);
-            alert.setHeaderText(null);
-            alert.setContentText(message);
-            alert.initOwner(stage);
-            alert.showAndWait();
+            dialogShowing = true;
+            try {
+                Alert alert = new Alert(Alert.AlertType.WARNING);
+                alert.setTitle(title);
+                alert.setHeaderText(null);
+                alert.setContentText(message);
+                alert.initOwner(stage);
+                alert.showAndWait();
+            } finally {
+                dialogShowing = false;
+            }
         });
     }
 
     private void showError(String title, String message) {
         Platform.runLater(() -> {
-            Alert alert = new Alert(Alert.AlertType.ERROR);
-            alert.setTitle(title);
-            alert.setHeaderText(null);
-            alert.setContentText(message);
-            alert.initOwner(stage);
-            alert.showAndWait();
+            dialogShowing = true;
+            try {
+                Alert alert = new Alert(Alert.AlertType.ERROR);
+                alert.setTitle(title);
+                alert.setHeaderText(null);
+                alert.setContentText(message);
+                alert.initOwner(stage);
+                alert.showAndWait();
+            } finally {
+                dialogShowing = false;
+            }
         });
     }
 
