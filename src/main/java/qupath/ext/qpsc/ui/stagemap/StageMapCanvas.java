@@ -80,6 +80,9 @@ public class StageMapCanvas extends Canvas {
     // Flag to completely disable rendering (used during dispose)
     private volatile boolean renderingEnabled = true;
 
+    // Track if canvas texture appears corrupted (continuous render failures)
+    private volatile boolean textureCorrupted = false;
+
     // ========== Callback ==========
     private BiConsumer<Double, Double> clickHandler;
 
@@ -334,7 +337,24 @@ public class StageMapCanvas extends Canvas {
                 logger.warn("Canvas render error (suppressing further): {}", e.getMessage());
                 renderErrorLogged = true;
             }
+
+            // If we hit many render errors quickly, the texture is likely corrupted
+            // Hide ourselves to stop JavaFX's internal render loop from spamming
+            if (renderErrorCount >= 5 && !textureCorrupted) {
+                textureCorrupted = true;
+                logger.warn("Canvas texture appears corrupted - hiding canvas to stop render errors");
+                setVisible(false);
+            }
         }
+    }
+
+    /**
+     * Returns true if the canvas texture appears to be corrupted.
+     * This happens when MicroManager's Live Mode is toggled off, corrupting
+     * shared graphics resources.
+     */
+    public boolean isTextureCorrupted() {
+        return textureCorrupted;
     }
 
     private void renderInsertBackground(GraphicsContext gc) {

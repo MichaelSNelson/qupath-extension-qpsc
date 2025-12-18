@@ -431,9 +431,13 @@ public class StageMapWindow {
                     MAX_CONSECUTIVE_ERRORS);
             Platform.runLater(() -> {
                 if (stage != null && stage.isShowing() && !dialogShowing) {
-                    statusLabel.setText("Polling paused (disconnected)");
+                    // CRITICAL: Hide the canvas to stop JavaFX's internal rendering loop
+                    // from trying to repaint a corrupted texture (causes NPE spam)
+                    if (canvas != null) {
+                        canvas.setVisible(false);
+                    }
+                    statusLabel.setText("Disconnected - reopen to reconnect");
                     statusLabel.setStyle("-fx-text-fill: #f66;");
-                    // Don't update canvas position to avoid triggering render
                 }
             });
         }
