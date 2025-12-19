@@ -894,6 +894,11 @@ public class ExistingAlignmentPath {
                 double yPercent = (firstAnn.getROI().getCentroidY() / imageHeight) * 100;
                 logger.info("First annotation position: {}% x, {}% y (flipped coordinates)",
                         String.format("%.1f", xPercent), String.format("%.1f", yPercent));
+            } else {
+                // No annotations in flipped entry - run tissue detection
+                // This will create annotations on the currently displayed (flipped) image
+                logger.info("No annotations in flipped entry - running tissue detection");
+                return AnnotationHelper.ensureAnnotationsExist(gui, state.pixelSize, state.selectedAnnotationClasses);
             }
 
             // Ensure annotation names
