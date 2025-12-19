@@ -20,6 +20,9 @@ import qupath.lib.projects.Project;
 
 import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
+import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.ResourceBundle;
 
 /**
@@ -308,10 +311,47 @@ public class StageMovementController {
 
             // Initial state - check if we have an alignment
             boolean hasAlignment = currentTransform != null;
+
+            // Create a container for available alignments list (shown when no alignment for current image)
+            ListView<String> alignmentListView = new ListView<>();
+            alignmentListView.setPrefHeight(100);
+            alignmentListView.setPrefWidth(280);
+            alignmentListView.setVisible(false);
+            alignmentListView.setManaged(false);
+
+            Label availableLabel = new Label("Images with alignments:");
+            availableLabel.setVisible(false);
+            availableLabel.setManaged(false);
+
             if (!hasAlignment) {
                 goToCentroidBtn.setDisable(true);
-                centroidStatus.setText("No alignment available");
-                logger.debug("Go to centroid button disabled - no alignment");
+
+                // Get list of available alignments
+                String currentImageName = gui != null && gui.getImageData() != null
+                        ? QPProjectFunctions.getActualImageFileName(gui.getImageData())
+                        : "unknown";
+
+                @SuppressWarnings("unchecked")
+                Project<BufferedImage> projectForList = gui != null && gui.getProject() != null
+                        ? (Project<BufferedImage>) gui.getProject()
+                        : null;
+                List<String> availableAlignments = getAvailableAlignments(projectForList);
+
+                if (availableAlignments.isEmpty()) {
+                    centroidStatus.setText("No alignments available in project");
+                } else {
+                    centroidStatus.setText("No alignment for: " + currentImageName);
+
+                    // Show the list of available alignments
+                    availableLabel.setVisible(true);
+                    availableLabel.setManaged(true);
+                    alignmentListView.setVisible(true);
+                    alignmentListView.setManaged(true);
+                    alignmentListView.getItems().addAll(availableAlignments);
+                }
+
+                logger.debug("Go to centroid button disabled - no alignment for current image. {} alignments available in project.",
+                        availableAlignments.size());
             } else {
                 logger.debug("Go to centroid button enabled - alignment available");
             }
@@ -419,6 +459,8 @@ public class StageMovementController {
 
             grid.add(goToCentroidBtn, 0, 8, 2, 1);
             grid.add(centroidStatus, 0, 9, 3, 1);
+            grid.add(availableLabel, 0, 10, 3, 1);
+            grid.add(alignmentListView, 0, 11, 3, 1);
 
             logger.debug("Finalizing dialog configuration and displaying");
             dlg.getDialogPane().setContent(grid);
@@ -435,5 +477,45 @@ public class StageMovementController {
             dlg.show();
             logger.info("Stage movement dialog displayed successfully");
         });
+    }
+
+    /**
+     * Gets a list of image names that have saved alignments in the project.
+     *
+     * @param project The QuPath project
+     * @return List of image names with alignments, or empty list if none found
+     */
+    private static List<String> getAvailableAlignments(Project<BufferedImage> project) {
+        List<String> alignedImages = new ArrayList<>();
+
+        if (project == null || project.getPath() == null) {
+            return alignedImages;
+        }
+
+        try {
+            File projectDir = project.getPath().toFile().getParentFile();
+            File alignmentDir = new File(projectDir, "alignmentFiles");
+
+            if (!alignmentDir.exists() || !alignmentDir.isDirectory()) {
+                return alignedImages;
+            }
+
+            File[] alignmentFiles = alignmentDir.listFiles((dir, name) -> name.endsWith("_alignment.json"));
+
+            if (alignmentFiles != null) {
+                for (File file : alignmentFiles) {
+                    // Extract image name from filename (remove _alignment.json suffix)
+                    String fileName = file.getName();
+                    String imageName = fileName.substring(0, fileName.length() - "_alignment.json".length());
+                    alignedImages.add(imageName);
+                }
+            }
+
+            logger.debug("Found {} images with alignments in project", alignedImages.size());
+        } catch (Exception e) {
+            logger.warn("Error listing available alignments: {}", e.getMessage());
+        }
+
+        return alignedImages;
     }
 }
