@@ -589,9 +589,12 @@ public class ExistingImageWorkflowV2 {
         }
 
         /**
-         * Shows success notification.
+         * Shows success notification and plays completion beep.
          */
         private void showSuccessNotification() {
+            // Play beep to alert user that workflow is complete
+            UIFunctions.playWorkflowCompletionBeep();
+
             Platform.runLater(() -> {
                 Dialogs.showInfoNotification("Acquisition Complete",
                         "All acquisitions have completed successfully.");

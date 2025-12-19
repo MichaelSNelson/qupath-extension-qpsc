@@ -393,6 +393,9 @@ public class BoundedAcquisitionWorkflow {
                                     actualSampleName,  // Use derived sample name for correct path
                                     actualProjectsFolder  // Use derived projectsFolder for correct path
                             ).thenRun(() -> {
+                                // Play beep to alert user that workflow is complete
+                                UIFunctions.playWorkflowCompletionBeep();
+
                                 Platform.runLater(() ->
                                         qupath.fx.dialogs.Dialogs.showInfoNotification(
                                                 "Stitching complete",

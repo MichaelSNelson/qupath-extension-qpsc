@@ -33,6 +33,7 @@ import qupath.lib.scripting.QP;
 
 import javafx.geometry.Insets;
 
+import java.awt.Toolkit;
 import java.util.*;
 import java.util.List;
 import java.util.concurrent.*;
@@ -489,6 +490,13 @@ public class UIFunctions {
      * @return ManualFocusResult indicating user's choice
      */
     public static ManualFocusResult showManualFocusDialog(int retriesRemaining) {
+        // Play system beep to alert user that attention is needed
+        try {
+            Toolkit.getDefaultToolkit().beep();
+        } catch (Exception e) {
+            // Ignore beep failures - not critical
+        }
+
         Alert alert = new Alert(Alert.AlertType.WARNING);
         alert.setTitle("Manual Focus Required");
         alert.setHeaderText("Autofocus Failed");
@@ -547,6 +555,24 @@ public class UIFunctions {
 
         // Default to cancel if dialog closed without selection
         return ManualFocusResult.CANCEL_ACQUISITION;
+    }
+
+    /**
+     * Plays a system beep to notify the user of workflow completion.
+     * This is useful for long-running acquisitions where the user may have
+     * stepped away from the computer.
+     *
+     * <p>The beep is played asynchronously and failures are silently ignored
+     * since audio notification is a non-critical feature.
+     */
+    public static void playWorkflowCompletionBeep() {
+        try {
+            Toolkit.getDefaultToolkit().beep();
+            logger.debug("Played workflow completion beep");
+        } catch (Exception e) {
+            // Ignore beep failures - not critical
+            logger.trace("Failed to play completion beep: {}", e.getMessage());
+        }
     }
 
 
