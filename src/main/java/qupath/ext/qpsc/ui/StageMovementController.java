@@ -7,14 +7,19 @@ import javafx.scene.layout.GridPane;
 import javafx.stage.Modality;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import javafx.stage.Stage;
 import qupath.ext.qpsc.controller.MicroscopeController;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
+import qupath.ext.qpsc.utilities.AffineTransformManager;
 import qupath.ext.qpsc.utilities.MicroscopeConfigManager;
+import qupath.ext.qpsc.utilities.QPProjectFunctions;
 import qupath.ext.qpsc.utilities.TransformationFunctions;
 import qupath.lib.gui.QuPathGUI;
 import qupath.lib.objects.PathObject;
+import qupath.lib.projects.Project;
 
 import java.awt.geom.AffineTransform;
+import java.awt.image.BufferedImage;
 import java.util.ResourceBundle;
 
 /**
@@ -270,7 +275,36 @@ public class StageMovementController {
 
             // Check conditions for enabling the button
             QuPathGUI gui = QuPathGUI.getInstance();
+
+            // Try to get alignment - first from MicroscopeController, then from slide-specific storage
             AffineTransform currentTransform = MicroscopeController.getInstance().getCurrentTransform();
+
+            // If no active transform, try to load slide-specific alignment for current image
+            if (currentTransform == null && gui != null && gui.getProject() != null && gui.getImageData() != null) {
+                logger.debug("No active transform, checking for slide-specific alignment");
+                try {
+                    @SuppressWarnings("unchecked")
+                    Project<BufferedImage> project = (Project<BufferedImage>) gui.getProject();
+
+                    // Use actual image file name - this is how alignments are saved
+                    String imageName = QPProjectFunctions.getActualImageFileName(gui.getImageData());
+                    if (imageName != null && !imageName.isEmpty()) {
+                        logger.debug("Looking for slide-specific alignment for image: {}", imageName);
+                        AffineTransform slideTransform = AffineTransformManager.loadSlideAlignment(project, imageName);
+
+                        if (slideTransform != null) {
+                            currentTransform = slideTransform;
+                            // Also set it in MicroscopeController for use in the action handler
+                            MicroscopeController.getInstance().setCurrentTransform(slideTransform);
+                            logger.info("Loaded slide-specific alignment for image: {}", imageName);
+                        } else {
+                            logger.debug("No slide-specific alignment found for image: {}", imageName);
+                        }
+                    }
+                } catch (Exception e) {
+                    logger.warn("Failed to load slide-specific alignment: {}", e.getMessage());
+                }
+            }
 
             // Initial state - check if we have an alignment
             boolean hasAlignment = currentTransform != null;
@@ -278,6 +312,8 @@ public class StageMovementController {
                 goToCentroidBtn.setDisable(true);
                 centroidStatus.setText("No alignment available");
                 logger.debug("Go to centroid button disabled - no alignment");
+            } else {
+                logger.debug("Go to centroid button enabled - alignment available");
             }
 
             goToCentroidBtn.setOnAction(e -> {
@@ -285,6 +321,25 @@ public class StageMovementController {
                 try {
                     // Re-check transform in case it was set after dialog opened
                     AffineTransform transform = MicroscopeController.getInstance().getCurrentTransform();
+
+                    // If still no transform, try slide-specific alignment again
+                    if (transform == null && gui != null && gui.getProject() != null && gui.getImageData() != null) {
+                        try {
+                            @SuppressWarnings("unchecked")
+                            Project<BufferedImage> project = (Project<BufferedImage>) gui.getProject();
+                            String imageName = QPProjectFunctions.getActualImageFileName(gui.getImageData());
+                            if (imageName != null && !imageName.isEmpty()) {
+                                transform = AffineTransformManager.loadSlideAlignment(project, imageName);
+                                if (transform != null) {
+                                    MicroscopeController.getInstance().setCurrentTransform(transform);
+                                    logger.info("Loaded slide-specific alignment on button click for: {}", imageName);
+                                }
+                            }
+                        } catch (Exception ex) {
+                            logger.warn("Failed to load slide-specific alignment on click: {}", ex.getMessage());
+                        }
+                    }
+
                     if (transform == null) {
                         centroidStatus.setText("No alignment available");
                         UIFunctions.notifyUserOfError(
@@ -369,6 +424,14 @@ public class StageMovementController {
             dlg.getDialogPane().setContent(grid);
             dlg.getDialogPane().getButtonTypes().add(ButtonType.CLOSE);
             dlg.initModality(Modality.NONE);
+
+            // Make dialog always on top but not blocking
+            dlg.setOnShown(event -> {
+                Stage stage = (Stage) dlg.getDialogPane().getScene().getWindow();
+                stage.setAlwaysOnTop(true);
+                logger.debug("Stage movement dialog set to always on top");
+            });
+
             dlg.show();
             logger.info("Stage movement dialog displayed successfully");
         });
