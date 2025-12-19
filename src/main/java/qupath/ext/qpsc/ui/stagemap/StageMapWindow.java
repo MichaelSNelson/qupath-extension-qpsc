@@ -224,7 +224,7 @@ public class StageMapWindow {
         helpButton.setStyle("-fx-font-size: 10; -fx-padding: 2 6;");
         helpButton.setTooltip(new Tooltip(
                 "Stage Map shows the microscope stage position.\n\n" +
-                "- Red crosshair: Current objective position\n" +
+                "- Green crosshair: Current objective position\n" +
                 "- Orange rectangle: Camera field of view\n" +
                 "- Blue rectangles: Slide positions\n" +
                 "- Green zones: Safe movement areas\n" +

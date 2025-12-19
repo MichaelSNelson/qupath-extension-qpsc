@@ -97,6 +97,10 @@ public class StageMovementController {
             dlg.setHeaderText(res.getString("stageMovement.header"));
             logger.debug("Dialog created with title: {}", res.getString("stageMovement.title"));
 
+            // Create warning label for multiple viewers
+            Label warningLabel = new Label(res.getString("stageMovement.warning.multipleViewers"));
+            warningLabel.setStyle("-fx-font-weight: bold; -fx-text-fill: #cc3300; -fx-padding: 5 0 10 0;");
+
             // --- Fields and status labels ---
             logger.debug("Creating UI input fields and status labels");
             TextField xField = new TextField();
@@ -360,19 +364,23 @@ public class StageMovementController {
             });
 
             // Arrange arrows in a cross pattern with step field in center
-            GridPane arrowGrid = new GridPane();
-            arrowGrid.setAlignment(Pos.CENTER);
-            arrowGrid.setHgap(2);
-            arrowGrid.setVgap(2);
-            arrowGrid.add(upBtn, 1, 0);
-            arrowGrid.add(leftBtn, 0, 1);
-            arrowGrid.add(xyStepField, 1, 1);
-            arrowGrid.add(rightBtn, 2, 1);
-            arrowGrid.add(downBtn, 1, 2);
+            // Use VBox for up/down to center them over the step field
+            VBox upDownBox = new VBox(2);
+            upDownBox.setAlignment(Pos.CENTER);
+            upDownBox.getChildren().addAll(upBtn, xyStepField, downBtn);
 
+            // Create horizontal row with left arrow, center column, right arrow
+            HBox arrowRow = new HBox(2);
+            arrowRow.setAlignment(Pos.CENTER);
+            arrowRow.getChildren().addAll(leftBtn, upDownBox, rightBtn);
+
+            // Add "um" label below
             Label arrowLabel = new Label("um");
             arrowLabel.setStyle("-fx-font-size: 10px;");
-            arrowGrid.add(arrowLabel, 2, 2);
+
+            VBox arrowGrid = new VBox(2);
+            arrowGrid.setAlignment(Pos.CENTER);
+            arrowGrid.getChildren().addAll(arrowRow, arrowLabel);
 
             // --- Z Scroll Control ---
             logger.debug("Adding Z scroll wheel control");
@@ -384,7 +392,26 @@ public class StageMovementController {
             Label zScrollLabel = new Label("Z step:");
             zScrollLabel.setStyle("-fx-font-size: 10px;");
 
-            HBox zScrollBox = new HBox(5, zScrollLabel, zStepField, new Label("um"));
+            // Help button with tooltip explaining Z scroll
+            Button zHelpBtn = new Button("?");
+            zHelpBtn.setStyle("-fx-font-size: 10px; -fx-min-width: 20px; -fx-min-height: 20px; -fx-padding: 0;");
+            Tooltip zHelpTooltip = new Tooltip(
+                    "Z SCROLL CONTROL\n\n" +
+                    "Use mouse scroll wheel to move Z axis:\n" +
+                    "- Hover over Z field, Move Z button, or Z step field\n" +
+                    "- Scroll UP to INCREASE Z (move up)\n" +
+                    "- Scroll DOWN to DECREASE Z (move down)\n\n" +
+                    "The Z step field sets how far each scroll moves."
+            );
+            zHelpTooltip.setShowDelay(javafx.util.Duration.ZERO);
+            zHelpTooltip.setShowDuration(javafx.util.Duration.INDEFINITE);
+            Tooltip.install(zHelpBtn, zHelpTooltip);
+            zHelpBtn.setOnAction(e -> {
+                // Show tooltip when clicked as well
+                Tooltip.install(zHelpBtn, zHelpTooltip);
+            });
+
+            HBox zScrollBox = new HBox(5, zScrollLabel, zStepField, new Label("um"), zHelpBtn);
             zScrollBox.setAlignment(Pos.CENTER_LEFT);
 
             // Add scroll handler to Z field and button
@@ -646,10 +673,31 @@ public class StageMovementController {
             grid.add(availableLabel, 0, 10, 4, 1);
             grid.add(alignmentListView, 0, 11, 4, 1);
 
+            // Wrap grid in VBox with warning at top
+            VBox contentBox = new VBox(5);
+            contentBox.getChildren().addAll(warningLabel, grid);
+
             logger.debug("Finalizing dialog configuration and displaying");
-            dlg.getDialogPane().setContent(grid);
+            dlg.getDialogPane().setContent(contentBox);
             dlg.getDialogPane().getButtonTypes().add(ButtonType.CLOSE);
             dlg.initModality(Modality.NONE);
+
+            // Add listener to refresh alignment status when image changes
+            if (gui != null) {
+                javafx.beans.value.ChangeListener<qupath.lib.images.ImageData<?>> imageChangeListener =
+                    (obs, oldImage, newImage) -> {
+                        logger.debug("Image changed in viewer, refreshing alignment status");
+                        refreshAlignmentStatus(gui, goToCentroidBtn, centroidStatus,
+                                availableLabel, alignmentListView, mgr);
+                    };
+                gui.imageDataProperty().addListener(imageChangeListener);
+
+                // Remove listener when dialog closes to prevent memory leak
+                dlg.setOnHidden(event -> {
+                    gui.imageDataProperty().removeListener(imageChangeListener);
+                    logger.debug("Removed image change listener from dialog");
+                });
+            }
 
             // Make dialog always on top but not blocking
             dlg.setOnShown(event -> {
@@ -701,5 +749,92 @@ public class StageMovementController {
         }
 
         return alignedImages;
+    }
+
+    /**
+     * Refreshes the alignment status for the Go to Centroid button when the image changes.
+     * Updates button enabled state and available alignments list.
+     *
+     * @param gui The QuPath GUI instance
+     * @param goToCentroidBtn The Go to Centroid button
+     * @param centroidStatus The status label
+     * @param availableLabel The label for available alignments
+     * @param alignmentListView The list view for available alignments
+     * @param mgr The config manager (for validation, passed but not used in this method)
+     */
+    private static void refreshAlignmentStatus(QuPathGUI gui, Button goToCentroidBtn,
+            Label centroidStatus, Label availableLabel, ListView<String> alignmentListView,
+            MicroscopeConfigManager mgr) {
+
+        // Reset state
+        AffineTransform currentTransform = null;
+        goToCentroidBtn.setDisable(true);
+        alignmentListView.getItems().clear();
+
+        if (gui == null || gui.getProject() == null) {
+            centroidStatus.setText("No project open");
+            availableLabel.setVisible(false);
+            availableLabel.setManaged(false);
+            alignmentListView.setVisible(false);
+            alignmentListView.setManaged(false);
+            return;
+        }
+
+        // Try to load slide-specific alignment for current image
+        if (gui.getImageData() != null) {
+            try {
+                @SuppressWarnings("unchecked")
+                Project<BufferedImage> project = (Project<BufferedImage>) gui.getProject();
+
+                String imageName = QPProjectFunctions.getActualImageFileName(gui.getImageData());
+                if (imageName != null && !imageName.isEmpty()) {
+                    logger.debug("Checking alignment for image: {}", imageName);
+                    AffineTransform slideTransform = AffineTransformManager.loadSlideAlignment(project, imageName);
+
+                    if (slideTransform != null) {
+                        currentTransform = slideTransform;
+                        MicroscopeController.getInstance().setCurrentTransform(slideTransform);
+                        logger.info("Loaded alignment for image: {}", imageName);
+                    }
+                }
+            } catch (Exception e) {
+                logger.warn("Failed to load alignment: {}", e.getMessage());
+            }
+        }
+
+        // Update UI based on alignment availability
+        if (currentTransform != null) {
+            goToCentroidBtn.setDisable(false);
+            centroidStatus.setText("Alignment available");
+            availableLabel.setVisible(false);
+            availableLabel.setManaged(false);
+            alignmentListView.setVisible(false);
+            alignmentListView.setManaged(false);
+            logger.debug("Go to centroid button enabled - alignment found");
+        } else {
+            String currentImageName = gui.getImageData() != null
+                    ? QPProjectFunctions.getActualImageFileName(gui.getImageData())
+                    : "no image";
+
+            @SuppressWarnings("unchecked")
+            Project<BufferedImage> projectForList = (Project<BufferedImage>) gui.getProject();
+            List<String> availableAlignments = getAvailableAlignments(projectForList);
+
+            if (availableAlignments.isEmpty()) {
+                centroidStatus.setText("No alignments available in project");
+                availableLabel.setVisible(false);
+                availableLabel.setManaged(false);
+                alignmentListView.setVisible(false);
+                alignmentListView.setManaged(false);
+            } else {
+                centroidStatus.setText("No alignment for: " + currentImageName);
+                availableLabel.setVisible(true);
+                availableLabel.setManaged(true);
+                alignmentListView.setVisible(true);
+                alignmentListView.setManaged(true);
+                alignmentListView.getItems().addAll(availableAlignments);
+            }
+            logger.debug("Go to centroid button disabled - no alignment for current image");
+        }
     }
 }

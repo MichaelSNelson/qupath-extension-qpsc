@@ -39,7 +39,7 @@ import java.util.function.BiConsumer;
  *   <li>Stage insert outline (dark gray rectangle)</li>
  *   <li>Slide positions (light blue rectangles)</li>
  *   <li>Legal/illegal zone overlay (green/red tint)</li>
- *   <li>Current objective position (cyan crosshair)</li>
+ *   <li>Current objective position (green crosshair)</li>
  *   <li>Camera field of view (orange rectangle)</li>
  *   <li>Target position on hover (blue dashed crosshair)</li>
  * </ul>
@@ -57,7 +57,7 @@ public class StageMapCanvas extends StackPane {
     private static final Color SLIDE_LABEL = Color.rgb(60, 80, 120);
     private static final Color LEGAL_ZONE = Color.rgb(100, 200, 100, 0.15);
     private static final Color ILLEGAL_ZONE = Color.rgb(200, 100, 100, 0.15);
-    private static final Color CROSSHAIR_COLOR = Color.CYAN;
+    private static final Color CROSSHAIR_COLOR = Color.LIME;
     private static final Color FOV_COLOR = Color.ORANGE;
     private static final Color TARGET_COLOR = Color.rgb(0, 150, 255, 0.7);
     private static final Color OUT_OF_BOUNDS_COLOR = Color.rgb(255, 100, 100, 0.8);
