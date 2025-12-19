@@ -2,8 +2,12 @@ package qupath.ext.qpsc.ui;
 
 import javafx.application.Platform;
 import javafx.geometry.Insets;
+import javafx.geometry.Pos;
 import javafx.scene.control.*;
+import javafx.scene.input.ScrollEvent;
 import javafx.scene.layout.GridPane;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.VBox;
 import javafx.stage.Modality;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -219,7 +223,7 @@ public class StageMovementController {
                 try {
                     double r = Double.parseDouble(rField.getText());
                     logger.debug("Parsed R coordinate for movement: {}", r);
-                    
+
                     // no bounds for R (polarizer rotation is unrestricted)
                     logger.info("Executing R stage movement to position: {}", r);
                     MicroscopeController.getInstance().moveStageR(r);
@@ -237,6 +241,184 @@ public class StageMovementController {
                 }
             });
 
+            // --- XY Arrow Controls ---
+            logger.debug("Creating XY arrow navigation controls");
+            TextField xyStepField = new TextField("100");
+            xyStepField.setPrefWidth(70);
+            xyStepField.setAlignment(Pos.CENTER);
+            Tooltip.install(xyStepField, new Tooltip("Step size in micrometers"));
+
+            Button upBtn = new Button("\u2191");  // Up arrow
+            Button downBtn = new Button("\u2193");  // Down arrow
+            Button leftBtn = new Button("\u2190");  // Left arrow
+            Button rightBtn = new Button("\u2192");  // Right arrow
+
+            // Style arrow buttons
+            String arrowBtnStyle = "-fx-font-size: 14px; -fx-min-width: 30px; -fx-min-height: 30px;";
+            upBtn.setStyle(arrowBtnStyle);
+            downBtn.setStyle(arrowBtnStyle);
+            leftBtn.setStyle(arrowBtnStyle);
+            rightBtn.setStyle(arrowBtnStyle);
+
+            // Helper to move XY by delta and update fields
+            Runnable updateXYFieldsFromHardware = () -> {
+                try {
+                    double[] xy = MicroscopeController.getInstance().getStagePositionXY();
+                    xField.setText(String.format("%.2f", xy[0]));
+                    yField.setText(String.format("%.2f", xy[1]));
+                } catch (Exception ex) {
+                    logger.warn("Failed to update XY fields from hardware: {}", ex.getMessage());
+                }
+            };
+
+            upBtn.setOnAction(e -> {
+                try {
+                    double step = Double.parseDouble(xyStepField.getText());
+                    double currentY = Double.parseDouble(yField.getText());
+                    double newY = currentY + step;
+                    double currentX = Double.parseDouble(xField.getText());
+
+                    if (!mgr.isWithinStageBounds(currentX, newY)) {
+                        xyStatus.setText("Y+ move out of bounds");
+                        return;
+                    }
+
+                    MicroscopeController.getInstance().moveStageXY(currentX, newY);
+                    yField.setText(String.format("%.2f", newY));
+                    xyStatus.setText(String.format("Moved Y+ to %.2f", newY));
+                    logger.debug("Arrow Y+ movement to: {}", newY);
+                } catch (Exception ex) {
+                    logger.warn("Arrow Y+ movement failed: {}", ex.getMessage());
+                    xyStatus.setText("Move failed: " + ex.getMessage());
+                }
+            });
+
+            downBtn.setOnAction(e -> {
+                try {
+                    double step = Double.parseDouble(xyStepField.getText());
+                    double currentY = Double.parseDouble(yField.getText());
+                    double newY = currentY - step;
+                    double currentX = Double.parseDouble(xField.getText());
+
+                    if (!mgr.isWithinStageBounds(currentX, newY)) {
+                        xyStatus.setText("Y- move out of bounds");
+                        return;
+                    }
+
+                    MicroscopeController.getInstance().moveStageXY(currentX, newY);
+                    yField.setText(String.format("%.2f", newY));
+                    xyStatus.setText(String.format("Moved Y- to %.2f", newY));
+                    logger.debug("Arrow Y- movement to: {}", newY);
+                } catch (Exception ex) {
+                    logger.warn("Arrow Y- movement failed: {}", ex.getMessage());
+                    xyStatus.setText("Move failed: " + ex.getMessage());
+                }
+            });
+
+            leftBtn.setOnAction(e -> {
+                try {
+                    double step = Double.parseDouble(xyStepField.getText());
+                    double currentX = Double.parseDouble(xField.getText());
+                    double newX = currentX - step;
+                    double currentY = Double.parseDouble(yField.getText());
+
+                    if (!mgr.isWithinStageBounds(newX, currentY)) {
+                        xyStatus.setText("X- move out of bounds");
+                        return;
+                    }
+
+                    MicroscopeController.getInstance().moveStageXY(newX, currentY);
+                    xField.setText(String.format("%.2f", newX));
+                    xyStatus.setText(String.format("Moved X- to %.2f", newX));
+                    logger.debug("Arrow X- movement to: {}", newX);
+                } catch (Exception ex) {
+                    logger.warn("Arrow X- movement failed: {}", ex.getMessage());
+                    xyStatus.setText("Move failed: " + ex.getMessage());
+                }
+            });
+
+            rightBtn.setOnAction(e -> {
+                try {
+                    double step = Double.parseDouble(xyStepField.getText());
+                    double currentX = Double.parseDouble(xField.getText());
+                    double newX = currentX + step;
+                    double currentY = Double.parseDouble(yField.getText());
+
+                    if (!mgr.isWithinStageBounds(newX, currentY)) {
+                        xyStatus.setText("X+ move out of bounds");
+                        return;
+                    }
+
+                    MicroscopeController.getInstance().moveStageXY(newX, currentY);
+                    xField.setText(String.format("%.2f", newX));
+                    xyStatus.setText(String.format("Moved X+ to %.2f", newX));
+                    logger.debug("Arrow X+ movement to: {}", newX);
+                } catch (Exception ex) {
+                    logger.warn("Arrow X+ movement failed: {}", ex.getMessage());
+                    xyStatus.setText("Move failed: " + ex.getMessage());
+                }
+            });
+
+            // Arrange arrows in a cross pattern with step field in center
+            GridPane arrowGrid = new GridPane();
+            arrowGrid.setAlignment(Pos.CENTER);
+            arrowGrid.setHgap(2);
+            arrowGrid.setVgap(2);
+            arrowGrid.add(upBtn, 1, 0);
+            arrowGrid.add(leftBtn, 0, 1);
+            arrowGrid.add(xyStepField, 1, 1);
+            arrowGrid.add(rightBtn, 2, 1);
+            arrowGrid.add(downBtn, 1, 2);
+
+            Label arrowLabel = new Label("um");
+            arrowLabel.setStyle("-fx-font-size: 10px;");
+            arrowGrid.add(arrowLabel, 2, 2);
+
+            // --- Z Scroll Control ---
+            logger.debug("Adding Z scroll wheel control");
+            TextField zStepField = new TextField("10");
+            zStepField.setPrefWidth(50);
+            zStepField.setAlignment(Pos.CENTER);
+            Tooltip.install(zStepField, new Tooltip("Z step size (um) - use mouse wheel over Z controls"));
+
+            Label zScrollLabel = new Label("Z step:");
+            zScrollLabel.setStyle("-fx-font-size: 10px;");
+
+            HBox zScrollBox = new HBox(5, zScrollLabel, zStepField, new Label("um"));
+            zScrollBox.setAlignment(Pos.CENTER_LEFT);
+
+            // Add scroll handler to Z field and button
+            javafx.event.EventHandler<ScrollEvent> zScrollHandler = event -> {
+                try {
+                    double step = Double.parseDouble(zStepField.getText());
+                    double currentZ = Double.parseDouble(zField.getText());
+
+                    // Scroll up = positive delta = move Z up (increase)
+                    // Scroll down = negative delta = move Z down (decrease)
+                    double direction = event.getDeltaY() > 0 ? 1 : -1;
+                    double newZ = currentZ + (step * direction);
+
+                    if (!mgr.isWithinStageBounds(newZ)) {
+                        zStatus.setText("Z move out of bounds");
+                        event.consume();
+                        return;
+                    }
+
+                    MicroscopeController.getInstance().moveStageZ(newZ);
+                    zField.setText(String.format("%.2f", newZ));
+                    zStatus.setText(String.format("Scrolled Z to %.2f", newZ));
+                    logger.debug("Scroll Z movement to: {}", newZ);
+                } catch (Exception ex) {
+                    logger.warn("Scroll Z movement failed: {}", ex.getMessage());
+                    zStatus.setText("Z scroll failed: " + ex.getMessage());
+                }
+                event.consume();
+            };
+
+            zField.setOnScroll(zScrollHandler);
+            moveZBtn.setOnScroll(zScrollHandler);
+            zStepField.setOnScroll(zScrollHandler);
+
             // --- Layout ---
             logger.debug("Creating and configuring dialog layout grid");
             GridPane grid = new GridPane();
@@ -251,27 +433,28 @@ public class StageMovementController {
             grid.add(new Label(res.getString("stageMovement.label.y")), 0, 1);
             grid.add(yField, 1, 1);
             grid.add(moveXYBtn, 2, 0, 1, 2);
-            grid.add(xyStatus,    1, 2, 2, 1);
+            grid.add(xyStatus, 1, 2, 2, 1);
 
-            // Z
+            // Z with scroll control
             logger.debug("Adding Z control components to dialog grid");
             grid.add(new Label(res.getString("stageMovement.label.z")), 0, 3);
             grid.add(zField, 1, 3);
             grid.add(moveZBtn, 2, 3);
-            grid.add(zStatus,  1, 4, 2, 1);
+            grid.add(zScrollBox, 3, 3);  // Z step control with scroll wheel hint
+            grid.add(zStatus, 1, 4, 3, 1);
 
             // R
             logger.debug("Adding R control components to dialog grid");
             grid.add(new Label(res.getString("stageMovement.label.r")), 0, 5);
             grid.add(rField, 1, 5);
             grid.add(moveRBtn, 2, 5);
-            grid.add(rStatus, 1, 6, 2, 1);
+            grid.add(rStatus, 1, 6, 3, 1);
 
-            // --- Go to object centroid button ---
-            logger.debug("Adding 'Go to object centroid' button");
+            // --- Go to object centroid button and arrow controls ---
+            logger.debug("Adding 'Go to object centroid' button and XY arrow controls");
             Separator separator = new Separator();
             separator.setPadding(new Insets(10, 0, 10, 0));
-            grid.add(separator, 0, 7, 3, 1);
+            grid.add(separator, 0, 7, 4, 1);
 
             Button goToCentroidBtn = new Button("Go to Object Centroid");
             Label centroidStatus = new Label();
@@ -458,9 +641,10 @@ public class StageMovementController {
             });
 
             grid.add(goToCentroidBtn, 0, 8, 2, 1);
-            grid.add(centroidStatus, 0, 9, 3, 1);
-            grid.add(availableLabel, 0, 10, 3, 1);
-            grid.add(alignmentListView, 0, 11, 3, 1);
+            grid.add(arrowGrid, 2, 8, 2, 1);  // Arrow grid next to centroid button
+            grid.add(centroidStatus, 0, 9, 4, 1);
+            grid.add(availableLabel, 0, 10, 4, 1);
+            grid.add(alignmentListView, 0, 11, 4, 1);
 
             logger.debug("Finalizing dialog configuration and displaying");
             dlg.getDialogPane().setContent(grid);
