@@ -354,7 +354,46 @@ public class AutofocusEditorWorkflow {
         tissueGrid.add(tissueAreaThresholdField, 1, 1);
         tissueGrid.add(tissueAreaThresholdDesc, 2, 1);
 
-        TitledPane tissuePane = new TitledPane("Tissue Detection (Shared)", tissueGrid);
+        // Add score_metric to tissue/shared grid (used by both standard and adaptive autofocus)
+        Label scoreMetricLabel = new Label("score_metric:");
+        ComboBox<String> scoreMetricCombo = new ComboBox<>();
+        scoreMetricCombo.getItems().addAll(
+            "laplacian_variance",
+            "sobel",
+            "brenner_gradient",
+            "robust_sharpness",
+            "hybrid_sharpness"
+        );
+        scoreMetricCombo.setValue("laplacian_variance");
+        scoreMetricCombo.setPrefWidth(200);
+        scoreMetricCombo.setTooltip(new Tooltip(
+            "Algorithm for measuring image sharpness.\n" +
+            "Used by BOTH standard and adaptive autofocus.\n\n" +
+            "laplacian_variance (~5ms, recommended):\n" +
+            "  + Fast and reliable for most samples\n" +
+            "  + Good for uniform tissue\n\n" +
+            "sobel (~5ms):\n" +
+            "  + Edge-sensitive metric\n" +
+            "  + Good for high-contrast features\n\n" +
+            "brenner_gradient (~3ms):\n" +
+            "  + Fastest option\n" +
+            "  - Less robust on noisy images\n\n" +
+            "robust_sharpness (~20ms):\n" +
+            "  + Resistant to debris/particles\n" +
+            "  + Best for contaminated samples\n" +
+            "  - Slower autofocus\n\n" +
+            "hybrid_sharpness (~8ms):\n" +
+            "  + Balanced speed and robustness\n" +
+            "  + Good compromise for varied samples"
+        ));
+        Label scoreMetricDesc = new Label("(Focus sharpness metric - shared by both AF methods)");
+        scoreMetricDesc.setStyle("-fx-font-size: 10px; -fx-text-fill: gray;");
+
+        tissueGrid.add(scoreMetricLabel, 0, 2);
+        tissueGrid.add(scoreMetricCombo, 1, 2);
+        tissueGrid.add(scoreMetricDesc, 2, 2);
+
+        TitledPane tissuePane = new TitledPane("Tissue Detection & Shared Settings", tissueGrid);
         tissuePane.setCollapsible(false);
 
         // ===== STANDARD AUTOFOCUS SECTION =====
@@ -442,40 +481,8 @@ public class AutofocusEditorWorkflow {
         Label interpKindDesc = new Label("(Interpolation method)");
         interpKindDesc.setStyle("-fx-font-size: 10px; -fx-text-fill: gray;");
 
-        Label scoreMetricLabel = new Label("score_metric:");
-        ComboBox<String> scoreMetricCombo = new ComboBox<>();
-        scoreMetricCombo.getItems().addAll(
-            "laplacian_variance",
-            "sobel",
-            "brenner_gradient",
-            "robust_sharpness",
-            "hybrid_sharpness"
-        );
-        scoreMetricCombo.setValue("laplacian_variance");
-        scoreMetricCombo.setPrefWidth(200);
-        scoreMetricCombo.setTooltip(new Tooltip(
-            "Algorithm for measuring image sharpness.\n\n" +
-            "laplacian_variance (~5ms, recommended):\n" +
-            "  + Fast and reliable for most samples\n" +
-            "  + Good for uniform tissue\n\n" +
-            "sobel (~5ms):\n" +
-            "  + Edge-sensitive metric\n" +
-            "  + Good for high-contrast features\n\n" +
-            "brenner_gradient (~3ms):\n" +
-            "  + Fastest option\n" +
-            "  - Less robust on noisy images\n\n" +
-            "robust_sharpness (~20ms):\n" +
-            "  + Resistant to debris/particles\n" +
-            "  + Best for contaminated samples\n" +
-            "  - Slower autofocus\n\n" +
-            "hybrid_sharpness (~8ms):\n" +
-            "  + Balanced speed and robustness\n" +
-            "  + Good compromise for varied samples"
-        ));
-        Label scoreMetricDesc = new Label("(Focus sharpness metric)");
-        scoreMetricDesc.setStyle("-fx-font-size: 10px; -fx-text-fill: gray;");
-
         // Add standard autofocus fields to grid
+        // Note: score_metric is now in the shared section above
         standardGrid.add(nStepsLabel, 0, 0);
         standardGrid.add(nStepsSpinner, 1, 0);
         standardGrid.add(nStepsDesc, 2, 0);
@@ -491,10 +498,6 @@ public class AutofocusEditorWorkflow {
         standardGrid.add(interpKindLabel, 0, 3);
         standardGrid.add(interpKindCombo, 1, 3);
         standardGrid.add(interpKindDesc, 2, 3);
-
-        standardGrid.add(scoreMetricLabel, 0, 4);
-        standardGrid.add(scoreMetricCombo, 1, 4);
-        standardGrid.add(scoreMetricDesc, 2, 4);
 
         // ===== ADAPTIVE AUTOFOCUS SECTION =====
         GridPane adaptiveGrid = new GridPane();
