@@ -664,16 +664,20 @@ public class TileProcessingUtilities {
     }
 
     /**
-     * Recursively delete a folder and all its contents.
+     * Recursively delete a folder and all its contents (files and subdirectories).
      * Used for cleaning up temporary tile directories after stitching.
      *
-     * <p>This method will log warnings for files that cannot be deleted but
-     * will continue attempting to delete remaining files.
+     * <p>This method walks the directory tree in reverse order (deepest first),
+     * which allows subdirectories to be empty before their parent directories
+     * are deleted. Both files and directories are processed.
+     *
+     * <p>This method will log warnings for items that cannot be deleted but
+     * will continue attempting to delete remaining items.
      *
      * @param folderPath Path to the folder to delete
      */
     public static void deleteTilesAndFolder(String folderPath) {
-        logger.info("Deleting folder and contents: {}", folderPath);
+        logger.info("Deleting folder and all contents: {}", folderPath);
 
         try {
             Path dir = Paths.get(folderPath);
@@ -683,21 +687,25 @@ public class TileProcessingUtilities {
                 return;
             }
 
-            // First, delete all files
+            // Count items for logging
+            long fileCount = Files.walk(dir).filter(Files::isRegularFile).count();
+            long dirCount = Files.walk(dir).filter(Files::isDirectory).count() - 1; // Exclude root
+            logger.info("Found {} files and {} subdirectories to delete", fileCount, dirCount);
+
+            // Walk in reverse order (deepest first) to delete files and then empty directories
+            // Using Comparator.reverseOrder() ensures children are processed before parents
             Files.walk(dir)
-                    .filter(Files::isRegularFile)
+                    .sorted(java.util.Comparator.reverseOrder())
                     .forEach(p -> {
                         try {
                             Files.delete(p);
-                            logger.trace("Deleted file: {}", p);
-                        } catch(IOException ex) {
-                            logger.error("Failed to delete file: {}", p, ex);
+                            logger.trace("Deleted: {}", p);
+                        } catch (IOException ex) {
+                            logger.error("Failed to delete: {}", p, ex);
                         }
                     });
 
-            // Then delete the directory itself
-            Files.delete(dir);
-            logger.info("Successfully deleted folder: {}", folderPath);
+            logger.info("Successfully deleted folder and all contents: {}", folderPath);
 
         } catch (IOException ex) {
             logger.error("Error deleting folder: {}", folderPath, ex);
@@ -710,10 +718,12 @@ public class TileProcessingUtilities {
      *
      * <p>The ZIP file will be created in a "Compressed tiles" subdirectory at the same level
      * as the original folder. The ZIP filename will match the original folder name.
+     * The subdirectory structure within the folder is preserved in the ZIP archive.
      *
      * @param folderPath Path to the folder containing tiles to compress
+     * @return true if compression was successful, false otherwise
      */
-    public static void zipTilesAndMove(String folderPath) {
+    public static boolean zipTilesAndMove(String folderPath) {
         logger.info("Compressing tiles in folder: {}", folderPath);
 
         try {
@@ -721,8 +731,16 @@ public class TileProcessingUtilities {
 
             if (!Files.exists(dir)) {
                 logger.warn("Folder does not exist: {}", folderPath);
-                return;
+                return false;
             }
+
+            // Count files to zip
+            long fileCount = Files.walk(dir).filter(Files::isRegularFile).count();
+            if (fileCount == 0) {
+                logger.warn("No files found to compress in: {}", folderPath);
+                return false;
+            }
+            logger.info("Found {} files to compress", fileCount);
 
             Path parent = dir.getParent();
             Path compressed = parent.resolve("Compressed tiles");
@@ -737,26 +755,39 @@ public class TileProcessingUtilities {
             Path zipPath = compressed.resolve(dir.getFileName() + ".zip");
             logger.info("Creating ZIP file: {}", zipPath);
 
+            final long[] zippedCount = {0};
             try (ZipOutputStream zos = new ZipOutputStream(new FileOutputStream(zipPath.toFile()))) {
                 Files.walk(dir)
                         .filter(Files::isRegularFile)
                         .forEach(p -> {
-                            ZipEntry e = new ZipEntry(dir.relativize(p).toString());
+                            // Use relative path to preserve subdirectory structure
+                            String relativePath = dir.relativize(p).toString();
+                            ZipEntry e = new ZipEntry(relativePath);
                             try {
                                 zos.putNextEntry(e);
                                 Files.copy(p, zos);
                                 zos.closeEntry();
-                                logger.trace("Added to ZIP: {}", p.getFileName());
-                            } catch(IOException ex) {
+                                zippedCount[0]++;
+                                logger.trace("Added to ZIP: {}", relativePath);
+                            } catch (IOException ex) {
                                 logger.error("Failed to zip file: {}", p, ex);
                             }
                         });
             }
 
-            logger.info("Successfully created ZIP archive: {}", zipPath);
+            // Verify zip was created and has content
+            if (Files.exists(zipPath) && Files.size(zipPath) > 0) {
+                logger.info("Successfully compressed {} files to ZIP archive: {} ({} bytes)",
+                        zippedCount[0], zipPath, Files.size(zipPath));
+                return true;
+            } else {
+                logger.error("ZIP file creation failed or file is empty");
+                return false;
+            }
 
-        } catch(IOException ex) {
-            logger.error("Error zipping tiles", ex);
+        } catch (IOException ex) {
+            logger.error("Error zipping tiles: {}", ex.getMessage(), ex);
+            return false;
         }
     }
 

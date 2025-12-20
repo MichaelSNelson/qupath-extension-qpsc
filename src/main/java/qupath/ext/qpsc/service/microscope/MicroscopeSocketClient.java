@@ -1403,6 +1403,31 @@ public class MicroscopeSocketClient implements AutoCloseable {
                                                double minAngle, double maxAngle, double angleStep,
                                                String exposureMode, Double fixedExposureMs,
                                                int targetIntensity) throws IOException {
+        return runBirefringenceOptimization(yamlPath, outputPath, minAngle, maxAngle, angleStep,
+                exposureMode, fixedExposureMs, targetIntensity, null);
+    }
+
+    /**
+     * Runs PPM birefringence optimization test with progress callback.
+     * This overload supports real-time progress updates during execution.
+     *
+     * @param yamlPath Path to microscope configuration YAML file
+     * @param outputPath Output directory for test results and plots
+     * @param minAngle Minimum angle to test (degrees)
+     * @param maxAngle Maximum angle to test (degrees)
+     * @param angleStep Step size for angle sweep (degrees)
+     * @param exposureMode Exposure mode: "interpolate", "calibrate", or "fixed"
+     * @param fixedExposureMs Fixed exposure in ms (required if mode="fixed", null otherwise)
+     * @param targetIntensity Target intensity for calibrate mode (0-255)
+     * @param progressCallback Callback receiving (current, total) progress updates (can be null)
+     * @return Path to the results directory
+     * @throws IOException if communication fails
+     */
+    public String runBirefringenceOptimization(String yamlPath, String outputPath,
+                                               double minAngle, double maxAngle, double angleStep,
+                                               String exposureMode, Double fixedExposureMs,
+                                               int targetIntensity,
+                                               java.util.function.BiConsumer<Integer, Integer> progressCallback) throws IOException {
 
         // Build PPMBIREF-specific command message
         StringBuilder messageBuilder = new StringBuilder();
@@ -1468,26 +1493,50 @@ public class MicroscopeSocketClient implements AutoCloseable {
                     }
                 }
 
-                // Wait for final SUCCESS/FAILED response
+                // Read responses in a loop until SUCCESS or FAILED
+                // Handles PROGRESS:current:total messages in between
                 logger.info("Waiting for birefringence optimization to complete...");
-                bytesRead = input.read(buffer);
-                if (bytesRead > 0) {
-                    String finalResponse = new String(buffer, 0, bytesRead, StandardCharsets.UTF_8);
-                    logger.info("Received final server response: {}", finalResponse);
+                while (true) {
+                    bytesRead = input.read(buffer);
+                    if (bytesRead <= 0) {
+                        throw new IOException("No response received from server");
+                    }
 
-                    if (finalResponse.startsWith("FAILED:")) {
-                        throw new IOException("Birefringence optimization failed: " + finalResponse.substring(7));
-                    } else if (finalResponse.startsWith("SUCCESS:")) {
+                    String response = new String(buffer, 0, bytesRead, StandardCharsets.UTF_8);
+
+                    // Handle PROGRESS updates
+                    if (response.startsWith("PROGRESS:")) {
+                        // Parse "PROGRESS:current:total"
+                        try {
+                            String[] parts = response.substring(9).split(":");
+                            if (parts.length >= 2) {
+                                int current = Integer.parseInt(parts[0].trim());
+                                int total = Integer.parseInt(parts[1].trim());
+                                logger.debug("Progress update: {}/{}", current, total);
+
+                                if (progressCallback != null) {
+                                    progressCallback.accept(current, total);
+                                }
+                            }
+                        } catch (NumberFormatException e) {
+                            logger.warn("Failed to parse progress message: {}", response);
+                        }
+                        continue; // Keep reading for next message
+                    }
+
+                    // Handle final responses
+                    if (response.startsWith("FAILED:")) {
+                        throw new IOException("Birefringence optimization failed: " + response.substring(7));
+                    } else if (response.startsWith("SUCCESS:")) {
                         // Extract results directory path from SUCCESS response
-                        String resultPath = finalResponse.substring(8).trim();
+                        String resultPath = response.substring(8).trim();
                         logger.info("Birefringence optimization successful. Results: {}", resultPath);
                         return resultPath;
                     } else {
-                        throw new IOException("Unexpected final response: " + finalResponse);
+                        logger.warn("Unexpected response during optimization: {}", response);
+                        // Continue reading - might be a partial message
                     }
                 }
-
-                throw new IOException("No response received from server");
 
             } catch (IOException e) {
                 logger.error("Error during birefringence optimization", e);

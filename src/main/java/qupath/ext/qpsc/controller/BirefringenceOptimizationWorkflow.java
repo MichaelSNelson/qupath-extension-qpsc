@@ -96,7 +96,7 @@ public class BirefringenceOptimizationWorkflow {
     }
 
     /**
-     * Executes the birefringence optimization via socket communication.
+     * Executes the birefringence optimization via socket communication with progress updates.
      *
      * @param params Optimization parameters from dialog
      */
@@ -104,17 +104,25 @@ public class BirefringenceOptimizationWorkflow {
         logger.info("Executing birefringence optimization: {} to {} deg, step {}",
                 params.minAngle(), params.maxAngle(), params.angleStep());
 
-        // Create progress dialog
+        // Create progress dialog with percentage display
         Alert progressDialog = new Alert(Alert.AlertType.INFORMATION);
         progressDialog.setTitle("Optimization In Progress");
         progressDialog.setHeaderText("PPM Birefringence Optimization Running");
-        progressDialog.setContentText(
-                "Optimization is in progress. This may take several minutes.\n\n" +
+
+        // Create a VBox with progress info that can be updated
+        javafx.scene.control.Label progressLabel = new javafx.scene.control.Label("Starting optimization...");
+        progressLabel.setStyle("-fx-font-size: 16px; -fx-font-weight: bold;");
+
+        javafx.scene.control.Label infoLabel = new javafx.scene.control.Label(
                 "The test acquires paired images at symmetric angles (+theta, -theta)\n" +
                 "to measure birefringence signal strength across the angle range.\n\n" +
-                "IMPORTANT: Check the Python server logs for detailed progress information.\n" +
                 "The dialog will close automatically when the test completes."
         );
+
+        javafx.scene.layout.VBox content = new javafx.scene.layout.VBox(10);
+        content.getChildren().addAll(progressLabel, infoLabel);
+        progressDialog.getDialogPane().setContent(content);
+
         progressDialog.getButtonTypes().clear();
         progressDialog.getButtonTypes().add(ButtonType.CANCEL);
 
@@ -143,7 +151,15 @@ public class BirefringenceOptimizationWorkflow {
             }
             logger.info("  Target intensity: {}", params.targetIntensity());
 
-            // Call the socket client method
+            // Create progress callback to update the dialog
+            java.util.function.BiConsumer<Integer, Integer> progressCallback = (current, total) -> {
+                int percent = (int) ((current * 100.0) / total);
+                Platform.runLater(() -> {
+                    progressLabel.setText(String.format("Progress: %d%% (%d/%d angle pairs)", percent, current, total));
+                });
+            };
+
+            // Call the socket client method with progress callback
             String resultPath = socketClient.runBirefringenceOptimization(
                     configFileLocation,
                     params.outputFolder(),
@@ -152,7 +168,8 @@ public class BirefringenceOptimizationWorkflow {
                     params.angleStep(),
                     params.exposureMode(),
                     params.fixedExposureMs(),
-                    params.targetIntensity()
+                    params.targetIntensity(),
+                    progressCallback
             );
 
             logger.info("Birefringence optimization completed successfully");

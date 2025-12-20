@@ -12,11 +12,14 @@ import javafx.stage.DirectoryChooser;
 import javafx.stage.Modality;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import qupath.ext.qpsc.preferences.QPPreferenceDialog;
+import qupath.ext.qpsc.utilities.MicroscopeConfigManager;
 import qupath.lib.gui.prefs.PathPrefs;
 
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -201,22 +204,51 @@ public class AutofocusBenchmarkDialog {
                 Label objectiveLabel = new Label("Objective:");
                 objectiveLabel.setPrefWidth(150);
 
-                TextField objectiveField = new TextField();
-                objectiveField.setPrefWidth(350);
+                ComboBox<String> objectiveComboBox = new ComboBox<>();
+                objectiveComboBox.setPrefWidth(350);
+                objectiveComboBox.setPromptText("Select objective...");
 
-                // Initialize with default or last used value
-                if (defaultObjective != null && !defaultObjective.isEmpty()) {
-                    objectiveField.setText(defaultObjective);
-                } else {
-                    objectiveField.setText(objectiveProperty.get());
+                // Load available objectives from microscope configuration
+                try {
+                    String configPath = QPPreferenceDialog.getMicroscopeConfigFileProperty();
+                    MicroscopeConfigManager configManager = MicroscopeConfigManager.getInstance(configPath);
+                    List<Map<String, Object>> hardwareObjectives = configManager.getHardwareObjectives();
+
+                    List<String> objectiveIds = new ArrayList<>();
+                    for (Map<String, Object> objective : hardwareObjectives) {
+                        String id = (String) objective.get("id");
+                        if (id != null) {
+                            objectiveIds.add(id);
+                        }
+                    }
+
+                    if (!objectiveIds.isEmpty()) {
+                        objectiveComboBox.getItems().addAll(objectiveIds);
+                        logger.debug("Loaded {} objectives for benchmark dialog: {}", objectiveIds.size(), objectiveIds);
+
+                        // Initialize with default or last used value
+                        String lastUsed = objectiveProperty.get();
+                        if (defaultObjective != null && !defaultObjective.isEmpty() &&
+                                objectiveIds.contains(defaultObjective)) {
+                            objectiveComboBox.setValue(defaultObjective);
+                        } else if (lastUsed != null && !lastUsed.isEmpty() &&
+                                objectiveIds.contains(lastUsed)) {
+                            objectiveComboBox.setValue(lastUsed);
+                        } else if (!objectiveIds.isEmpty()) {
+                            // Select first objective by default
+                            objectiveComboBox.setValue(objectiveIds.get(0));
+                        }
+                    } else {
+                        logger.warn("No objectives found in microscope configuration");
+                    }
+                } catch (Exception e) {
+                    logger.error("Failed to load objectives from configuration", e);
                 }
 
-                objectiveField.setPromptText("e.g., 20X, 40X (for safety limits)");
-
-                Label objectiveHelp = new Label("Used for Z safety limits - enter magnification (e.g., 20X)");
+                Label objectiveHelp = new Label("Used for Z safety limits during benchmark testing");
                 objectiveHelp.setStyle("-fx-font-size: 10px; -fx-text-fill: #666;");
 
-                objectiveBox.getChildren().addAll(objectiveLabel, objectiveField);
+                objectiveBox.getChildren().addAll(objectiveLabel, objectiveComboBox);
 
                 // ========== INFORMATION SECTION ==========
                 Label infoLabel = new Label("Benchmark Information");
@@ -471,7 +503,10 @@ public class AutofocusBenchmarkDialog {
                             boolean quick = quickModeCheck.isSelected();
 
                             // Get objective
-                            String obj = objectiveField.getText().trim();
+                            String obj = objectiveComboBox.getValue();
+                            if (obj == null) {
+                                obj = "";
+                            }
 
                             // Save preferences for next time
                             referenceZProperty.set(refZ);

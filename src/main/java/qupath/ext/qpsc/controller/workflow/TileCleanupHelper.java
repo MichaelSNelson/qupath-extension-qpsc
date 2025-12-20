@@ -5,6 +5,8 @@ import org.slf4j.LoggerFactory;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
 import qupath.ext.qpsc.utilities.TileProcessingUtilities;
 
+import java.io.File;
+
 /**
  * Helper for tile cleanup operations after acquisition.
  *
@@ -27,8 +29,8 @@ public class TileCleanupHelper {
      *
      * <p>The cleanup method is determined by the tile handling preference:
      * <ul>
-     *   <li>"Delete" - Removes all tiles and the temporary folder</li>
-     *   <li>"Zip" - Creates a zip archive then removes originals</li>
+     *   <li>"Delete" - Removes all tiles, subdirectories, and the temporary folder</li>
+     *   <li>"Zip" - Creates a zip archive then removes originals (only deletes if zip succeeds)</li>
      *   <li>Any other value - Keeps tiles in place</li>
      * </ul>
      *
@@ -37,15 +39,33 @@ public class TileCleanupHelper {
     public static void performCleanup(String tempTileDir) {
         String handling = QPPreferenceDialog.getTileHandlingMethodProperty();
 
-        logger.info("Performing tile cleanup - method: {}", handling);
+        logger.info("Performing tile cleanup - method: {}, path: {}", handling, tempTileDir);
+
+        // Validate the path exists
+        File tileDir = new File(tempTileDir);
+        if (!tileDir.exists()) {
+            logger.warn("Tile directory does not exist, nothing to clean up: {}", tempTileDir);
+            return;
+        }
+
+        if (!tileDir.isDirectory()) {
+            logger.warn("Path is not a directory: {}", tempTileDir);
+            return;
+        }
 
         if ("Delete".equals(handling)) {
+            logger.info("Deleting all tiles and subdirectories in: {}", tempTileDir);
             TileProcessingUtilities.deleteTilesAndFolder(tempTileDir);
-            logger.info("Deleted temporary tiles at: {}", tempTileDir);
         } else if ("Zip".equals(handling)) {
-            TileProcessingUtilities.zipTilesAndMove(tempTileDir);
-            TileProcessingUtilities.deleteTilesAndFolder(tempTileDir);
-            logger.info("Zipped and archived temporary tiles from: {}", tempTileDir);
+            logger.info("Zipping tiles before deletion: {}", tempTileDir);
+            boolean zipSuccess = TileProcessingUtilities.zipTilesAndMove(tempTileDir);
+            if (zipSuccess) {
+                logger.info("Zip successful, now deleting original tiles");
+                TileProcessingUtilities.deleteTilesAndFolder(tempTileDir);
+                logger.info("Zipped and archived temporary tiles from: {}", tempTileDir);
+            } else {
+                logger.error("Zip failed - keeping original tiles for safety");
+            }
         } else {
             logger.info("Keeping temporary tiles at: {}", tempTileDir);
         }
