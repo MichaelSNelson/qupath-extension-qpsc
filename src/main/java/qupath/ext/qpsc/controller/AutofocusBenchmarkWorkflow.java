@@ -280,6 +280,7 @@ public class AutofocusBenchmarkWorkflow {
      * @param results Parsed benchmark results from server
      * @param params Original benchmark parameters
      */
+    @SuppressWarnings("unchecked")
     private static void showResults(Map<String, Object> results, AutofocusBenchmarkDialog.BenchmarkParams params) {
         Alert resultsDialog = new Alert(Alert.AlertType.INFORMATION);
         resultsDialog.setTitle("Benchmark Results");
@@ -296,43 +297,102 @@ public class AutofocusBenchmarkWorkflow {
 
         // Extract key statistics
         Object totalTrials = results.get("total_trials");
+        Object successfulTrials = results.get("successful_trials");
+        Object failedTrials = results.get("failed_trials");
         Object successRate = results.get("success_rate");
 
         if (totalTrials != null) {
             resultsText.append(String.format("  Total trials: %s\n", totalTrials));
         }
-
+        if (successfulTrials != null && failedTrials != null) {
+            resultsText.append(String.format("  Successful: %s, Failed: %s\n", successfulTrials, failedTrials));
+        }
         if (successRate != null) {
-            double rate = (successRate instanceof Double) ? (Double) successRate : 0.0;
-            resultsText.append(String.format("  Success rate: %.1f%%\n\n", rate * 100));
+            double rate = (successRate instanceof Number) ? ((Number) successRate).doubleValue() : 0.0;
+            resultsText.append(String.format("  Success rate: %.1f%%\n", rate * 100));
         }
 
-        // Check for timing and accuracy stats
-        resultsText.append("Performance:\n");
-        Object meanDuration = results.get("mean_duration_ms");
-        Object meanError = results.get("mean_z_error_um");
+        resultsText.append("\nPerformance:\n");
 
-        if (meanDuration != null) {
-            resultsText.append(String.format("  Mean time-to-focus: %.0f ms\n",
-                    ((Number) meanDuration).doubleValue()));
+        // Extract timing_stats (nested structure from Python)
+        Object timingStats = results.get("timing_stats");
+        if (timingStats instanceof Map) {
+            Map<String, Object> timing = (Map<String, Object>) timingStats;
+            Object meanDuration = timing.get("mean_duration_ms");
+            Object minDuration = timing.get("min_duration_ms");
+            Object maxDuration = timing.get("max_duration_ms");
+
+            if (meanDuration != null) {
+                resultsText.append(String.format("  Mean time-to-focus: %.0f ms\n",
+                        ((Number) meanDuration).doubleValue()));
+            }
+            if (minDuration != null && maxDuration != null) {
+                resultsText.append(String.format("  Range: %.0f - %.0f ms\n",
+                        ((Number) minDuration).doubleValue(),
+                        ((Number) maxDuration).doubleValue()));
+            }
         }
 
-        if (meanError != null) {
-            resultsText.append(String.format("  Mean focus error: %.2f um\n",
-                    ((Number) meanError).doubleValue()));
+        // Extract accuracy_stats (nested structure from Python)
+        Object accuracyStats = results.get("accuracy_stats");
+        if (accuracyStats instanceof Map) {
+            Map<String, Object> accuracy = (Map<String, Object>) accuracyStats;
+            Object meanError = accuracy.get("mean_z_error_um");
+            Object minError = accuracy.get("min_z_error_um");
+            Object maxError = accuracy.get("max_z_error_um");
+
+            if (meanError != null) {
+                resultsText.append(String.format("  Mean focus error: %.2f um\n",
+                        ((Number) meanError).doubleValue()));
+            }
+            if (minError != null && maxError != null) {
+                resultsText.append(String.format("  Error range: %.2f - %.2f um\n",
+                        ((Number) minError).doubleValue(),
+                        ((Number) maxError).doubleValue()));
+            }
+        }
+
+        // Show fastest configurations if available
+        Object fastestStandard = results.get("fastest_standard");
+        if (fastestStandard instanceof Map) {
+            Map<String, Object> fs = (Map<String, Object>) fastestStandard;
+            resultsText.append("\nFastest Standard Config:\n");
+            resultsText.append(String.format("  n_steps=%s, range=%s um, metric=%s\n",
+                    fs.get("n_steps"), fs.get("search_range_um"), fs.get("score_metric")));
+            Object fsDuration = fs.get("duration_ms");
+            Object fsError = fs.get("z_error_um");
+            if (fsDuration != null && fsError != null) {
+                resultsText.append(String.format("  Duration: %.0f ms, Error: %.2f um\n",
+                        ((Number) fsDuration).doubleValue(),
+                        ((Number) fsError).doubleValue()));
+            }
+        }
+
+        Object fastestAdaptive = results.get("fastest_adaptive");
+        if (fastestAdaptive instanceof Map) {
+            Map<String, Object> fa = (Map<String, Object>) fastestAdaptive;
+            resultsText.append("\nFastest Adaptive Config:\n");
+            resultsText.append(String.format("  initial_step=%s um, metric=%s\n",
+                    fa.get("initial_step_um"), fa.get("score_metric")));
+            Object faDuration = fa.get("duration_ms");
+            Object faError = fa.get("z_error_um");
+            if (faDuration != null && faError != null) {
+                resultsText.append(String.format("  Duration: %.0f ms, Error: %.2f um\n",
+                        ((Number) faDuration).doubleValue(),
+                        ((Number) faError).doubleValue()));
+            }
         }
 
         resultsText.append("\nDetailed results saved to:\n");
-        resultsText.append(String.format("%s/benchmark_results.csv\n", params.outputPath()));
-        resultsText.append(String.format("%s/benchmark_summary.json\n", params.outputPath()));
+        resultsText.append(String.format("%s/autofocus_benchmark_*/\n", params.outputPath()));
 
-        resultsText.append("\nReview the detailed CSV for recommended configurations.");
+        resultsText.append("\nReview benchmark_results.csv for all trial data.");
 
         // Display in text area for better readability
         TextArea textArea = new TextArea(resultsText.toString());
         textArea.setEditable(false);
         textArea.setWrapText(true);
-        textArea.setPrefRowCount(20);
+        textArea.setPrefRowCount(25);
         textArea.setPrefColumnCount(60);
 
         resultsDialog.getDialogPane().setContent(textArea);
