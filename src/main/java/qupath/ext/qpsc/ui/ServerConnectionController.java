@@ -63,7 +63,6 @@ public class ServerConnectionController {
 
     // Status components
     private Label statusLabel;
-    private Label lastConnectionLabel;
     private ProgressIndicator progressIndicator;
     private TextArea logArea;
 
@@ -109,8 +108,7 @@ public class ServerConnectionController {
         TabPane tabPane = new TabPane();
         tabPane.getTabs().addAll(
                 createConnectionTab(),
-                createAdvancedTab(),
-                createStatusTab()
+                createAdvancedTab()
         );
 
         // Add control buttons
@@ -142,10 +140,12 @@ public class ServerConnectionController {
         Tab tab = new Tab(res.getString("server.tab.connection"));
         tab.setClosable(false);
 
+        VBox mainLayout = new VBox(10);
+        mainLayout.setPadding(new Insets(20));
+
         GridPane grid = new GridPane();
         grid.setHgap(10);
         grid.setVgap(10);
-        grid.setPadding(new Insets(20));
 
         int row = 0;
 
@@ -188,17 +188,40 @@ public class ServerConnectionController {
         HBox buttonBox = new HBox(10, testButton, connectButton);
         grid.add(buttonBox, 0, row++, 2, 1);
 
-        // Connection status
+        // Connection status with progress indicator
+        HBox statusBox = new HBox(10);
+        statusBox.setAlignment(Pos.CENTER_LEFT);
+
         statusLabel = new Label(res.getString("server.connection.status") + " Not tested");
         statusLabel.setWrapText(true);
-        grid.add(statusLabel, 0, row++, 2, 1);
 
         progressIndicator = new ProgressIndicator();
         progressIndicator.setVisible(false);
-        progressIndicator.setPrefSize(30, 30);
-        grid.add(progressIndicator, 2, row - 1);
+        progressIndicator.setPrefSize(24, 24);
 
-        tab.setContent(grid);
+        statusBox.getChildren().addAll(statusLabel, progressIndicator);
+        grid.add(statusBox, 0, row++, 3, 1);
+
+        mainLayout.getChildren().add(grid);
+
+        // Connection log area
+        Label logLabel = new Label("Connection Log");
+        logLabel.setFont(Font.font(null, FontWeight.BOLD, 12));
+        mainLayout.getChildren().add(logLabel);
+
+        logArea = new TextArea();
+        logArea.setEditable(false);
+        logArea.setPrefRowCount(8);
+        logArea.setStyle("-fx-font-family: monospace; -fx-font-size: 11px;");
+        VBox.setVgrow(logArea, Priority.ALWAYS);
+        mainLayout.getChildren().add(logArea);
+
+        // Clear log button
+        Button clearButton = new Button("Clear Log");
+        clearButton.setOnAction(e -> logArea.clear());
+        mainLayout.getChildren().add(clearButton);
+
+        tab.setContent(mainLayout);
         return tab;
     }
 
@@ -289,47 +312,6 @@ public class ServerConnectionController {
     }
 
     /**
-     * Creates the connection status tab.
-     */
-    private Tab createStatusTab() {
-        Tab tab = new Tab(res.getString("server.tab.status"));
-        tab.setClosable(false);
-
-        VBox vbox = new VBox(10);
-        vbox.setPadding(new Insets(20));
-
-        // Current status
-        Label statusTitle = new Label(res.getString("server.status.title"));
-        statusTitle.setFont(Font.font(null, FontWeight.BOLD, 14));
-        vbox.getChildren().add(statusTitle);
-
-        // Last connection info
-        lastConnectionLabel = new Label("Loading...");
-        lastConnectionLabel.setWrapText(true);
-        vbox.getChildren().add(lastConnectionLabel);
-
-        // Connection log
-        Label logTitle = new Label(res.getString("server.status.log"));
-        logTitle.setFont(Font.font(null, FontWeight.BOLD, 14));
-        vbox.getChildren().add(logTitle);
-
-        logArea = new TextArea();
-        logArea.setEditable(false);
-        logArea.setPrefRowCount(15);
-        logArea.setStyle("-fx-font-family: monospace");
-        VBox.setVgrow(logArea, Priority.ALWAYS);
-        vbox.getChildren().add(logArea);
-
-        // Clear log button
-        Button clearButton = new Button(res.getString("server.status.clearLog"));
-        clearButton.setOnAction(e -> logArea.clear());
-        vbox.getChildren().add(clearButton);
-
-        tab.setContent(vbox);
-        return tab;
-    }
-
-    /**
      * Loads current settings from preferences.
      */
     private void loadSettings() {
@@ -345,8 +327,8 @@ public class ServerConnectionController {
         reconnectDelaySpinner.getValueFactory().setValue((int) PersistentPreferences.getSocketReconnectDelayMs());
         healthCheckIntervalSpinner.getValueFactory().setValue((int) PersistentPreferences.getSocketHealthCheckIntervalMs());
 
-        // Status
-        updateStatusDisplay();
+        // Update connection status display
+        updateConnectionStatus();
     }
 
     /**
@@ -485,7 +467,6 @@ public class ServerConnectionController {
                 Platform.runLater(() -> {
                     statusLabel.setText(res.getString("server.status.connected"));
                     statusLabel.setTextFill(Color.GREEN);
-                    updateStatusDisplay();
                 });
 
             } catch (Exception e) {
@@ -510,35 +491,19 @@ public class ServerConnectionController {
     }
 
     /**
-     * Updates the status display with last connection info.
+     * Updates the connection status label based on controller state.
      */
-    private void updateStatusDisplay() {
-        String lastStatus = PersistentPreferences.getSocketLastConnectionStatus();
-        String lastTime = PersistentPreferences.getSocketLastConnectionTime();
-
-        StringBuilder sb = new StringBuilder();
-
-        // Current controller status
+    private void updateConnectionStatus() {
         try {
             MicroscopeController controller = MicroscopeController.getInstance();
             boolean connected = controller.isConnected();
-            sb.append(res.getString(connected ?
-                    "server.status.controllerConnected" :
-                    "server.status.controllerDisconnected"));
-            sb.append("\n\n");
+            statusLabel.setText(res.getString("server.connection.status") + " " +
+                    (connected ? "Connected" : "Disconnected"));
+            statusLabel.setTextFill(connected ? Color.GREEN : Color.GRAY);
         } catch (Exception e) {
-            sb.append(res.getString("server.status.controllerNotInit")).append("\n\n");
+            statusLabel.setText(res.getString("server.connection.status") + " Not initialized");
+            statusLabel.setTextFill(Color.GRAY);
         }
-
-        // Last connection attempt
-        if (!lastStatus.isEmpty()) {
-            sb.append("Last Connection: ").append(lastStatus).append("\n");
-        }
-        if (!lastTime.isEmpty()) {
-            sb.append("Time: ").append(lastTime).append("\n");
-        }
-
-        lastConnectionLabel.setText(sb.toString());
     }
 
     /**
