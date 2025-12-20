@@ -17,6 +17,9 @@ import javafx.scene.text.TextAlignment;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javafx.embed.swing.SwingFXUtils;
+import java.awt.geom.AffineTransform;
+import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.BiConsumer;
@@ -82,6 +85,13 @@ public class StageMapCanvas extends StackPane {
     private List<Rectangle> slideRects = new ArrayList<>();
     private List<Text> slideLabels = new ArrayList<>();
     private Rectangle insertBorderRect;
+
+    // ========== Macro Overlay Layer ==========
+    private ImageView macroOverlayView;
+    private AffineTransform macroTransform;
+    private int macroWidth, macroHeight;
+    private boolean macroOverlayVisible = false;
+    private static final double MACRO_OVERLAY_OPACITY = 0.3;  // 70% transparency
 
     // ========== State ==========
     private StageInsert currentInsert;
@@ -159,8 +169,16 @@ public class StageMapCanvas extends StackPane {
         insertBorderRect.setStrokeWidth(2);
         insertBorderRect.setVisible(false);
 
-        // Add all shapes to overlay
+        // Create macro overlay ImageView (behind other overlays)
+        macroOverlayView = new ImageView();
+        macroOverlayView.setOpacity(MACRO_OVERLAY_OPACITY);
+        macroOverlayView.setPreserveRatio(false);
+        macroOverlayView.setVisible(false);
+        macroOverlayView.setMouseTransparent(true);  // Don't interfere with click events
+
+        // Add all shapes to overlay (macroOverlayView first so it renders behind other elements)
         overlayPane.getChildren().addAll(
+                macroOverlayView,  // Renders first (behind everything)
                 insertBorderRect,
                 crosshairCircle, crosshairLineH1, crosshairLineH2, crosshairLineV1, crosshairLineV2,
                 fovRect,
@@ -577,6 +595,9 @@ public class StageMapCanvas extends StackPane {
         updateCrosshairOverlay();
         updateFOVOverlay();
         updateTargetOverlay();
+        if (macroOverlayVisible) {
+            updateMacroOverlayPosition();
+        }
     }
 
     private void updateCrosshairOverlay() {
@@ -713,6 +734,99 @@ public class StageMapCanvas extends StackPane {
         targetLineV.setEndY(sy + CROSSHAIR_LINE_LENGTH);
         targetLineV.setStroke(color);
         targetLineV.setVisible(true);
+    }
+
+    // ========== Macro Overlay Methods ==========
+
+    /**
+     * Sets and displays the macro image overlay.
+     *
+     * @param macroImage The processed macro image (BufferedImage)
+     * @param transform The AffineTransform mapping macro pixels to stage microns
+     */
+    public void setMacroOverlay(BufferedImage macroImage, AffineTransform transform) {
+        if (macroImage == null || transform == null) {
+            clearMacroOverlay();
+            return;
+        }
+
+        this.macroTransform = transform;
+        this.macroWidth = macroImage.getWidth();
+        this.macroHeight = macroImage.getHeight();
+        this.macroOverlayVisible = true;
+
+        // Convert BufferedImage to JavaFX Image
+        javafx.scene.image.Image fxImage = SwingFXUtils.toFXImage(macroImage, null);
+        macroOverlayView.setImage(fxImage);
+
+        // Update position and size
+        updateMacroOverlayPosition();
+        macroOverlayView.setVisible(true);
+
+        logger.debug("Macro overlay set: {}x{} pixels", macroWidth, macroHeight);
+    }
+
+    /**
+     * Clears and hides the macro image overlay.
+     */
+    public void clearMacroOverlay() {
+        macroOverlayVisible = false;
+        macroTransform = null;
+        macroOverlayView.setVisible(false);
+        macroOverlayView.setImage(null);
+    }
+
+    /**
+     * Updates the macro overlay position based on the current scale and offset.
+     * Called when the canvas resizes or the insert changes.
+     */
+    private void updateMacroOverlayPosition() {
+        if (!macroOverlayVisible || macroTransform == null || currentInsert == null) {
+            return;
+        }
+
+        // Transform the four corners of the macro image to stage coordinates, then to screen
+        double[][] macroCorners = {
+            {0, 0},
+            {macroWidth, 0},
+            {0, macroHeight},
+            {macroWidth, macroHeight}
+        };
+
+        double minScreenX = Double.MAX_VALUE;
+        double maxScreenX = -Double.MAX_VALUE;
+        double minScreenY = Double.MAX_VALUE;
+        double maxScreenY = -Double.MAX_VALUE;
+
+        for (double[] corner : macroCorners) {
+            // Transform macro pixel -> stage microns
+            double[] stagePos = new double[2];
+            macroTransform.transform(corner, 0, stagePos, 0, 1);
+
+            // Transform stage microns -> screen pixels
+            double[] screenPos = stageToScreen(stagePos[0], stagePos[1]);
+            if (screenPos != null) {
+                minScreenX = Math.min(minScreenX, screenPos[0]);
+                maxScreenX = Math.max(maxScreenX, screenPos[0]);
+                minScreenY = Math.min(minScreenY, screenPos[1]);
+                maxScreenY = Math.max(maxScreenY, screenPos[1]);
+            }
+        }
+
+        // Only update if we got valid coordinates
+        if (minScreenX != Double.MAX_VALUE) {
+            double screenWidth = maxScreenX - minScreenX;
+            double screenHeight = maxScreenY - minScreenY;
+
+            macroOverlayView.setX(minScreenX);
+            macroOverlayView.setY(minScreenY);
+            macroOverlayView.setFitWidth(screenWidth);
+            macroOverlayView.setFitHeight(screenHeight);
+
+            logger.trace("Macro overlay positioned at ({}, {}) size {}x{}",
+                String.format("%.1f", minScreenX), String.format("%.1f", minScreenY),
+                String.format("%.1f", screenWidth), String.format("%.1f", screenHeight));
+        }
     }
 
     // ========== Size Handling ==========

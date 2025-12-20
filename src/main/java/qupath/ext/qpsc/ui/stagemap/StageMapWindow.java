@@ -13,9 +13,19 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qupath.ext.qpsc.controller.MicroscopeController;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
+import qupath.ext.qpsc.utilities.AffineTransformManager;
+import qupath.ext.qpsc.utilities.ImageMetadataManager;
 import qupath.ext.qpsc.utilities.MicroscopeConfigManager;
+import qupath.ext.qpsc.utilities.QPProjectFunctions;
+import qupath.lib.gui.QuPathGUI;
+import qupath.lib.images.ImageData;
+import qupath.lib.projects.Project;
+import qupath.lib.projects.ProjectImageEntry;
 
+import javafx.beans.value.ChangeListener;
 import java.awt.Desktop;
+import java.awt.geom.AffineTransform;
+import java.awt.image.BufferedImage;
 import java.io.File;
 import java.util.List;
 import java.util.Optional;
@@ -28,7 +38,7 @@ import java.util.concurrent.TimeUnit;
  * <p>
  * Features:
  * <ul>
- *   <li>Always-on-top, non-modal window for continuous reference</li>
+ *   <li>Non-modal window that stays above QuPath main window but allows dialogs on top</li>
  *   <li>Real-time crosshair showing current objective position</li>
  *   <li>Camera FOV rectangle display</li>
  *   <li>Switchable insert configurations (single slide, multi-slide)</li>
@@ -36,6 +46,8 @@ import java.util.concurrent.TimeUnit;
  * </ul>
  * <p>
  * Uses a singleton pattern to ensure only one window instance exists.
+ * The window is owned by the QuPath main window, ensuring it stays visible above
+ * the main window while allowing modal dialogs to appear on top when needed.
  */
 public class StageMapWindow {
 
@@ -59,6 +71,13 @@ public class StageMapWindow {
     private volatile int consecutiveErrors = 0;  // Track polling failures
     private static final int MAX_CONSECUTIVE_ERRORS = 10;  // Pause polling after this many errors
     private static boolean movementWarningShownThisSession = false;
+
+    // ========== Macro Overlay State ==========
+    private CheckBox macroOverlayCheckbox;
+    private BufferedImage currentMacroImage = null;
+    private AffineTransform currentMacroTransform = null;
+    private String currentMacroSampleName = null;
+    private ChangeListener<ImageData<?>> imageChangeListener = null;
 
     // ========== Configuration ==========
     // Poll interval for position updates - lower = more responsive but more network traffic
@@ -119,7 +138,10 @@ public class StageMapWindow {
     private void dispose() {
         logger.debug("Disposing Stage Map window");
 
-        // Stop polling first
+        // Unregister image change listener first
+        unregisterImageChangeListener();
+
+        // Stop polling
         stopPositionPolling();
 
         // Disable canvas rendering to prevent further texture operations
@@ -143,7 +165,19 @@ public class StageMapWindow {
         stage = new Stage();
         stage.setTitle("Stage Map");
         stage.initModality(Modality.NONE);
-        stage.setAlwaysOnTop(true);
+
+        // Set owner to QuPath main window - this keeps Stage Map above the main window
+        // but allows modal dialogs to appear on top (unlike setAlwaysOnTop which blocks everything)
+        QuPathGUI gui = QuPathGUI.getInstance();
+        if (gui != null && gui.getStage() != null) {
+            stage.initOwner(gui.getStage());
+            logger.debug("Stage Map window owner set to QuPath main window");
+        } else {
+            // Fallback to alwaysOnTop if QuPath stage not available (shouldn't normally happen)
+            stage.setAlwaysOnTop(true);
+            logger.warn("Could not get QuPath main stage, using alwaysOnTop as fallback");
+        }
+
         stage.setResizable(true);
         stage.setMinWidth(350);
         stage.setMinHeight(320);
@@ -192,6 +226,9 @@ public class StageMapWindow {
 
         // Stop polling when window is closed
         stage.setOnCloseRequest(e -> dispose());
+
+        // Register image change listener for macro overlay availability
+        registerImageChangeListener();
     }
 
     private HBox buildTopBar() {
@@ -239,7 +276,28 @@ public class StageMapWindow {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
-        topBar.getChildren().addAll(insertLabel, insertComboBox, spacer, configButton, helpButton);
+        // Macro overlay checkbox
+        macroOverlayCheckbox = new CheckBox("Overlay Macro");
+        macroOverlayCheckbox.setStyle("-fx-text-fill: #ccc;");
+        macroOverlayCheckbox.setTooltip(new Tooltip(
+                "Display the cropped macro image from alignment\n" +
+                "over the stage map at its calibrated position.\n\n" +
+                "This shows the slide-only portion of the macro\n" +
+                "(with slide holder and background removed)\n" +
+                "that was saved during Microscope Alignment.\n\n" +
+                "Only available for images with saved alignments."));
+        macroOverlayCheckbox.setDisable(true);  // Initially disabled until macro is available
+        macroOverlayCheckbox.selectedProperty().addListener((obs, oldVal, newVal) -> {
+            if (canvas != null) {
+                if (newVal && currentMacroImage != null && currentMacroTransform != null) {
+                    canvas.setMacroOverlay(currentMacroImage, currentMacroTransform);
+                } else {
+                    canvas.clearMacroOverlay();
+                }
+            }
+        });
+
+        topBar.getChildren().addAll(insertLabel, insertComboBox, spacer, macroOverlayCheckbox, configButton, helpButton);
         return topBar;
     }
 
@@ -589,5 +647,162 @@ public class StageMapWindow {
      */
     public static void resetWarningFlag() {
         movementWarningShownThisSession = false;
+    }
+
+    // ========== Macro Overlay Methods ==========
+
+    /**
+     * Registers a listener for QuPath image changes to update macro overlay availability.
+     */
+    private void registerImageChangeListener() {
+        QuPathGUI gui = QuPathGUI.getInstance();
+        if (gui != null) {
+            imageChangeListener = (obs, oldImage, newImage) -> {
+                logger.debug("Image changed in QuPath, checking macro overlay availability");
+                checkMacroOverlayAvailability();
+            };
+            gui.imageDataProperty().addListener(imageChangeListener);
+
+            // Initial check
+            checkMacroOverlayAvailability();
+        }
+    }
+
+    /**
+     * Unregisters the image change listener to prevent memory leaks.
+     */
+    private void unregisterImageChangeListener() {
+        QuPathGUI gui = QuPathGUI.getInstance();
+        if (gui != null && imageChangeListener != null) {
+            gui.imageDataProperty().removeListener(imageChangeListener);
+            imageChangeListener = null;
+            logger.debug("Unregistered image change listener");
+        }
+    }
+
+    /**
+     * Checks if a macro overlay is available for the current QuPath image
+     * and updates the checkbox state accordingly.
+     */
+    private void checkMacroOverlayAvailability() {
+        Platform.runLater(() -> {
+            currentMacroImage = null;
+            currentMacroTransform = null;
+            currentMacroSampleName = null;
+
+            QuPathGUI gui = QuPathGUI.getInstance();
+            if (gui == null || gui.getProject() == null || gui.getImageData() == null) {
+                macroOverlayCheckbox.setDisable(true);
+                macroOverlayCheckbox.setSelected(false);
+                if (canvas != null) canvas.clearMacroOverlay();
+                return;
+            }
+
+            @SuppressWarnings("unchecked")
+            Project<BufferedImage> project = (Project<BufferedImage>) gui.getProject();
+
+            // Get sample name for lookup
+            String sampleName = getSampleNameForCurrentImage(gui, project);
+
+            if (sampleName == null || sampleName.isEmpty()) {
+                macroOverlayCheckbox.setDisable(true);
+                macroOverlayCheckbox.setSelected(false);
+                if (canvas != null) canvas.clearMacroOverlay();
+                logger.debug("No sample name found for current image");
+                return;
+            }
+
+            // Try to load macro image and transform
+            BufferedImage macroImage = AffineTransformManager.loadSavedMacroImage(project, sampleName);
+            AffineTransform transform = AffineTransformManager.loadSlideAlignment(project, sampleName);
+
+            if (macroImage != null && transform != null) {
+                currentMacroImage = macroImage;
+                currentMacroTransform = transform;
+                currentMacroSampleName = sampleName;
+                macroOverlayCheckbox.setDisable(false);
+                logger.info("Macro overlay available for sample: {}", sampleName);
+
+                // If checkbox is already selected, update the overlay
+                if (macroOverlayCheckbox.isSelected()) {
+                    canvas.setMacroOverlay(currentMacroImage, currentMacroTransform);
+                }
+            } else {
+                macroOverlayCheckbox.setDisable(true);
+                macroOverlayCheckbox.setSelected(false);
+                if (canvas != null) canvas.clearMacroOverlay();
+                logger.debug("No macro overlay available for sample: {}", sampleName);
+            }
+        });
+    }
+
+    /**
+     * Gets the sample name to use for macro lookup.
+     * Tries multiple sources: image file name, sample_name metadata, base_image metadata,
+     * and follows original_image_id for flipped images.
+     *
+     * @param gui The QuPath GUI instance
+     * @param project The current project
+     * @return The sample name, or null if not found
+     */
+    private String getSampleNameForCurrentImage(QuPathGUI gui, Project<BufferedImage> project) {
+        ImageData<BufferedImage> imageData = gui.getImageData();
+        if (imageData == null) {
+            return null;
+        }
+
+        // First try: actual image file name (how alignments are typically saved)
+        String imageName = QPProjectFunctions.getActualImageFileName(imageData);
+        if (imageName != null && !imageName.isEmpty()) {
+            // Check if alignment exists for this name
+            if (AffineTransformManager.loadSlideAlignment(project, imageName) != null) {
+                logger.debug("Found alignment using image name: {}", imageName);
+                return imageName;
+            }
+        }
+
+        // Second try: get from project entry metadata
+        ProjectImageEntry<BufferedImage> entry = project.getEntry(imageData);
+        if (entry != null) {
+            // Try sample_name metadata
+            String sampleName = ImageMetadataManager.getSampleName(entry);
+            if (sampleName != null && !sampleName.isEmpty()) {
+                if (AffineTransformManager.loadSlideAlignment(project, sampleName) != null) {
+                    logger.debug("Found alignment using sample_name metadata: {}", sampleName);
+                    return sampleName;
+                }
+            }
+
+            // Try base_image metadata
+            String baseImage = ImageMetadataManager.getBaseImage(entry);
+            if (baseImage != null && !baseImage.isEmpty()) {
+                if (AffineTransformManager.loadSlideAlignment(project, baseImage) != null) {
+                    logger.debug("Found alignment using base_image metadata: {}", baseImage);
+                    return baseImage;
+                }
+            }
+
+            // For flipped images, try original's base_image
+            if (ImageMetadataManager.isFlipped(entry)) {
+                String originalId = ImageMetadataManager.getOriginalImageId(entry);
+                if (originalId != null) {
+                    for (ProjectImageEntry<BufferedImage> e : project.getImageList()) {
+                        if (originalId.equals(e.getID())) {
+                            String origBase = ImageMetadataManager.getBaseImage(e);
+                            if (origBase != null && !origBase.isEmpty()) {
+                                if (AffineTransformManager.loadSlideAlignment(project, origBase) != null) {
+                                    logger.debug("Found alignment using original image's base_image: {}", origBase);
+                                    return origBase;
+                                }
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Return image name even if no alignment found (for logging purposes)
+        return imageName;
     }
 }
