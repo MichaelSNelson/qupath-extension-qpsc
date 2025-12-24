@@ -263,16 +263,18 @@ public class AutofocusBenchmarkDialog {
                         "configurations to find optimal settings for your microscope and samples.\n\n" +
 
                         "What is tested:\n" +
-                        "- Standard autofocus: n_steps, search_range, interpolation, score metrics\n" +
-                        "- Adaptive autofocus: initial_step, min_step, score metrics\n" +
-                        "- Performance at different distances from focus\n" +
-                        "- Both above and below focus positions\n\n" +
+                        "- Standard autofocus: n_steps (5 values), search_range (4 values), " +
+                        "interpolation (3 types), score metrics (3 types)\n" +
+                        "- Adaptive autofocus: initial_step (3 values), min_step (2 values)\n" +
+                        "- Each distance tested both above and below focus\n\n" +
 
-                        "Quick mode uses reduced parameter space (5-10 min), full benchmark " +
-                        "may take 30-60 minutes.\n\n" +
+                        "TIMING:\n" +
+                        "- Quick mode: ~100 trials, 5-15 minutes\n" +
+                        "- Full mode with 5 distances: ~1,980 trials, 30+ HOURS\n" +
+                        "- Reduce distances to 2-3 for faster results (e.g., \"10,30\")\n\n" +
 
-                        "Results are saved as CSV and JSON files for analysis. The summary will " +
-                        "recommend fastest and most accurate configurations."
+                        "Results are saved as CSV and JSON files. Progress updates are shown " +
+                        "during execution. You can cancel long-running benchmarks from the progress dialog."
                 );
 
                 // Validation feedback label (shown at bottom when Run button is disabled)
@@ -359,6 +361,8 @@ public class AutofocusBenchmarkDialog {
                 };
 
                 // Update estimate label based on test distances and quick mode
+                // Uses ACTUAL parameter grid from BenchmarkConfig defaults
+                // Note: Skips impossible combinations where search_range < distance
                 Runnable updateEstimate = () -> {
                     try {
                         // Parse test distances
@@ -377,33 +381,90 @@ public class AutofocusBenchmarkDialog {
 
                         // Default distances if none parsed
                         if (distances.isEmpty()) {
-                            distances.add(5.0);
-                            distances.add(10.0);
-                            distances.add(20.0);
-                            distances.add(30.0);
-                            distances.add(50.0);
+                            distances = List.of(5.0, 10.0, 20.0, 30.0, 50.0);
                         }
 
                         boolean quickMode = quickModeCheck.isSelected();
+                        int directions = 2; // above and below focus
 
-                        // Calculate test count
-                        // Each distance is tested above and below focus
-                        // Quick mode: ~3-5 configs per distance, Full mode: ~8-12 configs per distance
-                        int testsPerDistance = quickMode ? 4 : 10;
-                        int totalTests = distances.size() * 2 * testsPerDistance; // *2 for above and below
+                        int standardTrials, adaptiveTrials;
 
-                        // Estimate duration (rough estimates based on typical autofocus times)
-                        int minMinutes, maxMinutes;
                         if (quickMode) {
-                            minMinutes = 5;
-                            maxMinutes = 10;
+                            // Quick mode: reduced parameter space
+                            // search_range values: [25.0, 50.0], n_steps: 2, interp: 1, metrics: 2
+                            // adaptive: initial: 1, min: 1, metrics: 2
+                            double[] quickRanges = {25.0, 50.0};
+                            int nSteps = 2, nInterp = 1, nMetrics = 2;
+
+                            standardTrials = 0;
+                            for (double distance : distances) {
+                                // Count valid ranges (range >= distance)
+                                int validRanges = 0;
+                                for (double range : quickRanges) {
+                                    if (range >= distance) validRanges++;
+                                }
+                                standardTrials += validRanges * nSteps * nInterp * nMetrics * directions;
+                            }
+
+                            // Adaptive doesn't have range/distance constraint
+                            adaptiveTrials = 1 * 1 * 2 * distances.size() * directions;
                         } else {
-                            minMinutes = 30;
-                            maxMinutes = 60;
+                            // Full mode: complete parameter grid (from BenchmarkConfig defaults)
+                            // search_range values: [15.0, 25.0, 35.0, 50.0]
+                            // n_steps: 5, interp: 3, metrics: 3
+                            double[] fullRanges = {15.0, 25.0, 35.0, 50.0};
+                            int nSteps = 5, nInterp = 3, nMetrics = 3;
+
+                            standardTrials = 0;
+                            for (double distance : distances) {
+                                // Count valid ranges (range >= distance)
+                                int validRanges = 0;
+                                for (double range : fullRanges) {
+                                    if (range >= distance) validRanges++;
+                                }
+                                standardTrials += validRanges * nSteps * nInterp * nMetrics * directions;
+                            }
+
+                            // Adaptive: initial(3) * min(2) * metrics(3) - no range/distance constraint
+                            adaptiveTrials = 3 * 2 * 3 * distances.size() * directions;
                         }
 
-                        estimateLabel.setText(String.format("Estimated: ~%d tests, %d-%d minutes",
-                                totalTests, minMinutes, maxMinutes));
+                        int totalTrials = standardTrials + adaptiveTrials;
+
+                        // Estimate duration: ~30-90 seconds per trial on average
+                        // Quick trials are faster (~20-40s), full grid has mix of fast and slow
+                        double avgSecondsPerTrial = quickMode ? 30.0 : 70.0;
+                        double totalMinutes = (totalTrials * avgSecondsPerTrial) / 60.0;
+                        double totalHours = totalMinutes / 60.0;
+
+                        // Format the estimate string
+                        String durationStr;
+                        String warningStyle = "-fx-font-size: 11px; -fx-padding: 5 0 0 25; ";
+
+                        if (totalHours >= 1.0) {
+                            durationStr = String.format("%.1f hours", totalHours);
+                            // Red warning for very long benchmarks
+                            warningStyle += "-fx-text-fill: #cc0000; -fx-font-weight: bold;";
+                            estimateLabel.setText(String.format(
+                                    "WARNING: %,d trials estimated, ~%s! Consider using Quick Mode.",
+                                    totalTrials, durationStr));
+                        } else if (totalMinutes >= 30) {
+                            durationStr = String.format("%.0f minutes", totalMinutes);
+                            // Orange warning for long benchmarks
+                            warningStyle += "-fx-text-fill: #cc6600;";
+                            estimateLabel.setText(String.format(
+                                    "Estimated: %,d trials, ~%s",
+                                    totalTrials, durationStr));
+                        } else {
+                            durationStr = String.format("%.0f minutes", Math.max(5, totalMinutes));
+                            // Blue info for reasonable benchmarks
+                            warningStyle += "-fx-text-fill: #0066cc;";
+                            estimateLabel.setText(String.format(
+                                    "Estimated: %,d trials, ~%s",
+                                    totalTrials, durationStr));
+                        }
+
+                        estimateLabel.setStyle(warningStyle);
                         estimateLabel.setManaged(true);
                         estimateLabel.setVisible(true);
 

@@ -5,13 +5,18 @@ import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.Alert;
+import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.Label;
+import javafx.scene.control.ProgressBar;
 import javafx.scene.control.ProgressIndicator;
 import javafx.scene.control.TextArea;
+import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
+
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qupath.ext.qpsc.preferences.QPPreferenceDialog;
@@ -125,7 +130,36 @@ public class AutofocusBenchmarkWorkflow {
                             confirm.setTitle("Confirm Benchmark");
                             confirm.setHeaderText("Ready to start autofocus parameter benchmark");
 
-                            String estimatedTime = params.quickMode() ? "10-15 minutes" : "30-60 minutes";
+                            // Calculate accurate trial count and time estimate
+                            int numDistances = params.testDistances().size();
+                            int directions = 2; // above and below focus
+                            int standardTrials, adaptiveTrials;
+
+                            if (params.quickMode()) {
+                                standardTrials = 2 * 2 * 1 * 2 * numDistances * directions;
+                                adaptiveTrials = 1 * 1 * 2 * numDistances * directions;
+                            } else {
+                                standardTrials = 5 * 4 * 3 * 3 * numDistances * directions;
+                                adaptiveTrials = 3 * 2 * 3 * numDistances * directions;
+                            }
+                            int totalTrials = standardTrials + adaptiveTrials;
+
+                            double avgSeconds = params.quickMode() ? 30.0 : 70.0;
+                            double totalMinutes = (totalTrials * avgSeconds) / 60.0;
+                            double totalHours = totalMinutes / 60.0;
+
+                            String estimatedTime;
+                            if (totalHours >= 1.0) {
+                                estimatedTime = String.format("%.1f hours (%,d trials)", totalHours, totalTrials);
+                            } else {
+                                estimatedTime = String.format("%.0f minutes (%,d trials)", totalMinutes, totalTrials);
+                            }
+
+                            String warningText = "";
+                            if (totalHours >= 1.0) {
+                                warningText = "\n\nWARNING: This is a very long benchmark! " +
+                                        "Consider using Quick Mode or reducing test distances.";
+                            }
 
                             confirm.setContentText(
                                     String.format(
@@ -134,12 +168,13 @@ public class AutofocusBenchmarkWorkflow {
                                             "Mode: %s\n" +
                                             "Estimated time: %s\n\n" +
                                             "The benchmark will systematically test autofocus parameters. " +
-                                            "Do not disturb the microscope during this time.\n\n" +
+                                            "Do not disturb the microscope during this time.%s\n\n" +
                                             "Continue?",
                                             params.referenceZ(),
                                             params.testDistances(),
                                             params.quickMode() ? "Quick" : "Full",
-                                            estimatedTime
+                                            estimatedTime,
+                                            warningText
                                     )
                             );
 
@@ -180,33 +215,84 @@ public class AutofocusBenchmarkWorkflow {
     private static void runBenchmark(MicroscopeSocketClient client, AutofocusBenchmarkDialog.BenchmarkParams params) {
         logger.info("Starting benchmark execution");
 
-        // Show simple progress dialog (benchmark doesn't have granular progress updates)
+        // Cancellation flag shared between UI thread and background thread
+        AtomicBoolean cancelled = new AtomicBoolean(false);
+
+        // Show progress dialog with real-time updates
         Platform.runLater(() -> {
-            // Create simple progress window
+            // Create progress window
             Stage progressStage = new Stage();
             progressStage.initModality(Modality.NONE);
             progressStage.setTitle("Autofocus Parameter Benchmark");
             progressStage.setAlwaysOnTop(true);
             progressStage.setResizable(false);
 
+            // Progress bar for determinate progress once trials start
+            ProgressBar progressBar = new ProgressBar();
+            progressBar.setProgress(0);
+            progressBar.setPrefWidth(280);
+
+            // Also keep spinner for initial phase
             ProgressIndicator progressIndicator = new ProgressIndicator();
             progressIndicator.setProgress(-1); // Indeterminate
+            progressIndicator.setPrefSize(40, 40);
 
             Label titleLabel = new Label("Running Benchmark...");
             titleLabel.setStyle("-fx-font-size: 14px; -fx-font-weight: bold;");
 
-            Label statusLabel = new Label("Testing autofocus parameters");
-            statusLabel.setStyle("-fx-font-size: 12px;");
+            Label progressLabel = new Label("Trial 0/0");
+            progressLabel.setStyle("-fx-font-size: 13px; -fx-font-weight: bold;");
 
-            Label timeLabel = new Label("This may take 10-60 minutes");
-            timeLabel.setStyle("-fx-font-size: 11px; -fx-text-fill: gray;");
+            Label statusLabel = new Label("Initializing...");
+            statusLabel.setStyle("-fx-font-size: 11px;");
+            statusLabel.setWrapText(true);
+            statusLabel.setMaxWidth(280);
 
-            VBox layout = new VBox(15);
+            Label timeLabel = new Label("Progress updates received after each trial");
+            timeLabel.setStyle("-fx-font-size: 10px; -fx-text-fill: gray;");
+
+            // Cancel button
+            Button cancelButton = new Button("Cancel Benchmark");
+            cancelButton.setStyle("-fx-background-color: #cc6600; -fx-text-fill: white;");
+            cancelButton.setOnAction(e -> {
+                // Confirm cancellation
+                Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
+                confirm.setTitle("Cancel Benchmark");
+                confirm.setHeaderText("Cancel the running benchmark?");
+                confirm.setContentText(
+                        "The benchmark will be stopped. Partial results may have been saved " +
+                        "to the output directory.\n\nCancel the benchmark?");
+
+                confirm.showAndWait().ifPresent(response -> {
+                    if (response == ButtonType.OK) {
+                        logger.info("User requested benchmark cancellation");
+                        cancelled.set(true);
+                        cancelButton.setDisable(true);
+                        cancelButton.setText("Cancelling...");
+                        statusLabel.setText("Cancellation requested - closing connection...");
+
+                        // Close the client connection to abort the benchmark
+                        // This will cause an IOException in the background thread
+                        try {
+                            client.disconnect();
+                        } catch (Exception ex) {
+                            logger.debug("Error during cancellation disconnect: {}", ex.getMessage());
+                        }
+                    }
+                });
+            });
+
+            HBox buttonBox = new HBox(cancelButton);
+            buttonBox.setAlignment(Pos.CENTER);
+            buttonBox.setPadding(new Insets(10, 0, 0, 0));
+
+            VBox layout = new VBox(12);
             layout.setAlignment(Pos.CENTER);
             layout.setPadding(new Insets(20));
-            layout.getChildren().addAll(titleLabel, progressIndicator, statusLabel, timeLabel);
+            layout.getChildren().addAll(titleLabel, progressIndicator, progressBar,
+                    progressLabel, statusLabel, timeLabel, buttonBox);
 
-            Scene scene = new Scene(layout, 300, 180);
+            Scene scene = new Scene(layout, 340, 280);
             progressStage.setScene(scene);
             progressStage.show();
 
@@ -216,15 +302,33 @@ public class AutofocusBenchmarkWorkflow {
                     logger.info("Sending benchmark command to server");
 
                     // Update status
-                    Platform.runLater(() -> statusLabel.setText("Initializing benchmark..."));
+                    Platform.runLater(() -> statusLabel.setText("Sending command to server..."));
 
-                    // Execute benchmark
+                    // Create progress listener that updates the UI
+                    MicroscopeSocketClient.BenchmarkProgressListener progressListener =
+                            (current, total, statusMsg) -> {
+                                Platform.runLater(() -> {
+                                    // Update progress bar
+                                    double progress = (double) current / total;
+                                    progressBar.setProgress(progress);
+
+                                    // Update progress label
+                                    progressLabel.setText(String.format("Trial %d/%d (%.1f%%)",
+                                            current, total, progress * 100));
+
+                                    // Update status with latest trial result
+                                    statusLabel.setText(statusMsg);
+                                });
+                            };
+
+                    // Execute benchmark with progress listener
                     Map<String, Object> results = client.runAutofocusBenchmark(
                             params.referenceZ(),
                             params.outputPath(),
                             params.testDistances(),
                             params.quickMode(),
-                            params.objective()
+                            params.objective(),
+                            progressListener
                     );
 
                     logger.info("Benchmark completed successfully");
@@ -241,6 +345,19 @@ public class AutofocusBenchmarkWorkflow {
 
                     Platform.runLater(() -> {
                         progressStage.close();
+
+                        // Check if this was a user cancellation
+                        if (cancelled.get()) {
+                            Alert alert = new Alert(Alert.AlertType.INFORMATION);
+                            alert.setTitle("Benchmark Cancelled");
+                            alert.setHeaderText("Benchmark was cancelled by user");
+                            alert.setContentText(
+                                    "The benchmark has been stopped.\n\n" +
+                                    "Partial results may have been saved to:\n" +
+                                    params.outputPath());
+                            alert.showAndWait();
+                            return;
+                        }
 
                         Alert alert = new Alert(Alert.AlertType.ERROR);
                         alert.setTitle("Benchmark Failed");

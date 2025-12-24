@@ -972,9 +972,10 @@ public class MicroscopeSocketClient implements AutoCloseable {
             int originalTimeout = 0;
             try {
                 originalTimeout = socket.getSoTimeout();
-                // Increase timeout for sensitivity test (can take 10-30 minutes depending on test type)
-                socket.setSoTimeout(1800000); // 30 minutes
-                logger.debug("Increased socket timeout to 30 minutes for PPM sensitivity test");
+                // Increase timeout for sensitivity test (can take 10-60 minutes depending on test type)
+                // Note: PPMSENS does not send progress updates, so use generous total timeout
+                socket.setSoTimeout(3600000); // 60 minutes
+                logger.debug("Increased socket timeout to 60 minutes for PPM sensitivity test");
             } catch (IOException e) {
                 logger.warn("Failed to adjust socket timeout", e);
             }
@@ -1061,6 +1062,22 @@ public class MicroscopeSocketClient implements AutoCloseable {
     ) {}
 
     /**
+     * Functional interface for receiving benchmark progress updates.
+     * Called after each trial completes to report progress.
+     */
+    @FunctionalInterface
+    public interface BenchmarkProgressListener {
+        /**
+         * Called when progress is reported from the benchmark.
+         *
+         * @param currentTrial Current trial number (1-based)
+         * @param totalTrials Total number of trials to run
+         * @param statusMessage Status message describing current trial result
+         */
+        void onProgress(int currentTrial, int totalTrials, String statusMessage);
+    }
+
+    /**
      * Run autofocus parameter benchmark to find optimal settings.
      *
      * This command performs systematic testing of autofocus parameters to determine
@@ -1087,6 +1104,33 @@ public class MicroscopeSocketClient implements AutoCloseable {
             List<Double> testDistances,
             boolean quickMode,
             String objective) throws IOException {
+        // Delegate to overload with null progress listener
+        return runAutofocusBenchmark(referenceZ, outputPath, testDistances, quickMode, objective, null);
+    }
+
+    /**
+     * Run autofocus parameter benchmark with progress reporting.
+     *
+     * This overload accepts a progress listener that receives updates after each trial.
+     * Progress updates keep the socket connection alive during long benchmarks (which
+     * can run for many hours with full parameter grids of 1000+ trials).
+     *
+     * @param referenceZ Known good focus Z position (must be manually verified in focus)
+     * @param outputPath Output directory for benchmark results
+     * @param testDistances List of distances (um) from focus to test, or null for defaults
+     * @param quickMode If true, run reduced parameter space for faster results
+     * @param objective Objective identifier for safety limits (e.g., "20X")
+     * @param progressListener Optional listener for progress updates, may be null
+     * @return Map with summary results including success_rate, timing_stats, and fastest configs
+     * @throws IOException if communication fails or benchmark encounters errors
+     */
+    public Map<String, Object> runAutofocusBenchmark(
+            double referenceZ,
+            String outputPath,
+            List<Double> testDistances,
+            boolean quickMode,
+            String objective,
+            BenchmarkProgressListener progressListener) throws IOException {
 
         // Build AFBENCH command message
         StringBuilder message = new StringBuilder();
@@ -1123,13 +1167,14 @@ public class MicroscopeSocketClient implements AutoCloseable {
         synchronized (socketLock) {
             ensureConnected();
 
-            // Benchmark can take a long time - set generous timeout
-            // With full parameter grid, could take 30-60 minutes
+            // Per-read timeout: 10 minutes between progress updates should be sufficient
+            // Even slow trials complete within a few minutes
+            int perReadTimeout = 600000; // 10 minutes between messages
             int originalTimeout = readTimeout;
             try {
                 if (socket != null) {
-                    socket.setSoTimeout(3600000); // 60 minutes for full benchmark
-                    logger.debug("Increased socket timeout to 60 minutes for benchmark");
+                    socket.setSoTimeout(perReadTimeout);
+                    logger.debug("Set socket timeout to {} minutes for benchmark reads", perReadTimeout / 60000);
                 }
 
                 // Send AFBENCH command (8 bytes)
@@ -1165,35 +1210,73 @@ public class MicroscopeSocketClient implements AutoCloseable {
                     }
                 }
 
-                // Wait for final SUCCESS/FAILED response
+                // Read responses in a loop until SUCCESS/FAILED
+                // Server sends PROGRESS messages after each trial to keep connection alive
                 logger.info("Waiting for autofocus benchmark to complete...");
-                logger.info("This may take 10-60 minutes depending on parameter space...");
+                logger.info("Progress updates will be received after each trial...");
 
-                bytesRead = input.read(buffer);
-                if (bytesRead > 0) {
-                    String finalResponse = new String(buffer, 0, bytesRead, StandardCharsets.UTF_8);
-                    logger.info("Received final server response: {}", finalResponse);
-
-                    // Check for safety violation
-                    if (finalResponse.startsWith("FAILED:SAFETY:")) {
-                        String safetyMsg = finalResponse.substring("FAILED:SAFETY:".length());
-                        throw new IOException("SAFETY VIOLATION: " + safetyMsg);
-                    } else if (finalResponse.startsWith("FAILED:")) {
-                        throw new IOException("Benchmark failed: " + finalResponse.substring(7));
-                    } else if (!finalResponse.startsWith("SUCCESS:")) {
-                        logger.warn("Unexpected final response: {}", finalResponse);
+                while (true) {
+                    bytesRead = input.read(buffer);
+                    if (bytesRead <= 0) {
+                        throw new IOException("Connection closed while waiting for benchmark response");
                     }
 
-                    // Parse JSON results from SUCCESS response
-                    // Format: SUCCESS:{"success_rate": 0.95, "total_trials": 100, ...}
-                    Map<String, Object> results = new HashMap<>();
-                    if (finalResponse.startsWith("SUCCESS:")) {
-                        String jsonData = finalResponse.substring(8).trim();
-                        logger.info("Parsing benchmark results JSON");
+                    String response = new String(buffer, 0, bytesRead, StandardCharsets.UTF_8);
+                    lastActivityTime.set(System.currentTimeMillis());
 
+                    // Handle progress updates
+                    if (response.startsWith("PROGRESS:")) {
+                        // Format: PROGRESS:current:total:status_message (consistent with PPMBIREF)
                         try {
-                            // Simple JSON parsing for common types
-                            // Note: This is a basic parser - production code should use a JSON library
+                            String progressData = response.substring(9); // Remove "PROGRESS:"
+                            String[] parts = progressData.split(":", 3); // Split into at most 3 parts
+
+                            if (parts.length >= 2) {
+                                int current = Integer.parseInt(parts[0].trim());
+                                int total = Integer.parseInt(parts[1].trim());
+                                String statusMsg = parts.length > 2 ? parts[2] : "";
+
+                                // Log progress periodically (every 50 trials or at key percentages)
+                                double percentComplete = (current * 100.0 / total);
+                                if (current % 50 == 0 || current == 1 || current == total) {
+                                    logger.info("Benchmark progress: {}/{} ({} %)",
+                                            current, total, String.format("%.1f", percentComplete));
+                                }
+
+                                // Notify listener if provided
+                                if (progressListener != null) {
+                                    try {
+                                        progressListener.onProgress(current, total, statusMsg);
+                                    } catch (Exception e) {
+                                        logger.warn("Progress listener threw exception: {}", e.getMessage());
+                                    }
+                                }
+                            }
+                        } catch (Exception e) {
+                            logger.debug("Could not parse progress message: {}", response);
+                        }
+                        continue; // Keep reading for more messages
+                    }
+
+                    // Check for safety violation
+                    if (response.startsWith("FAILED:SAFETY:")) {
+                        String safetyMsg = response.substring("FAILED:SAFETY:".length());
+                        throw new IOException("SAFETY VIOLATION: " + safetyMsg);
+                    }
+
+                    // Check for other failures
+                    if (response.startsWith("FAILED:")) {
+                        throw new IOException("Benchmark failed: " + response.substring(7));
+                    }
+
+                    // Check for success
+                    if (response.startsWith("SUCCESS:")) {
+                        String jsonData = response.substring(8).trim();
+                        logger.info("Benchmark completed successfully");
+                        logger.info("Parsing benchmark results...");
+
+                        Map<String, Object> results = new HashMap<>();
+                        try {
                             results = parseSimpleJson(jsonData);
                             logger.info("Parsed {} result keys", results.size());
                         } catch (Exception e) {
@@ -1204,13 +1287,10 @@ public class MicroscopeSocketClient implements AutoCloseable {
                         lastActivityTime.set(System.currentTimeMillis());
                         return results;
                     }
-                } else {
-                    throw new IOException("No final response received from benchmark");
-                }
 
-                // Fallback - shouldn't reach here
-                lastActivityTime.set(System.currentTimeMillis());
-                return new HashMap<>();
+                    // Unknown response type - log and continue
+                    logger.warn("Unexpected response during benchmark: {}", response);
+                }
 
             } catch (IOException | InterruptedException e) {
                 handleIOException(new IOException("Autofocus benchmark error", e));
@@ -1312,9 +1392,10 @@ public class MicroscopeSocketClient implements AutoCloseable {
             try {
                 originalTimeout = socket.getSoTimeout();
                 // Increase timeout for calibration (can take several minutes)
-                // With stability check (3 runs), each run takes ~2-3 minutes, so allow 15 minutes total
-                socket.setSoTimeout(900000); // 15 minutes
-                logger.debug("Increased socket timeout to 15 minutes for calibration");
+                // With stability check (3 runs) and fine steps, allow plenty of time
+                // Note: POLCAL does not send progress updates, so use generous total timeout
+                socket.setSoTimeout(3600000); // 60 minutes
+                logger.debug("Increased socket timeout to 60 minutes for calibration");
             } catch (IOException e) {
                 logger.warn("Failed to adjust socket timeout", e);
             }
