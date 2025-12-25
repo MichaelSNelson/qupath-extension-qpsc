@@ -4,6 +4,8 @@ import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.*;
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyEvent;
 import javafx.scene.input.ScrollEvent;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
@@ -28,6 +30,7 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.ResourceBundle;
+import java.util.function.UnaryOperator;
 
 /**
  * StageMovementController - Manual microscope stage control interface
@@ -250,7 +253,18 @@ public class StageMovementController {
             TextField xyStepField = new TextField("100");
             xyStepField.setPrefWidth(70);
             xyStepField.setAlignment(Pos.CENTER);
-            Tooltip.install(xyStepField, new Tooltip("Step size in micrometers"));
+            Tooltip.install(xyStepField, new Tooltip("Step size in micrometers (integers only)"));
+
+            // Input validation: only allow digits and commas (no decimals)
+            UnaryOperator<TextFormatter.Change> integerFilter = change -> {
+                String newText = change.getControlNewText();
+                // Allow digits and commas only (commas are removed when parsing)
+                if (newText.matches("[0-9,]*")) {
+                    return change;
+                }
+                return null;
+            };
+            xyStepField.setTextFormatter(new TextFormatter<>(integerFilter));
 
             Button upBtn = new Button("\u2191");  // Up arrow
             Button downBtn = new Button("\u2193");  // Down arrow
@@ -275,12 +289,20 @@ public class StageMovementController {
                 }
             };
 
+            // Sample movement checkbox - inverts Y direction when checked
+            CheckBox sampleMovementCheckbox = new CheckBox("Sample movement");
+            Tooltip.install(sampleMovementCheckbox, new Tooltip(
+                    "When checked, controls move the sample rather than the stage.\n" +
+                    "This inverts the Y direction to match visual expectations."));
+
             upBtn.setOnAction(e -> {
                 try {
-                    double step = Double.parseDouble(xyStepField.getText());
-                    double currentY = Double.parseDouble(yField.getText());
-                    double newY = currentY + step;
-                    double currentX = Double.parseDouble(xField.getText());
+                    double step = Double.parseDouble(xyStepField.getText().replace(",", ""));
+                    double currentY = Double.parseDouble(yField.getText().replace(",", ""));
+                    // Invert Y direction if sample movement is checked
+                    double yDirection = sampleMovementCheckbox.isSelected() ? -1 : 1;
+                    double newY = currentY + (step * yDirection);
+                    double currentX = Double.parseDouble(xField.getText().replace(",", ""));
 
                     if (!mgr.isWithinStageBounds(currentX, newY)) {
                         xyStatus.setText("Y+ move out of bounds");
@@ -299,10 +321,12 @@ public class StageMovementController {
 
             downBtn.setOnAction(e -> {
                 try {
-                    double step = Double.parseDouble(xyStepField.getText());
-                    double currentY = Double.parseDouble(yField.getText());
-                    double newY = currentY - step;
-                    double currentX = Double.parseDouble(xField.getText());
+                    double step = Double.parseDouble(xyStepField.getText().replace(",", ""));
+                    double currentY = Double.parseDouble(yField.getText().replace(",", ""));
+                    // Invert Y direction if sample movement is checked
+                    double yDirection = sampleMovementCheckbox.isSelected() ? -1 : 1;
+                    double newY = currentY - (step * yDirection);
+                    double currentX = Double.parseDouble(xField.getText().replace(",", ""));
 
                     if (!mgr.isWithinStageBounds(currentX, newY)) {
                         xyStatus.setText("Y- move out of bounds");
@@ -321,10 +345,10 @@ public class StageMovementController {
 
             leftBtn.setOnAction(e -> {
                 try {
-                    double step = Double.parseDouble(xyStepField.getText());
-                    double currentX = Double.parseDouble(xField.getText());
+                    double step = Double.parseDouble(xyStepField.getText().replace(",", ""));
+                    double currentX = Double.parseDouble(xField.getText().replace(",", ""));
                     double newX = currentX - step;
-                    double currentY = Double.parseDouble(yField.getText());
+                    double currentY = Double.parseDouble(yField.getText().replace(",", ""));
 
                     if (!mgr.isWithinStageBounds(newX, currentY)) {
                         xyStatus.setText("X- move out of bounds");
@@ -343,10 +367,10 @@ public class StageMovementController {
 
             rightBtn.setOnAction(e -> {
                 try {
-                    double step = Double.parseDouble(xyStepField.getText());
-                    double currentX = Double.parseDouble(xField.getText());
+                    double step = Double.parseDouble(xyStepField.getText().replace(",", ""));
+                    double currentX = Double.parseDouble(xField.getText().replace(",", ""));
                     double newX = currentX + step;
-                    double currentY = Double.parseDouble(yField.getText());
+                    double currentY = Double.parseDouble(yField.getText().replace(",", ""));
 
                     if (!mgr.isWithinStageBounds(newX, currentY)) {
                         xyStatus.setText("X+ move out of bounds");
@@ -380,14 +404,17 @@ public class StageMovementController {
 
             VBox arrowGrid = new VBox(2);
             arrowGrid.setAlignment(Pos.CENTER);
-            arrowGrid.getChildren().addAll(arrowRow, arrowLabel);
+            arrowGrid.getChildren().addAll(arrowRow, arrowLabel, sampleMovementCheckbox);
 
             // --- Z Scroll Control ---
             logger.debug("Adding Z scroll wheel control");
             TextField zStepField = new TextField("10");
             zStepField.setPrefWidth(50);
             zStepField.setAlignment(Pos.CENTER);
-            Tooltip.install(zStepField, new Tooltip("Z step size (um) - use mouse wheel over Z controls"));
+            Tooltip.install(zStepField, new Tooltip("Z step size (um, integers only) - use mouse wheel over Z controls"));
+
+            // Input validation: only allow digits and commas (no decimals)
+            zStepField.setTextFormatter(new TextFormatter<>(integerFilter));
 
             Label zScrollLabel = new Label("Z step:");
             zScrollLabel.setStyle("-fx-font-size: 10px;");
@@ -417,8 +444,8 @@ public class StageMovementController {
             // Add scroll handler to Z field and button
             javafx.event.EventHandler<ScrollEvent> zScrollHandler = event -> {
                 try {
-                    double step = Double.parseDouble(zStepField.getText());
-                    double currentZ = Double.parseDouble(zField.getText());
+                    double step = Double.parseDouble(zStepField.getText().replace(",", ""));
+                    double currentZ = Double.parseDouble(zField.getText().replace(",", ""));
 
                     // Scroll up = positive delta = move Z up (increase)
                     // Scroll down = negative delta = move Z down (decrease)
@@ -681,6 +708,41 @@ public class StageMovementController {
             dlg.getDialogPane().setContent(contentBox);
             dlg.getDialogPane().getButtonTypes().add(ButtonType.CLOSE);
             dlg.initModality(Modality.NONE);
+
+            // Add WASD keyboard support for XY movement (similar to arrow keys)
+            // Using event filter to capture keys before text fields consume them
+            dlg.getDialogPane().addEventFilter(KeyEvent.KEY_PRESSED, event -> {
+                // Only respond if focus is not on a text field (to allow typing in fields)
+                if (event.getTarget() instanceof TextField) {
+                    return;
+                }
+
+                KeyCode code = event.getCode();
+                if (code == KeyCode.W || code == KeyCode.A || code == KeyCode.S || code == KeyCode.D) {
+                    event.consume();
+                    switch (code) {
+                        case W:
+                            upBtn.fire();
+                            logger.debug("WASD: W key triggered up movement");
+                            break;
+                        case S:
+                            downBtn.fire();
+                            logger.debug("WASD: S key triggered down movement");
+                            break;
+                        case A:
+                            leftBtn.fire();
+                            logger.debug("WASD: A key triggered left movement");
+                            break;
+                        case D:
+                            rightBtn.fire();
+                            logger.debug("WASD: D key triggered right movement");
+                            break;
+                        default:
+                            break;
+                    }
+                }
+            });
+            logger.debug("WASD keyboard controls enabled for XY movement");
 
             // Add listener to refresh alignment status when image changes
             if (gui != null) {
