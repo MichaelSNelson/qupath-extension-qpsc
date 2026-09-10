@@ -18,6 +18,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 **Stage Map: slide placement updates as alignments are collected**
 - During multi-slide batch acquisition, slides now appear on the Stage Map at their measured actual position once their alignment is saved, rather than staying at their nominal slot centre. A slide's true position in the holder can differ from its nominal slot by a median ~600 µm, so the map's accuracy improves throughout a batch run as alignments accumulate. Before any alignment is saved, slides show at their nominal positions (the existing behavior); after alignment, each slide moves to reflect reality. Only each slide's position is corrected, not its rotation or size, so the map remains an approximate spatial reference rather than an exact one.
 
+**Bug reporter: optional contact fields, and an honest note about anonymity**
+- Reports are filed by a shared reporting service, not from your GitHub account, so GitHub has
+  nobody to notify -- you would never see a reply unless you went back and commented yourself.
+  The dialog now says this at the top, before you write anything.
+- Two optional contact fields let you stay in the loop: a **GitHub username** (mentioned on the
+  issue, which does notify you) and an **image.sc forum username** (linked to your profile).
+  "alice", "@alice" and a pasted profile URL are all accepted; leave both blank to stay anonymous.
+  Both appear publicly in the issue.
+- New **"Open the issue in my browser after submitting"** checkbox, on by default.
+
 ### Fixed
 
 **Multi-Slide: stage controls now lock during slot-jump autofocus, with a Cancel affordance**
